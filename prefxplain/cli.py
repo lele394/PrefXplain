@@ -84,8 +84,8 @@ def create(
     api_key: Optional[str] = typer.Option(
         None,
         "--api-key",
-        envvar="OPENAI_API_KEY",
-        help="OpenAI-compatible API key.",
+        envvar="ANTHROPIC_API_KEY",
+        help="API key (ANTHROPIC_API_KEY preferred, falls back to OPENAI_API_KEY).",
         show_default=False,
     ),
     api_base: Optional[str] = typer.Option(
@@ -94,7 +94,7 @@ def create(
         help="Custom API base URL (for Ollama, Groq, etc.).",
     ),
     model: str = typer.Option(
-        "gpt-4o-mini",
+        "claude-haiku-4-5-20251001",
         "--model",
         help="LLM model for descriptions.",
     ),
@@ -189,7 +189,7 @@ def update(
     api_key: Optional[str] = typer.Option(
         None,
         "--api-key",
-        envvar="OPENAI_API_KEY",
+        envvar="ANTHROPIC_API_KEY",
         show_default=False,
     ),
     api_base: Optional[str] = typer.Option(
@@ -197,7 +197,7 @@ def update(
         "--api-base",
     ),
     model: str = typer.Option(
-        "gpt-4o-mini",
+        "claude-haiku-4-5-20251001",
         "--model",
     ),
     max_files: int = typer.Option(

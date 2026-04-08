@@ -173,6 +173,7 @@ const CYCLE_EDGES = new Set({cycle_edges_json});
 const CLUSTERS = {clusters_json};
 const CLUSTERS_BY_ROLE = {clusters_by_role_json};
 const ROLE_ORDER = {role_order_json};
+const ROLE_SUBTITLES = {role_subtitles_json};
 const METRICS = {metrics_json};
 const NODE_METRICS = {node_metrics_json};
 const HEALTH = {health_json};
@@ -253,7 +254,7 @@ function layoutClusters(mode) {{
       return {{
         dir, clNodes, cols, rows, cellW, cellH,
         boxW: innerW + CLUSTER_PAD_X * 2,
-        boxH: innerH + CLUSTER_PAD_Y + CLUSTER_PAD_X,
+        boxH: innerH + 40 + CLUSTER_PAD_X,  // 40 = header with label only
       }};
     }}).filter(Boolean);
 
@@ -271,31 +272,28 @@ function layoutClusters(mode) {{
 
   }} else {{
     // ── Role/Purpose mode: full-width horizontal bands stacked vertically ─
-    // Role order is provided by Python (high-level → low-level).
-    const ROLE_LABEL_MAP = {{}};
-    // Build inverse map: role_key → display_label, using ROLE_ORDER for ordering
-    // CLUSTERS_BY_ROLE keys are already display labels ("Entry Points", etc.)
-    const orderedLabels = ROLE_ORDER.map(roleKey => {{
-      const labelMap = {{
-        'entry_point': 'Entry Points', 'api_route': 'API Layer',
-        'data_model': 'Data Models', 'utility': 'Utilities',
-        'config': 'Configuration', 'test': 'Tests', 'other': 'Other',
-      }};
-      return labelMap[roleKey] || roleKey;
-    }}).filter(label => CLUSTERS_BY_ROLE[label] && CLUSTERS_BY_ROLE[label].length > 0);
+    const labelMap = {{
+      'entry_point': 'Entry Points', 'api_route': 'API Layer',
+      'data_model': 'Data Models', 'utility': 'Utilities',
+      'config': 'Configuration', 'test': 'Tests', 'other': 'Other',
+    }};
+    const orderedLabels = ROLE_ORDER.map(roleKey => labelMap[roleKey] || roleKey)
+      .filter(label => CLUSTERS_BY_ROLE[label] && CLUSTERS_BY_ROLE[label].length > 0);
 
     const canvasW = Math.max(canvas.width, 900);
-    const bandW = canvasW - 120; // full-width minus padding
+    const bandW = canvasW - 120;
+    const HEADER_H = 56; // title (16px) + subtitle (12px) + padding
     const startX = 60, startY = 60;
     let cy = startY;
 
     clusterBoxes = orderedLabels.map(label => {{
       const ids = CLUSTERS_BY_ROLE[label] || [];
-      const clNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
+      // Sort nodes by pagerank descending — most central/important appears first
+      const clNodes = ids.map(id => nodeIndex[id]).filter(Boolean)
+        .sort((a, b) => (b.pagerank || 0) - (a.pagerank || 0));
       const count = clNodes.length;
       if (count === 0) return null;
 
-      // Fill nodes across the full band width
       const cellW = Math.max(...clNodes.map(n => n.w));
       const cellH = Math.max(...clNodes.map(n => n.h));
       const maxCols = Math.max(1, Math.floor((bandW - CLUSTER_PAD_X * 2 + NODE_GAP_X) / (cellW + NODE_GAP_X)));
@@ -307,7 +305,8 @@ function layoutClusters(mode) {{
         clNodes, cols, rows, cellW, cellH,
         x: startX, y: cy,
         boxW: bandW,
-        boxH: innerH + CLUSTER_PAD_Y + CLUSTER_PAD_X,
+        boxH: innerH + HEADER_H + CLUSTER_PAD_X,
+        headerH: HEADER_H,
       }};
       cy += cb.boxH + CLUSTER_GAP;
       return cb;
@@ -316,11 +315,12 @@ function layoutClusters(mode) {{
 
   // Position each node inside its cluster box (same for both modes)
   for (const cb of clusterBoxes) {{
+    const headerH = cb.headerH || CLUSTER_PAD_Y;
     cb.clNodes.forEach((n, i) => {{
       const col = i % cb.cols;
       const row = Math.floor(i / cb.cols);
       n.x = cb.x + CLUSTER_PAD_X + col * (cb.cellW + NODE_GAP_X) + cb.cellW / 2;
-      n.y = cb.y + CLUSTER_PAD_Y + row * (cb.cellH + NODE_GAP_Y) + cb.cellH / 2;
+      n.y = cb.y + headerH + row * (cb.cellH + NODE_GAP_Y) + cb.cellH / 2;
       n.vx = 0; n.vy = 0;
       n.pinned = true;
     }});
@@ -687,28 +687,50 @@ function drawClusters() {{
       ctx.stroke();
 
       // Cluster label — prominent at top of box
-      ctx.fillStyle = '#c9d1d9';
-      ctx.font = `bold ${{13 / zoom}}px -apple-system, sans-serif`;
+      ctx.fillStyle = '#e6edf3';
+      ctx.font = `bold ${{15 / zoom}}px -apple-system, sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      // Role mode: natural language label; dir mode: append "/"
       const displayLabel = isRole ? cb.dir : (cb.dir + '/');
       ctx.fillText(displayLabel, cb.x + 16, cb.y + 12);
 
-      // File count (or node count)
-      ctx.fillStyle = '#6e7681';
-      ctx.font = `${{10 / zoom}}px -apple-system, "SF Mono", monospace`;
+      // File count
+      ctx.fillStyle = '#8b949e';
+      ctx.font = `${{10 / zoom}}px "SF Mono", monospace`;
       const countText = cb.clNodes.length + ' file' + (cb.clNodes.length === 1 ? '' : 's');
       const labelW = ctx.measureText(displayLabel).width;
-      ctx.fillText(countText, cb.x + 16 + labelW + 8, cb.y + 14);
+      ctx.fillText(countText, cb.x + 16 + labelW + 8, cb.y + 16);
 
-      // Role mode: show hierarchy hint on first and last box
+      // Role mode: subtitle (what this group means in plain language)
+      if (isRole) {{
+        const roleKeyMap = {{
+          'Entry Points': 'entry_point', 'API Layer': 'api_route',
+          'Data Models': 'data_model', 'Utilities': 'utility',
+          'Configuration': 'config', 'Tests': 'test', 'Other': 'other',
+        }};
+        const roleKey = roleKeyMap[cb.dir] || 'other';
+        const subtitle = ROLE_SUBTITLES[roleKey] || '';
+        if (subtitle) {{
+          ctx.fillStyle = '#6e7681';
+          ctx.font = `${{11 / zoom}}px -apple-system, sans-serif`;
+          ctx.fillText(subtitle, cb.x + 16, cb.y + 31);
+        }}
+      }}
+
+      // High/low level indicators on first and last box — larger and more visible
       if (isRole && boxes.length > 1) {{
-        ctx.fillStyle = 'rgba(139,148,158,0.4)';
-        ctx.font = `${{9 / zoom}}px -apple-system, monospace`;
+        const indicatorY = cb.y + (isRole ? 13 : 13);
         ctx.textAlign = 'right';
-        if (ci === 0) ctx.fillText('\u2191 high-level', cb.x + cb.boxW - 16, cb.y + 13);
-        if (ci === boxes.length - 1) ctx.fillText('\u2193 low-level', cb.x + cb.boxW - 16, cb.y + 13);
+        if (ci === 0) {{
+          ctx.fillStyle = '#58a6ff';
+          ctx.font = `bold ${{11 / zoom}}px -apple-system, sans-serif`;
+          ctx.fillText('\u2191 HIGH LEVEL', cb.x + cb.boxW - 16, cb.y + 12);
+        }}
+        if (ci === boxes.length - 1) {{
+          ctx.fillStyle = '#a78bfa';
+          ctx.font = `bold ${{11 / zoom}}px -apple-system, sans-serif`;
+          ctx.fillText('\u2193 LOW LEVEL', cb.x + cb.boxW - 16, cb.y + 12);
+        }}
         ctx.textAlign = 'left';
       }}
     }});
@@ -940,16 +962,31 @@ function draw() {{
       ctx.stroke();
       curY += 5 / zoom;
 
-      // ── Section 2: symbol list ───────────────────────────────────────────
+      // ── Section 2: symbol list (name + short description) ───────────────
       ctx.textAlign = 'left';
-      ctx.font = `${{10 / zoom}}px "SF Mono", monospace`;
       for (const s of syms) {{
-        const icon = s.kind === 'function' ? '\u0192 ' : s.kind === 'class' ? '\u25c6 ' : '\u00b7 ';
+        const icon = s.kind === 'function' ? '\u0192' : s.kind === 'class' ? '\u25c6' : '\u00b7';
+        // Symbol name (colored)
+        ctx.font = `${{10 / zoom}}px "SF Mono", monospace`;
         ctx.fillStyle = s.kind === 'function' ? symFnColor : s.kind === 'class' ? symClsColor : mutedColor;
-        const symText = icon + s.name;
-        const maxSymW = Math.floor((innerW - 4) / (7 / zoom));
-        const displaySym = symText.length > maxSymW ? symText.slice(0, maxSymW - 1) + '\u2026' : symText;
-        ctx.fillText(displaySym, x + padding + 2, curY);
+        const nameText = icon + ' ' + s.name;
+        ctx.fillText(nameText, x + padding + 2, curY);
+        const nameW = ctx.measureText(nameText).width;
+        // Symbol description (muted, after em-dash if it fits)
+        if (s.description) {{
+          ctx.font = `${{9 / zoom}}px -apple-system, sans-serif`;
+          ctx.fillStyle = mutedColor;
+          const sep = ' \u2014 ';
+          const sepW = ctx.measureText(sep).width;
+          const availW = (innerW - 8) / zoom - nameW - sepW;
+          if (availW > 20) {{
+            const maxDescChars = Math.floor(availW / (5.5 / zoom));
+            const descText = s.description.length > maxDescChars
+              ? s.description.slice(0, maxDescChars - 1) + '\u2026'
+              : s.description;
+            ctx.fillText(sep + descText, x + padding + 2 + nameW * zoom, curY);
+          }}
+        }}
         curY += 13 / zoom;
       }}
       curY += 3 / zoom;
@@ -1030,27 +1067,24 @@ canvas.addEventListener('mousedown', e => {{
   const n = nodeAt(wx, wy);
   dragging = true;
   if (n) {{
+    // Click on node — select it, no drag
     dragNode = n;
-    n.pinned = true;
-    simRunning = true;
-    simTicks = Math.max(simTicks, 400);
-    startAnim();
   }} else {{
+    // Click on empty space — pan the canvas
     dragStart = {{ x: e.offsetX, y: e.offsetY }};
     panStart = {{ ...pan }};
   }}
   canvas.classList.add('dragging');
-  startAnim();
 }});
 
 canvas.addEventListener('mousemove', e => {{
   const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
   if (dragging && dragNode) {{
-    dragNode.x = wx; dragNode.y = wy;
-    dragNode.vx = 0; dragNode.vy = 0;
+    // No node dragging — just update cursor
   }} else if (dragging && dragStart) {{
     pan.x = panStart.x + (e.offsetX - dragStart.x);
     pan.y = panStart.y + (e.offsetY - dragStart.y);
+    draw();
   }} else {{
     const prev = hoveredNode;
     hoveredNode = nodeAt(wx, wy);
@@ -1060,12 +1094,9 @@ canvas.addEventListener('mousemove', e => {{
 }});
 
 canvas.addEventListener('mouseup', e => {{
-  if (dragging && dragNode && !dragStart) {{
+  if (dragging && dragNode) {{
     const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
-    if (Math.abs(wx - dragNode.x) < 5 && Math.abs(wy - dragNode.y) < 5) {{
-      selectNode(dragNode);
-    }}
-    dragNode.pinned = false;
+    selectNode(dragNode);
     dragNode = null;
   }}
   dragging = false;
@@ -1420,48 +1451,52 @@ function toggleHelp() {{
 
 function renderStatsBar() {{
   const sb = document.getElementById('statsbar');
-  if (!HEALTH || !METRICS) return;
+  if (!METRICS) return;
 
-  const score = HEALTH.score || 0;
-  const scoreColor = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#f85149';
+  // Entry point (where the program starts)
+  const entryNodes = nodes.filter(n => n.role === 'entry_point');
+  const startFile = entryNodes.length > 0
+    ? entryNodes.sort((a, b) => b.outdegree - a.outdegree)[0]
+    : [...nodes].sort((a, b) => b.outdegree - a.outdegree)[0];
 
-  // Architecture role counts
-  const roleCounts = {{}};
-  for (const n of nodes) {{
-    const r = n.role || 'other';
-    roleCounts[r] = (roleCounts[r] || 0) + 1;
-  }}
-  const roleColors = {{ entry_point: '#22c55e', hub: '#3b82f6', utility: '#a78bfa', leaf: '#6e7681', data_model: '#f59e0b', test: '#ef4444', config: '#6b7280' }};
+  // Most-imported file (the "backbone" other files depend on)
+  const coreFile = [...nodes].sort((a, b) => b.indegree - a.indegree)[0];
 
-  // Top hubs (most imported)
-  const topHubs = [...nodes].sort((a, b) => b.indegree - a.indegree).slice(0, 3).filter(n => n.indegree > 0);
-
-  let html = `
-    <div class="stat-group">
-      <span class="stat-label">Health</span>
-      <span class="stat-value health-badge" style="background:${{scoreColor}}20;color:${{scoreColor}};border:1px solid ${{scoreColor}}40">${{score}}/100</span>
-    </div>
-    <div class="stat-group">
-      <span class="stat-label">Architecture</span>
-      <span>
-  `;
-  for (const [role, count] of Object.entries(roleCounts).filter(([r]) => r !== 'other').slice(0, 4)) {{
-    const c = roleColors[role] || '#888';
-    html += `<span class="role-chip" style="background:${{c}}25;color:${{c}}">${{count}} ${{role.replace('_',' ')}}</span>`;
-  }}
-  html += `</span></div>`;
-
-  if (topHubs.length) {{
-    html += `<div class="stat-group"><span class="stat-label">Top hubs:</span>`;
-    topHubs.forEach(n => {{
-      html += `<span class="stat-value" style="cursor:pointer;color:#58a6ff" onclick="selectNode(nodeIndex['${{n.id}}'])">${{n.label}}</span><span class="stat-label">(${{n.indegree}})</span>`;
-    }});
-    html += `</div>`;
-  }}
-
+  // Health / issues
+  const cycles = METRICS.cycles || 0;
   const orphans = nodes.filter(n => n.indegree === 0 && n.outdegree === 0).length;
+
+  let html = '';
+
+  // "Start here" pill
+  if (startFile) {{
+    const desc = startFile.description
+      ? startFile.description.split('.')[0] + '.'
+      : 'entry point';
+    html += `<div class="stat-group">
+      <span class="stat-label">\u25b6 Start here</span>
+      <span class="stat-value" style="cursor:pointer;color:#22c55e;text-decoration:underline dotted"
+        onclick="selectNode(nodeIndex['${{startFile.id}}'])">${{startFile.label}}</span>
+      <span class="stat-label" style="max-width:260px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${{esc(desc)}}</span>
+    </div>`;
+  }}
+
+  // "Core file" pill (most depended on)
+  if (coreFile && coreFile !== startFile && coreFile.indegree > 0) {{
+    html += `<div class="stat-group">
+      <span class="stat-label">\u2764 Core file</span>
+      <span class="stat-value" style="cursor:pointer;color:#58a6ff;text-decoration:underline dotted"
+        onclick="selectNode(nodeIndex['${{coreFile.id}}'])">${{coreFile.label}}</span>
+      <span class="stat-label">${{coreFile.indegree}} file${{coreFile.indegree > 1 ? 's' : ''}} depend on it</span>
+    </div>`;
+  }}
+
+  // Warnings
+  if (cycles > 0) {{
+    html += `<div class="stat-group"><span style="color:#f85149">\u26a0 ${{cycles}} circular dependency${{cycles > 1 ? ' ies' : ''}} — files that import each other (can cause bugs)</span></div>`;
+  }}
   if (orphans > 0) {{
-    html += `<div class="stat-group"><span style="color:#f59e0b">\u26a0 ${{orphans}} orphan${{orphans > 1 ? 's' : ''}}</span></div>`;
+    html += `<div class="stat-group"><span style="color:#f59e0b">\u26a0 ${{orphans}} unused file${{orphans > 1 ? 's' : ''}} — not imported anywhere</span></div>`;
   }}
 
   sb.innerHTML = html;
@@ -1501,7 +1536,20 @@ renderStatsBar();
 minimap.width = 160;
 minimap.height = 100;
 
-startAnim();
+// Start in "By Purpose" mode — hierarchical layout is the default view.
+// Run layout before physics so nodes start in the right positions.
+(function initLayout() {{
+  const btn = document.getElementById('btnClusters');
+  clusterMode = 'role';
+  btn.textContent = 'By Purpose';
+  btn.classList.add('active');
+  layoutClusters('role');
+  simRunning = false; // deterministic layout — no physics needed
+  draw();
+  drawMinimap();
+  // Fit viewport after layout
+  setTimeout(() => {{ zoomToFit(); draw(); drawMinimap(); }}, 50);
+}})();
 </script>
 </body>
 </html>
@@ -1632,6 +1680,7 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
     clusters_json = _safe_json(render_data.get("clusters", {}))
     clusters_by_role_json = _safe_json(render_data.get("clusters_by_role", {}))
     role_order_json = _safe_json(render_data.get("role_order", []))
+    role_subtitles_json = _safe_json(render_data.get("role_subtitles", {}))
     metrics_json = _safe_json(render_data.get("metrics", {}))
     node_metrics_json = _safe_json(render_data.get("node_metrics", {}))
     health_json = _safe_json(render_data.get("health", {}))
@@ -1653,6 +1702,7 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
         clusters_json=clusters_json,
         clusters_by_role_json=clusters_by_role_json,
         role_order_json=role_order_json,
+        role_subtitles_json=role_subtitles_json,
         metrics_json=metrics_json,
         node_metrics_json=node_metrics_json,
         health_json=health_json,

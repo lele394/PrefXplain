@@ -20,13 +20,20 @@ class Symbol:
     name: str
     kind: Literal["function", "class", "variable", "import"]
     line: int
+    description: str = ""   # short natural-language hint, e.g. "parses CLI arguments"
 
     def to_dict(self) -> dict:
-        return {"name": self.name, "kind": self.kind, "line": self.line}
+        d: dict = {"name": self.name, "kind": self.kind, "line": self.line}
+        if self.description:
+            d["description"] = self.description
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> Symbol:
-        return cls(name=d["name"], kind=d["kind"], line=d["line"])
+        return cls(
+            name=d["name"], kind=d["kind"], line=d["line"],
+            description=d.get("description", ""),
+        )
 
 
 @dataclass
@@ -130,6 +137,17 @@ ROLE_LABELS: dict[str, str] = {
     "config":      "Configuration",
     "test":        "Tests",
     "other":       "Other",
+}
+
+# Human-friendly subtitle shown under each cluster header
+ROLE_SUBTITLES: dict[str, str] = {
+    "entry_point": "Where the program starts — run these files to launch the app",
+    "api_route":   "Routes & controllers — handles requests coming in from outside",
+    "data_model":  "Data shapes & schemas — defines what your data looks like",
+    "utility":     "Helper functions — reusable tools used everywhere else",
+    "config":      "Settings & constants — controls how the app behaves",
+    "test":        "Tests — checks that everything works correctly",
+    "other":       "Other files that didn't fit the categories above",
 }
 
 # Semantic ordering: high-level concepts first, low-level infrastructure last
@@ -663,6 +681,7 @@ class Graph:
             "clusters": clusters,
             "clusters_by_role": clusters_by_role,
             "role_order": ROLE_ORDER,
+            "role_subtitles": ROLE_SUBTITLES,
             "cycle_edges": cycle_edges_list,
             "cycle_node_ids": sorted(cycle_node_set),
             "metrics": metrics,

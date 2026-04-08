@@ -820,22 +820,26 @@ function draw() {{
     drawArrowHead(x1, y1, x2, y2, color, arrowSize);
   }}
 
-  // Deterministic hash → consistent lane per edge pair (spread lines in left margin)
-  function edgeLaneOffset(a, b) {{
-    const N_LANES = 12, LANE_W = 9; // 12 lanes × 9px = 108px spread
+  // Deterministic hash → consistent lane index per edge pair
+  function edgeLaneIndex(a, b) {{
+    const N_LANES = 8;
     let h = 5381;
     for (let i = 0; i < a.id.length; i++) h = ((h << 5) + h + a.id.charCodeAt(i)) & 0x7fffffff;
     for (let i = 0; i < b.id.length; i++) h = ((h << 5) + h + b.id.charCodeAt(i)) & 0x7fffffff;
-    return (h % N_LANES) * LANE_W;
+    return h % N_LANES;
   }}
 
   // Route an edge as a bezier curve that exits LEFT from source, travels down
-  // a dedicated lane in the left margin, then enters LEFT into target.
-  // Each edge gets a deterministic horizontal offset so they don't stack.
+  // a lane in the LEFT MARGIN (between x=8 and cluster left edge-8), then
+  // enters LEFT into target. Lanes are spread evenly across the margin width.
   function drawRoutedEdge(a, b, color, lw, arrowSize) {{
     const boxes = window.__clusterBoxes || [];
-    const baseMarginX = (boxes.length > 0 ? boxes[0].x - 40 : 20);
-    const laneX = baseMarginX - edgeLaneOffset(a, b); // spread into left gutter
+    const clusterLeft = boxes.length > 0 ? boxes[0].x : 60;
+    const marginRight = clusterLeft - 6;  // just left of cluster band
+    const marginLeft = 8;                  // left edge of canvas
+    const N_LANES = 8;
+    const lane = edgeLaneIndex(a, b);
+    const laneX = marginLeft + (lane / (N_LANES - 1)) * (marginRight - marginLeft);
     const sx = a.x - a.w / 2;
     const sy = a.y;
     const ex = b.x - b.w / 2;
@@ -952,10 +956,33 @@ function draw() {{
       ctx.fill();
     }}
 
+    // LOD: skip text if card is too small on screen (< 55px wide)
+    // This keeps the graph clean when zoomed out.
+    if (nw * zoom < 55) {{
+      // Draw just a tiny label for identification
+      if (nw * zoom >= 28) {{
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.font = `bold 9px -apple-system, sans-serif`;
+        ctx.fillStyle = '#8b949e';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(n.label.replace(/\.(py|js|ts)$/, ''), n.x * zoom + pan.x, n.y * zoom + pan.y);
+        ctx.restore();
+      }}
+      continue;
+    }}
+
     // Clip ALL text drawing to the card rectangle — prevents overflow onto adjacent cards
+    // Text is drawn in SCREEN SPACE (constant 12px size regardless of zoom).
+    const screenX = n.x * zoom + pan.x;
+    const screenY = n.y * zoom + pan.y;
+    const screenW = nw * zoom;
+    const screenH = nh * zoom;
     ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset to screen coords
     ctx.beginPath();
-    roundRect(ctx, x, y, nw, nh, NODE_R);
+    roundRect(ctx, screenX - screenW/2 + 1, screenY - screenH/2 + 1, screenW - 2, screenH - 2, NODE_R * zoom);
     ctx.clip();
 
     // 4-section card layout:
@@ -969,34 +996,33 @@ function draw() {{
 
     const textColor = isSelected ? nodeTextColor(n) : '#e6edf3';
     const mutedColor = isSelected ? 'rgba(255,255,255,0.7)' : '#8b949e';
-    const symFnColor  = isSelected ? 'rgba(255,255,255,0.9)' : '#c084fc'; // purple for functions
-    const symClsColor = isSelected ? 'rgba(255,255,255,0.9)' : '#93c5fd'; // blue for classes
+    const symFnColor  = isSelected ? 'rgba(255,255,255,0.9)' : '#c084fc';
+    const symClsColor = isSelected ? 'rgba(255,255,255,0.9)' : '#93c5fd';
     const divColor    = isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)';
 
+    // All drawing is in screen space (setTransform reset above).
+    // innerW/positions in screen px — font sizes are fixed (not /zoom).
     const padding = 8;
-    const innerW = nw - padding * 2;
+    const innerW = screenW - padding * 2;
 
     // ── Section 1: description / title ───────────────────────────────────
     const titleText = nodeTitleText(n);
-    ctx.fillStyle = textColor;
-    ctx.font = `bold ${{12 / zoom}}px -apple-system, sans-serif`;
-    // Word-wrap to 2 lines at most
+    ctx.font = `bold 12px -apple-system, sans-serif`;
     const maxLineW = innerW - 4;
     const words = titleText.split(' ');
     let line1 = '', line2 = '';
     for (const word of words) {{
       const test = line1 ? line1 + ' ' + word : word;
-      if (ctx.measureText(test).width * zoom <= maxLineW) {{
+      if (ctx.measureText(test).width <= maxLineW) {{
         line1 = test;
       }} else if (!line2) {{
         line2 = word;
       }} else {{
         const test2 = line2 + ' ' + word;
-        if (ctx.measureText(test2).width <= maxLineW / zoom) {{
+        if (ctx.measureText(test2).width <= maxLineW) {{
           line2 = test2;
         }} else {{
-          // Truncate with ellipsis
-          while (line2 && ctx.measureText(line2 + '\u2026').width * zoom > maxLineW) {{
+          while (line2 && ctx.measureText(line2 + '\u2026').width > maxLineW) {{
             line2 = line2.slice(0, -1);
           }}
           line2 += '\u2026';
@@ -1007,85 +1033,77 @@ function draw() {{
 
     const syms = (n.symbols || []).slice(0, 4);
     const hasSyms = syms.length > 0;
-    // Vertical layout: title at top, then optionally symbols, then footer
-    // Total height = nodeHeight(n). Distribute vertically.
-    const titleLines = line2 ? 2 : 1;
-    const titleBlockH = titleLines * 14; // px per line at zoom=1
-    const symBlockH = hasSyms ? syms.length * 14 + 8 : 0; // 8 = dividers
-    const footerH = 12;
-    // Top of text content (leave NODE_R gap from border)
-    let curY = y + NODE_R + 6;
+    // Top of text content in screen px (NODE_R * zoom = border radius in screen px)
+    let curY = screenY - screenH / 2 + NODE_R * zoom + 6;
 
     // Title line(s)
     ctx.fillStyle = textColor;
-    ctx.font = `bold ${{12 / zoom}}px -apple-system, sans-serif`;
+    ctx.font = `bold 12px -apple-system, sans-serif`;
     ctx.textBaseline = 'top';
     ctx.textAlign = 'center';
-    ctx.fillText(line1, n.x, curY);
-    curY += 14 / zoom;
+    ctx.fillText(line1, screenX, curY);
+    curY += 14;
     if (line2) {{
-      ctx.fillText(line2, n.x, curY);
-      curY += 14 / zoom;
+      ctx.fillText(line2, screenX, curY);
+      curY += 14;
     }}
-    curY += 4 / zoom;
+    curY += 4;
 
     if (hasSyms) {{
       // ── Divider ─────────────────────────────────────────────────────────
       ctx.strokeStyle = divColor;
-      ctx.lineWidth = 0.5 / zoom;
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(x + padding, curY);
-      ctx.lineTo(x + nw - padding, curY);
+      ctx.moveTo(screenX - screenW / 2 + padding, curY);
+      ctx.lineTo(screenX + screenW / 2 - padding, curY);
       ctx.stroke();
-      curY += 5 / zoom;
+      curY += 5;
 
-      // ── Section 2: symbol list (name + short description) ───────────────
+      // ── Section 2: symbol list ──────────────────────────────────────────
       ctx.textAlign = 'left';
       for (const s of syms) {{
         const icon = s.kind === 'function' ? '\u0192' : s.kind === 'class' ? '\u25c6' : '\u00b7';
-        // Symbol name (colored)
-        ctx.font = `${{10 / zoom}}px "SF Mono", monospace`;
+        ctx.font = `10px "SF Mono", monospace`;
         ctx.fillStyle = s.kind === 'function' ? symFnColor : s.kind === 'class' ? symClsColor : mutedColor;
         const nameText = icon + ' ' + s.name;
-        ctx.fillText(nameText, x + padding + 2, curY);
+        ctx.fillText(nameText, screenX - screenW / 2 + padding + 2, curY);
         const nameW = ctx.measureText(nameText).width;
-        // Symbol description (muted, after em-dash if it fits)
         if (s.description) {{
-          ctx.font = `${{9 / zoom}}px -apple-system, sans-serif`;
+          ctx.font = `9px -apple-system, sans-serif`;
           ctx.fillStyle = mutedColor;
           const sep = ' \u2014 ';
           const sepW = ctx.measureText(sep).width;
-          const availW = (innerW - 8) / zoom - nameW - sepW;
+          const availW = innerW - 8 - nameW - sepW;
           if (availW > 20) {{
-            const maxDescChars = Math.floor(availW / (5.5 / zoom));
+            const maxDescChars = Math.floor(availW / 5.5);
             const descText = s.description.length > maxDescChars
               ? s.description.slice(0, maxDescChars - 1) + '\u2026'
               : s.description;
-            ctx.fillText(sep + descText, x + padding + 2 + nameW * zoom, curY);
+            ctx.fillText(sep + descText, screenX - screenW / 2 + padding + 2 + nameW, curY);
           }}
         }}
-        curY += 13 / zoom;
+        curY += 13;
       }}
-      curY += 3 / zoom;
+      curY += 3;
     }}
 
     // ── Bottom divider + footer ──────────────────────────────────────────
     ctx.strokeStyle = divColor;
-    ctx.lineWidth = 0.5 / zoom;
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
-    ctx.moveTo(x + padding, y + nh - 18 / zoom);
-    ctx.lineTo(x + nw - padding, y + nh - 18 / zoom);
+    ctx.moveTo(screenX - screenW / 2 + padding, screenY + screenH / 2 - 18);
+    ctx.lineTo(screenX + screenW / 2 - padding, screenY + screenH / 2 - 18);
     ctx.stroke();
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'bottom';
     ctx.fillStyle = mutedColor;
-    ctx.font = `${{9 / zoom}}px "SF Mono", monospace`;
+    ctx.font = `9px "SF Mono", monospace`;
     const footer = nodeSubtitle(n);
     if (footer) {{
-      const footerMaxW = Math.floor(innerW / (5.5 / zoom));
+      const footerMaxW = Math.floor(innerW / 5.5);
       const footerText = footer.length > footerMaxW ? footer.slice(0, footerMaxW - 1) + '\u2026' : footer;
-      ctx.fillText(footerText, n.x, y + nh - 5 / zoom);
+      ctx.fillText(footerText, screenX, screenY + screenH / 2 - 5);
     }}
     ctx.restore(); // end card clip
 
@@ -1185,13 +1203,19 @@ canvas.addEventListener('mouseup', e => {{
 
 canvas.addEventListener('wheel', e => {{
   e.preventDefault();
-  const factor = e.deltaY < 0 ? 1.1 : 0.9;
-  const wx = (e.offsetX - pan.x) / zoom;
-  const wy = (e.offsetY - pan.y) / zoom;
-  zoom *= factor;
-  zoom = Math.max(0.1, Math.min(4, zoom));
-  pan.x = e.offsetX - wx * zoom;
-  pan.y = e.offsetY - wy * zoom;
+  if (e.ctrlKey || e.metaKey) {{
+    // Pinch gesture (trackpad) or Ctrl+scroll → zoom
+    const factor = e.deltaY < 0 ? 1.08 : 0.93;
+    const wx = (e.offsetX - pan.x) / zoom;
+    const wy = (e.offsetY - pan.y) / zoom;
+    zoom = Math.max(0.2, Math.min(2.5, zoom * factor));
+    pan.x = e.offsetX - wx * zoom;
+    pan.y = e.offsetY - wy * zoom;
+  }} else {{
+    // Two-finger scroll (trackpad) → pan
+    pan.x -= e.deltaX * 1.2;
+    pan.y -= e.deltaY * 1.2;
+  }}
   draw();
 }}, {{ passive: false }});
 

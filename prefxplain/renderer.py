@@ -133,7 +133,8 @@ _HTML_TEMPLATE = """\
   <div class="toolbar">
     <button id="btnColorLang" class="active" onclick="setColorMode('language')">By Language</button>
     <button id="btnColorRole" onclick="setColorMode('role')">By Role</button>
-    <button id="btnClusters" onclick="toggleClusters()">Clusters</button>
+    <button id="btnClusters" onclick="toggleClusters()">By Purpose</button>
+    <button id="btnEdges" onclick="toggleEdgeMode()">Edges: Hover</button>
     <button onclick="zoomToFit()">Fit</button>
     <button onclick="toggleHelp()">?</button>
   </div>
@@ -187,6 +188,7 @@ const searchInput = document.getElementById('search');
 // ── State ───────────────────────────────────────────────────────────────────
 let colorMode = 'language'; // 'language' | 'role'
 let clusterMode = 'off'; // 'off' | 'dir' | 'role'
+let edgeMode = 'hover'; // 'hover' | 'all'
 
 // Convenience getter used throughout the code (replaces the old showClusters bool)
 function showClusters() {{ return clusterMode !== 'off'; }}
@@ -206,6 +208,14 @@ function toggleClusters() {{
   btn.classList.add('active');
   layoutClusters(clusterMode);
   simRunning = false;
+  draw();
+}}
+
+function toggleEdgeMode() {{
+  edgeMode = edgeMode === 'hover' ? 'all' : 'hover';
+  const btn = document.getElementById('btnEdges');
+  btn.textContent = edgeMode === 'hover' ? 'Edges: Hover' : 'Edges: All';
+  btn.classList.toggle('active', edgeMode === 'all');
   draw();
 }}
 
@@ -810,19 +820,30 @@ function draw() {{
     drawArrowHead(x1, y1, x2, y2, color, arrowSize);
   }}
 
+  // Deterministic hash → consistent lane per edge pair (spread lines in left margin)
+  function edgeLaneOffset(a, b) {{
+    const N_LANES = 12, LANE_W = 9; // 12 lanes × 9px = 108px spread
+    let h = 5381;
+    for (let i = 0; i < a.id.length; i++) h = ((h << 5) + h + a.id.charCodeAt(i)) & 0x7fffffff;
+    for (let i = 0; i < b.id.length; i++) h = ((h << 5) + h + b.id.charCodeAt(i)) & 0x7fffffff;
+    return (h % N_LANES) * LANE_W;
+  }}
+
   // Route an edge as a bezier curve that exits LEFT from source, travels down
-  // the left margin, then enters LEFT into target — avoiding intermediate bands.
+  // a dedicated lane in the left margin, then enters LEFT into target.
+  // Each edge gets a deterministic horizontal offset so they don't stack.
   function drawRoutedEdge(a, b, color, lw, arrowSize) {{
     const boxes = window.__clusterBoxes || [];
-    const marginX = (boxes.length > 0 ? boxes[0].x - 45 : 20);
-    const sx = a.x - a.w / 2; // exit from left edge of source
+    const baseMarginX = (boxes.length > 0 ? boxes[0].x - 40 : 20);
+    const laneX = baseMarginX - edgeLaneOffset(a, b); // spread into left gutter
+    const sx = a.x - a.w / 2;
     const sy = a.y;
-    const ex = b.x - b.w / 2; // enter from left edge of target
+    const ex = b.x - b.w / 2;
     const ey = b.y;
-    // Bezier: horizontal exit → margin → margin → horizontal entry
-    const cp1x = marginX, cp1y = sy;
-    const cp2x = marginX, cp2y = ey;
-    const endX = ex - arrowSize * 0.6; // leave room for arrowhead
+    // S-curve: exit source horizontally → down the lane → enter target horizontally
+    const cp1x = laneX, cp1y = sy;
+    const cp2x = laneX, cp2y = ey;
+    const endX = ex - arrowSize * 0.6;
     ctx.beginPath();
     ctx.moveTo(sx, sy);
     ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, endX, ey);
@@ -840,11 +861,25 @@ function draw() {{
     const vis = isVisible(a) && isVisible(b);
     if (!vis) continue;
 
-    const faded = highlightSet && !highlightSet.has(a.id) && !highlightSet.has(b.id);
+    // Only show an edge if the focal node (selected or hovered) is one of its endpoints.
+    // Using highlightSet membership would also light up edges between neighbors, which is noisy.
+    const focalId = selectedNode ? selectedNode.id : (hoveredNode ? hoveredNode.id : null);
+    const isDirect = focalId && (a.id === focalId || b.id === focalId);
+    const inHighlight = isDirect; // kept for opacity logic below
+    const faded = highlightSet && !isDirect && !(highlightSet.has(a.id) && highlightSet.has(b.id));
+
+    // Hover mode: only draw edges when a node is selected/hovered
+    if (edgeMode === 'hover' && !isDirect) continue;
+
     const isCycle = isCycleEdge(e);
     const isBidi = edgeKeySet.has(b.id + '|' + a.id);
 
-    ctx.globalAlpha = faded ? 0.06 : (isCycle ? 0.95 : 0.75);
+    // Opacity: highlighted edges bright, others very faint in all-mode
+    let alpha;
+    if (faded) alpha = 0.04;
+    else if (inHighlight) alpha = isCycle ? 0.95 : 0.85;
+    else alpha = isCycle ? 0.6 : 0.22; // all-mode, no selection
+    ctx.globalAlpha = alpha;
 
     const edgeColor = isCycle ? '#f85149' : '#6b7280';
     const lw = (isCycle ? 2 : 1.5) / zoom;

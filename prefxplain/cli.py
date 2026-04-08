@@ -418,28 +418,35 @@ def _run(
             console.print(f"      [dim]+{len(cycles) - 3} more[/dim]")
 
     # Step 2: LLM descriptions
-    if no_descriptions or fmt in ("mermaid", "dot"):
-        console.print("[bold blue]2/3[/bold blue] Skipping descriptions")
-        # Preserve descriptions from a previous run so --no-descriptions doesn't
-        # silently wipe them when the output json already exists.
-        prior_json_path = (output or (root / f"prefxplain{ext}")).with_suffix(".json")
-        if prior_json_path.exists():
-            try:
-                from .graph import Graph as _Graph
+    # Always preserve prior descriptions first — so a failed LLM call or
+    # --no-descriptions never silently wipes descriptions from a previous run.
+    prior_json_path = (output or (root / f"prefxplain{ext}")).with_suffix(".json")
+    if prior_json_path.exists():
+        try:
+            from .graph import Graph as _Graph
 
-                prior_graph = _Graph.load(prior_json_path)
-                prior_descs = {n.id: n.description for n in prior_graph.nodes if n.description}
-                preserved = 0
-                for node in graph.nodes:
-                    if node.id in prior_descs:
-                        node.description = prior_descs[node.id]
-                        preserved += 1
-                if preserved:
-                    console.print(
-                        f"    [dim]Preserved {preserved} description(s) from previous run[/dim]"
-                    )
-            except Exception:  # noqa: BLE001 — graceful degradation
-                pass
+            prior_graph = _Graph.load(prior_json_path)
+            prior_descs = {n.id: n for n in prior_graph.nodes if n.description}
+            preserved = 0
+            for node in graph.nodes:
+                prior = prior_descs.get(node.id)
+                if prior:
+                    node.description = prior.description
+                    # Also restore per-symbol descriptions
+                    old_sym = {s.name: s.description for s in prior.symbols if s.description}
+                    for sym in node.symbols:
+                        if sym.name in old_sym:
+                            sym.description = old_sym[sym.name]
+                    preserved += 1
+            if preserved:
+                console.print(
+                    f"    [dim]Preserved {preserved} description(s) from previous run[/dim]"
+                )
+        except Exception:  # noqa: BLE001 — graceful degradation
+            pass
+
+    if no_descriptions or fmt in ("mermaid", "dot"):
+        console.print("[bold blue]2/3[/bold blue] Skipping descriptions (preserved from cache)")
     else:
         console.print("[bold blue]2/3[/bold blue] Generating natural language descriptions...")
         graph = describe(

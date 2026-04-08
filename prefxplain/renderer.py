@@ -952,6 +952,12 @@ function draw() {{
       ctx.fill();
     }}
 
+    // Clip ALL text drawing to the card rectangle — prevents overflow onto adjacent cards
+    ctx.save();
+    ctx.beginPath();
+    roundRect(ctx, x, y, nw, nh, NODE_R);
+    ctx.clip();
+
     // 4-section card layout:
     //   Section 1: description (or label if no description) — primary text
     //   Divider
@@ -980,7 +986,7 @@ function draw() {{
     let line1 = '', line2 = '';
     for (const word of words) {{
       const test = line1 ? line1 + ' ' + word : word;
-      if (ctx.measureText(test).width <= maxLineW / zoom) {{
+      if (ctx.measureText(test).width * zoom <= maxLineW) {{
         line1 = test;
       }} else if (!line2) {{
         line2 = word;
@@ -990,7 +996,7 @@ function draw() {{
           line2 = test2;
         }} else {{
           // Truncate with ellipsis
-          while (line2 && ctx.measureText(line2 + '\u2026').width > maxLineW / zoom) {{
+          while (line2 && ctx.measureText(line2 + '\u2026').width * zoom > maxLineW) {{
             line2 = line2.slice(0, -1);
           }}
           line2 += '\u2026';
@@ -1081,6 +1087,7 @@ function draw() {{
       const footerText = footer.length > footerMaxW ? footer.slice(0, footerMaxW - 1) + '\u2026' : footer;
       ctx.fillText(footerText, n.x, y + nh - 5 / zoom);
     }}
+    ctx.restore(); // end card clip
 
     // Indegree badge on hub nodes (indegree >= 3) — top-right corner
     if (!isSelected && n.indegree >= 3) {{

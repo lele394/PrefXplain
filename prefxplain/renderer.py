@@ -171,6 +171,8 @@ const ROLE_COLORS = {role_colors_json};
 const CYCLE_NODES = new Set({cycle_nodes_json});
 const CYCLE_EDGES = new Set({cycle_edges_json});
 const CLUSTERS = {clusters_json};
+const CLUSTERS_BY_ROLE = {clusters_by_role_json};
+const ROLE_ORDER = {role_order_json};
 const METRICS = {metrics_json};
 const NODE_METRICS = {node_metrics_json};
 const HEALTH = {health_json};
@@ -183,7 +185,10 @@ const searchInput = document.getElementById('search');
 
 // ── State ───────────────────────────────────────────────────────────────────
 let colorMode = 'language'; // 'language' | 'role'
-let showClusters = false;
+let clusterMode = 'off'; // 'off' | 'dir' | 'role'
+
+// Convenience getter used throughout the code (replaces the old showClusters bool)
+function showClusters() {{ return clusterMode !== 'off'; }}
 
 function setColorMode(mode) {{
   colorMode = mode;
@@ -192,74 +197,124 @@ function setColorMode(mode) {{
   draw();
 }}
 
+// Cycle: off → dir → role → off
 function toggleClusters() {{
-  showClusters = !showClusters;
-  document.getElementById('btnClusters').classList.toggle('active', showClusters);
-  if (showClusters) {{
-    layoutClustersAsGrid();
-    simRunning = false; // freeze the sim — clusters layout is deterministic
-  }} else {{
+  if (clusterMode === 'off') clusterMode = 'dir';
+  else if (clusterMode === 'dir') clusterMode = 'role';
+  else clusterMode = 'off';
+
+  const btn = document.getElementById('btnClusters');
+  if (clusterMode === 'off') {{
+    btn.textContent = 'Clusters';
+    btn.classList.remove('active');
     // Re-enable physics so user can shake it back
     simRunning = true;
     simTicks = 0;
     for (const n of nodes) n.pinned = false;
     startAnim();
+  }} else {{
+    btn.textContent = clusterMode === 'dir' ? 'By Directory' : 'By Purpose';
+    btn.classList.add('active');
+    layoutClusters(clusterMode);
+    simRunning = false; // freeze the sim — clusters layout is deterministic
   }}
   draw();
 }}
 
 // One-shot grid layout when Clusters mode is enabled.
-// Each cluster (directory) becomes a labeled box with its files arranged in a
-// uniform grid inside. Replaces the force-directed positioning so containers
-// look like CodeViz instead of a random blob.
-function layoutClustersAsGrid() {{
+// mode = 'dir': each directory becomes a labeled box, packed left-to-right.
+// mode = 'role': each architectural role becomes a full-width horizontal band,
+//                stacked top-to-bottom in semantic order (high-level → low-level).
+function layoutClusters(mode) {{
   const CLUSTER_PAD_X = 24;
-  const CLUSTER_PAD_Y = 36; // top padding for cluster label
+  const CLUSTER_PAD_Y = 40; // top padding for cluster label
   const NODE_GAP_X = 16;
-  const NODE_GAP_Y = 12;
+  const NODE_GAP_Y = 14;
   const CLUSTER_GAP = 50;
 
-  const keys = Object.keys(CLUSTERS).sort();
-  if (keys.length === 0) return;
+  let clusterBoxes;
 
-  // Compute each cluster's grid dimensions first
-  const clusterBoxes = keys.map(dir => {{
-    const ids = CLUSTERS[dir];
-    const clNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
-    const count = clNodes.length;
-    if (count === 0) return null;
-    // Choose grid dims: roughly square, capped at 4 columns wide
-    const cols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(count))));
-    const rows = Math.ceil(count / cols);
-    const cellW = Math.max(...clNodes.map(n => n.w));
-    const cellH = Math.max(...clNodes.map(n => n.h));
-    const innerW = cols * cellW + (cols - 1) * NODE_GAP_X;
-    const innerH = rows * cellH + (rows - 1) * NODE_GAP_Y;
-    return {{
-      dir, clNodes, cols, rows, cellW, cellH,
-      boxW: innerW + CLUSTER_PAD_X * 2,
-      boxH: innerH + CLUSTER_PAD_Y + CLUSTER_PAD_X,
-    }};
-  }}).filter(Boolean);
+  if (mode === 'dir') {{
+    // ── Directory mode: packed grid, same as before ───────────────────────
+    const keys = Object.keys(CLUSTERS).sort();
+    if (keys.length === 0) return;
 
-  // Pack cluster boxes left-to-right, wrapping at canvas width
-  const startX = 60, startY = 60;
-  const wrapW = Math.max(800, canvas.width - 120);
-  let cx = startX, cy = startY, rowH = 0;
+    clusterBoxes = keys.map(dir => {{
+      const ids = CLUSTERS[dir];
+      const clNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
+      const count = clNodes.length;
+      if (count === 0) return null;
+      const cols = Math.min(4, Math.max(1, Math.ceil(Math.sqrt(count))));
+      const rows = Math.ceil(count / cols);
+      const cellW = Math.max(...clNodes.map(n => n.w));
+      const cellH = Math.max(...clNodes.map(n => n.h));
+      const innerW = cols * cellW + (cols - 1) * NODE_GAP_X;
+      const innerH = rows * cellH + (rows - 1) * NODE_GAP_Y;
+      return {{
+        dir, clNodes, cols, rows, cellW, cellH,
+        boxW: innerW + CLUSTER_PAD_X * 2,
+        boxH: innerH + CLUSTER_PAD_Y + CLUSTER_PAD_X,
+      }};
+    }}).filter(Boolean);
 
-  for (const cb of clusterBoxes) {{
-    if (cx + cb.boxW > startX + wrapW && cx > startX) {{
-      cx = startX;
-      cy += rowH + CLUSTER_GAP;
-      rowH = 0;
+    const startX = 60, startY = 60;
+    const wrapW = Math.max(800, canvas.width - 120);
+    let cx = startX, cy = startY, rowH = 0;
+    for (const cb of clusterBoxes) {{
+      if (cx + cb.boxW > startX + wrapW && cx > startX) {{
+        cx = startX; cy += rowH + CLUSTER_GAP; rowH = 0;
+      }}
+      cb.x = cx; cb.y = cy;
+      rowH = Math.max(rowH, cb.boxH);
+      cx += cb.boxW + CLUSTER_GAP;
     }}
-    cb.x = cx;
-    cb.y = cy;
-    rowH = Math.max(rowH, cb.boxH);
-    cx += cb.boxW + CLUSTER_GAP;
+
+  }} else {{
+    // ── Role/Purpose mode: full-width horizontal bands stacked vertically ─
+    // Role order is provided by Python (high-level → low-level).
+    const ROLE_LABEL_MAP = {{}};
+    // Build inverse map: role_key → display_label, using ROLE_ORDER for ordering
+    // CLUSTERS_BY_ROLE keys are already display labels ("Entry Points", etc.)
+    const orderedLabels = ROLE_ORDER.map(roleKey => {{
+      const labelMap = {{
+        'entry_point': 'Entry Points', 'api_route': 'API Layer',
+        'data_model': 'Data Models', 'utility': 'Utilities',
+        'config': 'Configuration', 'test': 'Tests', 'other': 'Other',
+      }};
+      return labelMap[roleKey] || roleKey;
+    }}).filter(label => CLUSTERS_BY_ROLE[label] && CLUSTERS_BY_ROLE[label].length > 0);
+
+    const canvasW = Math.max(canvas.width, 900);
+    const bandW = canvasW - 120; // full-width minus padding
+    const startX = 60, startY = 60;
+    let cy = startY;
+
+    clusterBoxes = orderedLabels.map(label => {{
+      const ids = CLUSTERS_BY_ROLE[label] || [];
+      const clNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
+      const count = clNodes.length;
+      if (count === 0) return null;
+
+      // Fill nodes across the full band width
+      const cellW = Math.max(...clNodes.map(n => n.w));
+      const cellH = Math.max(...clNodes.map(n => n.h));
+      const maxCols = Math.max(1, Math.floor((bandW - CLUSTER_PAD_X * 2 + NODE_GAP_X) / (cellW + NODE_GAP_X)));
+      const cols = Math.min(maxCols, count);
+      const rows = Math.ceil(count / cols);
+      const innerH = rows * cellH + (rows - 1) * NODE_GAP_Y;
+      const cb = {{
+        dir: label,
+        clNodes, cols, rows, cellW, cellH,
+        x: startX, y: cy,
+        boxW: bandW,
+        boxH: innerH + CLUSTER_PAD_Y + CLUSTER_PAD_X,
+      }};
+      cy += cb.boxH + CLUSTER_GAP;
+      return cb;
+    }}).filter(Boolean);
   }}
 
-  // Position each node inside its cluster box
+  // Position each node inside its cluster box (same for both modes)
   for (const cb of clusterBoxes) {{
     cb.clNodes.forEach((n, i) => {{
       const col = i % cb.cols;
@@ -280,14 +335,14 @@ function layoutClustersAsGrid() {{
     maxY = Math.max(maxY, n.y + n.h / 2);
   }}
   const layoutW = maxX - minX, layoutH = maxY - minY;
-  const targetX = (canvas.width - layoutW * zoom) / 2 - minX * zoom;
-  const targetY = (canvas.height - layoutH * zoom) / 2 - minY * zoom;
-  pan.x = targetX;
-  pan.y = targetY;
+  pan.x = (canvas.width - layoutW * zoom) / 2 - minX * zoom;
+  pan.y = (canvas.height - layoutH * zoom) / 2 - minY * zoom;
 
-  // Stash cluster boxes for the draw step
   window.__clusterBoxes = clusterBoxes;
 }}
+
+// Alias kept for any direct callers
+function layoutClustersAsGrid() {{ layoutClusters('dir'); }}
 
 // ── Layout ──────────────────────────────────────────────────────────────────
 
@@ -300,8 +355,15 @@ resize();
 
 // ── Force simulation ─────────────────────────────────────────────────────────
 
-const NODE_W = 130, NODE_H = 36, NODE_R = 6;
-const REPULSION = 8000, SPRING_LEN = 240, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
+const NODE_W = 220, NODE_H_BASE = 44, NODE_R = 6;
+// Taller nodes need more space — bump repulsion and spring length
+const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
+
+// Dynamic height: base + 16px per symbol shown (max 4), plus 10px for dividers
+function nodeHeight(n) {{
+  const symCount = Math.min((n.symbols || []).length, 4);
+  return NODE_H_BASE + symCount * 16 + (symCount > 0 ? 10 : 0);
+}}
 
 // ── Topology-aware initial placement ─────────────────────────────────────────
 // BFS from sources (indegree=0) assigns each node a "depth layer".
@@ -364,14 +426,13 @@ const nodes = GRAPH.nodes.map(n => ({{
 const nodeIndex = {{}};
 nodes.forEach(n => {{ nodeIndex[n.id] = n; }});
 
-// Two-line card layout: filename top + role/size bottom.
-// Wider and taller than the original to give breathing room and a real subtitle.
+// Expanded card layout: description + symbols + footer.
+// Width fixed at NODE_W; height is dynamic based on symbol count.
 const maxIndegree = Math.max(1, ...nodes.map(n => NODE_METRICS[n.id]?.indegree || 0));
 nodes.forEach(n => {{
   const m = NODE_METRICS[n.id] || {{}};
-  const ratio = (m.indegree || 0) / maxIndegree;
-  n.w = Math.round(170 + ratio * 50); // 170–220px
-  n.h = 56; // tall enough for two lines + padding
+  n.w = NODE_W;
+  n.h = nodeHeight(n); // dynamic: base + symbols
   n.indegree = m.indegree || 0;
   n.outdegree = m.outdegree || 0;
   n.pagerank = m.pagerank || 0;
@@ -526,10 +587,11 @@ function tickSim() {{
     b.fx -= fx; b.fy -= fy;
   }}
 
-  // Cluster gravity — attract nodes to their folder centroid
-  if (showClusters) {{
+  // Cluster gravity — attract nodes to their cluster centroid
+  if (showClusters()) {{
     const CLUSTER_GRAVITY = 0.025;
-    for (const [, ids] of Object.entries(CLUSTERS)) {{
+    const activeClusters = clusterMode === 'role' ? CLUSTERS_BY_ROLE : CLUSTERS;
+    for (const [, ids] of Object.entries(activeClusters)) {{
       const clNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
       if (clNodes.length < 2) continue;
       const cx = clNodes.reduce((s, n) => s + n.x, 0) / clNodes.length;
@@ -609,11 +671,12 @@ const CLUSTER_PALETTE = [
 ];
 
 function drawClusters() {{
-  if (!showClusters) return;
+  if (!showClusters()) return;
 
-  // Prefer the deterministic cluster boxes from layoutClustersAsGrid if available
+  // Prefer the deterministic cluster boxes from layoutClusters if available
   const boxes = window.__clusterBoxes;
   if (boxes && boxes.length > 0) {{
+    const isRole = clusterMode === 'role';
     boxes.forEach((cb, ci) => {{
       const color = CLUSTER_PALETTE[ci % CLUSTER_PALETTE.length];
       ctx.fillStyle = color;
@@ -625,17 +688,29 @@ function drawClusters() {{
 
       // Cluster label — prominent at top of box
       ctx.fillStyle = '#c9d1d9';
-      ctx.font = `bold ${{13 / zoom}}px -apple-system, "SF Mono", monospace`;
+      ctx.font = `bold ${{13 / zoom}}px -apple-system, sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(cb.dir + '/', cb.x + 16, cb.y + 12);
+      // Role mode: natural language label; dir mode: append "/"
+      const displayLabel = isRole ? cb.dir : (cb.dir + '/');
+      ctx.fillText(displayLabel, cb.x + 16, cb.y + 12);
 
-      // File count
+      // File count (or node count)
       ctx.fillStyle = '#6e7681';
       ctx.font = `${{10 / zoom}}px -apple-system, "SF Mono", monospace`;
       const countText = cb.clNodes.length + ' file' + (cb.clNodes.length === 1 ? '' : 's');
-      const labelW = ctx.measureText(cb.dir + '/').width;
+      const labelW = ctx.measureText(displayLabel).width;
       ctx.fillText(countText, cb.x + 16 + labelW + 8, cb.y + 14);
+
+      // Role mode: show hierarchy hint on first and last box
+      if (isRole && boxes.length > 1) {{
+        ctx.fillStyle = 'rgba(139,148,158,0.4)';
+        ctx.font = `${{9 / zoom}}px -apple-system, monospace`;
+        ctx.textAlign = 'right';
+        if (ci === 0) ctx.fillText('\u2191 high-level', cb.x + cb.boxW - 16, cb.y + 13);
+        if (ci === boxes.length - 1) ctx.fillText('\u2193 low-level', cb.x + cb.boxW - 16, cb.y + 13);
+        ctx.textAlign = 'left';
+      }}
     }});
     return;
   }}
@@ -784,30 +859,122 @@ function draw() {{
       ctx.fill();
     }}
 
-    // Two-line card layout:
-    //   Line 1: filename (bold, larger)
-    //   Line 2: role · size · in/out degree (smaller, muted)
+    // 4-section card layout:
+    //   Section 1: description (or label if no description) — primary text
+    //   Divider
+    //   Section 2: symbol list (function/class names, colored by kind)
+    //   Divider
+    //   Section 3: filename · role · size (footer, muted)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
-    // Title (filename) — bold, white
-    ctx.fillStyle = isSelected ? nodeTextColor(n) : '#e6edf3';
-    ctx.font = `bold ${{13 / zoom}}px -apple-system, "SF Mono", monospace`;
-    const maxChars = Math.floor((nw - 14) / 7.5);
-    const label = n.label.length > maxChars ? n.label.slice(0, maxChars - 1) + '\u2026' : n.label;
-    ctx.fillText(label, n.x, n.y - 8);
+    const textColor = isSelected ? nodeTextColor(n) : '#e6edf3';
+    const mutedColor = isSelected ? 'rgba(255,255,255,0.7)' : '#8b949e';
+    const symFnColor  = isSelected ? 'rgba(255,255,255,0.9)' : '#c084fc'; // purple for functions
+    const symClsColor = isSelected ? 'rgba(255,255,255,0.9)' : '#93c5fd'; // blue for classes
+    const divColor    = isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)';
 
-    // Subtitle (role/size/degree) — smaller, muted
-    const sub = nodeSubtitle(n);
-    if (sub) {{
-      ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.85)' : '#8b949e';
-      ctx.font = `${{10 / zoom}}px -apple-system, "SF Mono", monospace`;
-      const subMaxChars = Math.floor((nw - 14) / 6);
-      const subLabel = sub.length > subMaxChars ? sub.slice(0, subMaxChars - 1) + '\u2026' : sub;
-      ctx.fillText(subLabel, n.x, n.y + 10);
+    const padding = 8;
+    const innerW = nw - padding * 2;
+
+    // ── Section 1: description / title ───────────────────────────────────
+    const titleText = n.description || n.label;
+    ctx.fillStyle = textColor;
+    ctx.font = `bold ${{12 / zoom}}px -apple-system, sans-serif`;
+    // Word-wrap to 2 lines at most
+    const maxLineW = innerW - 4;
+    const words = titleText.split(' ');
+    let line1 = '', line2 = '';
+    for (const word of words) {{
+      const test = line1 ? line1 + ' ' + word : word;
+      if (ctx.measureText(test).width <= maxLineW / zoom) {{
+        line1 = test;
+      }} else if (!line2) {{
+        line2 = word;
+      }} else {{
+        const test2 = line2 + ' ' + word;
+        if (ctx.measureText(test2).width <= maxLineW / zoom) {{
+          line2 = test2;
+        }} else {{
+          // Truncate with ellipsis
+          while (line2 && ctx.measureText(line2 + '\u2026').width > maxLineW / zoom) {{
+            line2 = line2.slice(0, -1);
+          }}
+          line2 += '\u2026';
+          break;
+        }}
+      }}
     }}
 
-    // Indegree badge on hub nodes (indegree >= 3) — moved to top-right corner
+    const syms = (n.symbols || []).slice(0, 4);
+    const hasSyms = syms.length > 0;
+    // Vertical layout: title at top, then optionally symbols, then footer
+    // Total height = nodeHeight(n). Distribute vertically.
+    const titleLines = line2 ? 2 : 1;
+    const titleBlockH = titleLines * 14; // px per line at zoom=1
+    const symBlockH = hasSyms ? syms.length * 14 + 8 : 0; // 8 = dividers
+    const footerH = 12;
+    // Top of text content (leave NODE_R gap from border)
+    let curY = y + NODE_R + 6;
+
+    // Title line(s)
+    ctx.fillStyle = textColor;
+    ctx.font = `bold ${{12 / zoom}}px -apple-system, sans-serif`;
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'center';
+    ctx.fillText(line1, n.x, curY);
+    curY += 14 / zoom;
+    if (line2) {{
+      ctx.fillText(line2, n.x, curY);
+      curY += 14 / zoom;
+    }}
+    curY += 4 / zoom;
+
+    if (hasSyms) {{
+      // ── Divider ─────────────────────────────────────────────────────────
+      ctx.strokeStyle = divColor;
+      ctx.lineWidth = 0.5 / zoom;
+      ctx.beginPath();
+      ctx.moveTo(x + padding, curY);
+      ctx.lineTo(x + nw - padding, curY);
+      ctx.stroke();
+      curY += 5 / zoom;
+
+      // ── Section 2: symbol list ───────────────────────────────────────────
+      ctx.textAlign = 'left';
+      ctx.font = `${{10 / zoom}}px "SF Mono", monospace`;
+      for (const s of syms) {{
+        const icon = s.kind === 'function' ? '\u0192 ' : s.kind === 'class' ? '\u25c6 ' : '\u00b7 ';
+        ctx.fillStyle = s.kind === 'function' ? symFnColor : s.kind === 'class' ? symClsColor : mutedColor;
+        const symText = icon + s.name;
+        const maxSymW = Math.floor((innerW - 4) / (7 / zoom));
+        const displaySym = symText.length > maxSymW ? symText.slice(0, maxSymW - 1) + '\u2026' : symText;
+        ctx.fillText(displaySym, x + padding + 2, curY);
+        curY += 13 / zoom;
+      }}
+      curY += 3 / zoom;
+    }}
+
+    // ── Bottom divider + footer ──────────────────────────────────────────
+    ctx.strokeStyle = divColor;
+    ctx.lineWidth = 0.5 / zoom;
+    ctx.beginPath();
+    ctx.moveTo(x + padding, y + nh - 18 / zoom);
+    ctx.lineTo(x + nw - padding, y + nh - 18 / zoom);
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillStyle = mutedColor;
+    ctx.font = `${{9 / zoom}}px "SF Mono", monospace`;
+    const footer = nodeSubtitle(n);
+    if (footer) {{
+      const footerMaxW = Math.floor(innerW / (5.5 / zoom));
+      const footerText = footer.length > footerMaxW ? footer.slice(0, footerMaxW - 1) + '\u2026' : footer;
+      ctx.fillText(footerText, n.x, y + nh - 5 / zoom);
+    }}
+
+    // Indegree badge on hub nodes (indegree >= 3) — top-right corner
     if (!isSelected && n.indegree >= 3) {{
       const badge = String(n.indegree);
       const bx = x + nw - 2, by = y - 2;
@@ -1463,6 +1630,8 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
     cycle_nodes_json = _safe_json(render_data.get("cycle_node_ids", cycle_nodes))
     cycle_edges_json = _safe_json(cycle_edges_list)
     clusters_json = _safe_json(render_data.get("clusters", {}))
+    clusters_by_role_json = _safe_json(render_data.get("clusters_by_role", {}))
+    role_order_json = _safe_json(render_data.get("role_order", []))
     metrics_json = _safe_json(render_data.get("metrics", {}))
     node_metrics_json = _safe_json(render_data.get("node_metrics", {}))
     health_json = _safe_json(render_data.get("health", {}))
@@ -1482,6 +1651,8 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
         cycle_nodes_json=cycle_nodes_json,
         cycle_edges_json=cycle_edges_json,
         clusters_json=clusters_json,
+        clusters_by_role_json=clusters_by_role_json,
+        role_order_json=role_order_json,
         metrics_json=metrics_json,
         node_metrics_json=node_metrics_json,
         health_json=health_json,

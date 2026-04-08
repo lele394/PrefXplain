@@ -122,6 +122,22 @@ class GraphMetadata:
         )
 
 
+ROLE_LABELS: dict[str, str] = {
+    "entry_point": "Entry Points",
+    "api_route":   "API Layer",
+    "data_model":  "Data Models",
+    "utility":     "Utilities",
+    "config":      "Configuration",
+    "test":        "Tests",
+    "other":       "Other",
+}
+
+# Semantic ordering: high-level concepts first, low-level infrastructure last
+ROLE_ORDER: list[str] = [
+    "entry_point", "api_route", "data_model", "utility", "config", "test", "other",
+]
+
+
 @dataclass
 class Graph:
     nodes: list[Node] = field(default_factory=list)
@@ -487,6 +503,15 @@ class Graph:
             clusters[parent].append(node.id)
         return dict(clusters)
 
+    def cluster_by_role(self) -> dict[str, list[str]]:
+        """Group node ids by architectural role, keyed by human-readable label."""
+        clusters: dict[str, list[str]] = defaultdict(list)
+        for node in self.nodes:
+            role = node.role or "other"
+            label = ROLE_LABELS.get(role, "Other")
+            clusters[label].append(node.id)
+        return {k: v for k, v in clusters.items() if v}
+
     # ------------------------------------------------------------------
     # Role inference
     # ------------------------------------------------------------------
@@ -610,6 +635,7 @@ class Graph:
         base = self.to_dict()
 
         clusters = self.cluster_by_directory()
+        clusters_by_role = self.cluster_by_role()
         cycle_edges_list = [list(e) for e in sorted(self.cycle_edges())]
         cycle_node_set = self.cycle_node_ids()
         metrics = self.metrics()
@@ -635,6 +661,8 @@ class Graph:
 
         base.update({
             "clusters": clusters,
+            "clusters_by_role": clusters_by_role,
+            "role_order": ROLE_ORDER,
             "cycle_edges": cycle_edges_list,
             "cycle_node_ids": sorted(cycle_node_set),
             "metrics": metrics,

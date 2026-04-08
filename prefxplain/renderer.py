@@ -301,12 +301,61 @@ resize();
 // ── Force simulation ─────────────────────────────────────────────────────────
 
 const NODE_W = 130, NODE_H = 36, NODE_R = 6;
-const REPULSION = 8000, SPRING_LEN = 180, SPRING_K = 0.04, GRAVITY = 0.015, DAMPING = 0.85;
+const REPULSION = 8000, SPRING_LEN = 240, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
-const nodes = GRAPH.nodes.map((n, i) => ({{
+// ── Topology-aware initial placement ─────────────────────────────────────────
+// BFS from sources (indegree=0) assigns each node a "depth layer".
+// Layer 0 = entry points / test files (nothing imports them).
+// Layer N = core modules (imported by many).
+// Nodes start on a grid organised left→right by layer, so connected nodes
+// begin close together and the simulation has much less work to do.
+(function computeInitialPositions() {{
+  const inDeg = {{}}, adj = {{}};
+  for (const n of GRAPH.nodes) {{ inDeg[n.id] = 0; adj[n.id] = []; }}
+  for (const e of GRAPH.edges) {{
+    if (inDeg[e.target] !== undefined) inDeg[e.target]++;
+    if (adj[e.source]) adj[e.source].push(e.target);
+  }}
+  // BFS — assign layers
+  const layer = {{}};
+  const queue = GRAPH.nodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
+  queue.forEach(id => {{ layer[id] = 0; }});
+  for (let i = 0; i < queue.length; i++) {{
+    const id = queue[i];
+    for (const child of adj[id]) {{
+      if (layer[child] === undefined || layer[child] < layer[id] + 1) {{
+        layer[child] = layer[id] + 1;
+        queue.push(child);
+      }}
+    }}
+  }}
+  // Nodes in cycles never reached — assign to layer 0 with jitter
+  for (const n of GRAPH.nodes) if (layer[n.id] === undefined) layer[n.id] = 0;
+
+  // Group by layer
+  const maxLayer = Math.max(0, ...Object.values(layer));
+  const byLayer = {{}};
+  for (let l = 0; l <= maxLayer; l++) byLayer[l] = [];
+  for (const n of GRAPH.nodes) byLayer[layer[n.id]].push(n.id);
+
+  // Store positions on GRAPH nodes so the map below can read them
+  const cw = Math.max(canvas.width, 800), ch = Math.max(canvas.height, 600);
+  const padX = 120, padY = 80;
+  for (let l = 0; l <= maxLayer; l++) {{
+    const ids = byLayer[l];
+    const lx = maxLayer === 0 ? cw / 2 : padX + (l / maxLayer) * (cw - padX * 2);
+    ids.forEach((id, i) => {{
+      const ly = padY + ((i + 0.5) / ids.length) * (ch - padY * 2);
+      const gn = GRAPH.nodes.find(n => n.id === id);
+      if (gn) {{ gn._ix = lx + (Math.random() - 0.5) * 30; gn._iy = ly + (Math.random() - 0.5) * 30; }}
+    }});
+  }}
+}})();
+
+const nodes = GRAPH.nodes.map(n => ({{
   ...n,
-  x: canvas.width / 2 + (Math.random() - 0.5) * 600,
-  y: canvas.height / 2 + (Math.random() - 0.5) * 400,
+  x: n._ix !== undefined ? n._ix : canvas.width / 2 + (Math.random() - 0.5) * 400,
+  y: n._iy !== undefined ? n._iy : canvas.height / 2 + (Math.random() - 0.5) * 300,
   vx: 0, vy: 0,
   fx: 0, fy: 0,
   pinned: false,
@@ -502,7 +551,7 @@ function tickSim() {{
       const overlapX = minSepX - Math.abs(dx);
       const overlapY = minSepY - Math.abs(dy);
       if (overlapX > 0 && overlapY > 0) {{
-        const push = Math.min(overlapX, overlapY) * 0.55;
+        const push = Math.min(overlapX, overlapY) * 1.1;
         const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
         const fx = push * dx / dist, fy = push * dy / dist;
         a.fx -= fx; a.fy -= fy;
@@ -632,6 +681,29 @@ function draw() {{
   // Cluster backgrounds
   drawClusters();
 
+  // Pre-compute bidirectional pairs once per draw call
+  const edgeKeySet = new Set(GRAPH.edges.map(e => e.source + '|' + e.target));
+
+  function drawArrow(x1, y1, x2, y2, color, lw, arrowSize) {{
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    const tx = x2 - Math.cos(angle) * arrowSize * 0.6;
+    const ty = y2 - Math.sin(angle) * arrowSize * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(tx, ty);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+    // Arrowhead
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(tx + Math.cos(angle) * arrowSize, ty + Math.sin(angle) * arrowSize);
+    ctx.lineTo(tx - arrowSize * Math.cos(angle - 0.42), ty - arrowSize * Math.sin(angle - 0.42));
+    ctx.lineTo(tx - arrowSize * Math.cos(angle + 0.42), ty - arrowSize * Math.sin(angle + 0.42));
+    ctx.closePath();
+    ctx.fill();
+  }}
+
   // Edges
   for (const e of edges) {{
     const a = e.source, b = e.target;
@@ -640,27 +712,32 @@ function draw() {{
 
     const faded = highlightSet && !highlightSet.has(a.id) && !highlightSet.has(b.id);
     const isCycle = isCycleEdge(e);
-    ctx.globalAlpha = faded ? 0.06 : (isCycle ? 0.95 : 0.7);
-    ctx.strokeStyle = isCycle ? '#f85149' : '#4a5568';
-    ctx.lineWidth = (isCycle ? 2.5 : 1.5) / zoom;
+    const isBidi = edgeKeySet.has(b.id + '|' + a.id); // reverse edge also exists?
 
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
+    ctx.globalAlpha = faded ? 0.06 : (isCycle ? 0.95 : 0.75);
 
-    // Arrow head
+    const edgeColor = isCycle ? '#f85149' : '#6b7280';
+    const lw = (isCycle ? 2 : 1.5) / zoom;
+    const as = (isCycle ? 9 : 8) / zoom;
+
     const angle = Math.atan2(b.y - a.y, b.x - a.x);
-    const tx = b.x - Math.cos(angle) * (b.w / 2 + 4);
-    const ty = b.y - Math.sin(angle) * (b.h / 2 + 4);
-    const as = (isCycle ? 9 : 7) / zoom;
-    ctx.fillStyle = isCycle ? '#f85149' : '#30363d';
-    ctx.beginPath();
-    ctx.moveTo(tx, ty);
-    ctx.lineTo(tx - as * Math.cos(angle - 0.4), ty - as * Math.sin(angle - 0.4));
-    ctx.lineTo(tx - as * Math.cos(angle + 0.4), ty - as * Math.sin(angle + 0.4));
-    ctx.closePath();
-    ctx.fill();
+
+    if (isBidi) {{
+      // Offset each direction by 5px perpendicular so both arrows are visible
+      const ox = Math.sin(angle) * 5 / zoom;
+      const oy = -Math.cos(angle) * 5 / zoom;
+      // This direction: A→B (offset to one side)
+      const ax1 = a.x + ox, ay1 = a.y + oy;
+      const bx1 = b.x + ox, by1 = b.y + oy;
+      // Only draw this edge once (the reverse edge will draw the other side)
+      drawArrow(ax1, ay1, bx1, by1, edgeColor, lw, as);
+    }} else {{
+      // Simple unidirectional arrow from center to center
+      const sx = a.x, sy = a.y;
+      const ex = b.x - Math.cos(angle) * (b.w / 2 + 2);
+      const ey = b.y - Math.sin(angle) * (b.h / 2 + 2);
+      drawArrow(sx, sy, ex, ey, edgeColor, lw, as);
+    }}
   }}
 
   ctx.globalAlpha = 1;

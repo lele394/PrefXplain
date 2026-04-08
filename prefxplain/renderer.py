@@ -198,27 +198,14 @@ function setColorMode(mode) {{
   draw();
 }}
 
-// Cycle: off → dir → role → off
+// Toggle between the two cluster views: role ↔ dir
 function toggleClusters() {{
-  if (clusterMode === 'off') clusterMode = 'dir';
-  else if (clusterMode === 'dir') clusterMode = 'role';
-  else clusterMode = 'off';
-
+  clusterMode = (clusterMode === 'role') ? 'dir' : 'role';
   const btn = document.getElementById('btnClusters');
-  if (clusterMode === 'off') {{
-    btn.textContent = 'Clusters';
-    btn.classList.remove('active');
-    // Re-enable physics so user can shake it back
-    simRunning = true;
-    simTicks = 0;
-    for (const n of nodes) n.pinned = false;
-    startAnim();
-  }} else {{
-    btn.textContent = clusterMode === 'dir' ? 'By Directory' : 'By Purpose';
-    btn.classList.add('active');
-    layoutClusters(clusterMode);
-    simRunning = false; // freeze the sim — clusters layout is deterministic
-  }}
+  btn.textContent = clusterMode === 'dir' ? 'By Directory' : 'By Purpose';
+  btn.classList.add('active');
+  layoutClusters(clusterMode);
+  simRunning = false;
   draw();
 }}
 
@@ -339,6 +326,12 @@ function layoutClusters(mode) {{
   pan.y = (canvas.height - layoutH * zoom) / 2 - minY * zoom;
 
   window.__clusterBoxes = clusterBoxes;
+
+  // Build nodeId → clusterBox map for edge routing
+  window.__nodeClusterMap = new Map();
+  for (const cb of clusterBoxes) {{
+    for (const n of cb.clNodes) window.__nodeClusterMap.set(n.id, cb);
+  }}
 }}
 
 // Alias kept for any direct callers
@@ -439,18 +432,29 @@ nodes.forEach(n => {{
   n.inCycle = m.in_cycle || false;
 }});
 
-// Subtitle text for each card: "<role> · <size> · <indegree>↓"
+// Subtitle text for each card footer: "filename · role · size"
 function nodeSubtitle(n) {{
   const parts = [];
-  if (n.role) parts.push(n.role.replace(/_/g, ' '));
-  else if (n.language && n.language !== 'other') parts.push(n.language);
-  if (n.size) {{
-    const kb = (n.size / 1024).toFixed(1);
-    parts.push(kb + ' KB');
-  }}
-  if (n.indegree > 0) parts.push(n.indegree + ' \u2190');
-  if (n.outdegree > 0) parts.push(n.outdegree + ' \u2192');
+  parts.push(n.label); // filename always first in footer
+  if (n.role) parts.push(n.role.replace(/_/g, '\u00a0'));
+  if (n.size) parts.push((n.size / 1024).toFixed(1) + '\u00a0KB');
   return parts.join(' \u00b7 ');
+}}
+
+// Primary title text — natural language preferred over filename
+const _ROLE_HINTS = {{
+  entry_point: 'Program entry', api_route: 'API\u00a0route',
+  data_model: 'Data\u00a0model', utility: 'Helper\u00a0module',
+  config: 'Configuration', test: 'Test\u00a0suite',
+}};
+function nodeTitleText(n) {{
+  if (n.description) return n.description;
+  // No description: build something meaningful from role + symbol names
+  const roleHint = _ROLE_HINTS[n.role] || 'Module';
+  const topSyms = (n.symbols || [])
+    .filter(s => s.kind === 'function' || s.kind === 'class')
+    .slice(0, 3).map(s => s.name).join(', ');
+  return topSyms ? roleHint + ': ' + topSyms : roleHint;
 }}
 
 const edges = GRAPH.edges.map(e => ({{
@@ -781,6 +785,18 @@ function draw() {{
   // Pre-compute bidirectional pairs once per draw call
   const edgeKeySet = new Set(GRAPH.edges.map(e => e.source + '|' + e.target));
 
+  // Draw arrowhead at (x2,y2) arriving from direction (x1,y1)
+  function drawArrowHead(x1, y1, x2, y2, color, arrowSize) {{
+    const angle = Math.atan2(y2 - y1, x2 - x1);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x2, y2);
+    ctx.lineTo(x2 - arrowSize * Math.cos(angle - 0.42), y2 - arrowSize * Math.sin(angle - 0.42));
+    ctx.lineTo(x2 - arrowSize * Math.cos(angle + 0.42), y2 - arrowSize * Math.sin(angle + 0.42));
+    ctx.closePath();
+    ctx.fill();
+  }}
+
   function drawArrow(x1, y1, x2, y2, color, lw, arrowSize) {{
     const angle = Math.atan2(y2 - y1, x2 - x1);
     const tx = x2 - Math.cos(angle) * arrowSize * 0.6;
@@ -791,15 +807,32 @@ function draw() {{
     ctx.strokeStyle = color;
     ctx.lineWidth = lw;
     ctx.stroke();
-    // Arrowhead
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(tx + Math.cos(angle) * arrowSize, ty + Math.sin(angle) * arrowSize);
-    ctx.lineTo(tx - arrowSize * Math.cos(angle - 0.42), ty - arrowSize * Math.sin(angle - 0.42));
-    ctx.lineTo(tx - arrowSize * Math.cos(angle + 0.42), ty - arrowSize * Math.sin(angle + 0.42));
-    ctx.closePath();
-    ctx.fill();
+    drawArrowHead(x1, y1, x2, y2, color, arrowSize);
   }}
+
+  // Route an edge as a bezier curve that exits LEFT from source, travels down
+  // the left margin, then enters LEFT into target — avoiding intermediate bands.
+  function drawRoutedEdge(a, b, color, lw, arrowSize) {{
+    const boxes = window.__clusterBoxes || [];
+    const marginX = (boxes.length > 0 ? boxes[0].x - 45 : 20);
+    const sx = a.x - a.w / 2; // exit from left edge of source
+    const sy = a.y;
+    const ex = b.x - b.w / 2; // enter from left edge of target
+    const ey = b.y;
+    // Bezier: horizontal exit → margin → margin → horizontal entry
+    const cp1x = marginX, cp1y = sy;
+    const cp2x = marginX, cp2y = ey;
+    const endX = ex - arrowSize * 0.6; // leave room for arrowhead
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, endX, ey);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+    drawArrowHead(cp2x, cp2y, ex, ey, color, arrowSize);
+  }}
+
+  const nodeClusterMap = window.__nodeClusterMap;
 
   // Edges
   for (const e of edges) {{
@@ -809,7 +842,7 @@ function draw() {{
 
     const faded = highlightSet && !highlightSet.has(a.id) && !highlightSet.has(b.id);
     const isCycle = isCycleEdge(e);
-    const isBidi = edgeKeySet.has(b.id + '|' + a.id); // reverse edge also exists?
+    const isBidi = edgeKeySet.has(b.id + '|' + a.id);
 
     ctx.globalAlpha = faded ? 0.06 : (isCycle ? 0.95 : 0.75);
 
@@ -817,23 +850,26 @@ function draw() {{
     const lw = (isCycle ? 2 : 1.5) / zoom;
     const as = (isCycle ? 9 : 8) / zoom;
 
-    const angle = Math.atan2(b.y - a.y, b.x - a.x);
+    // In role cluster mode: route inter-band edges via left margin
+    if (clusterMode === 'role' && nodeClusterMap) {{
+      const aBox = nodeClusterMap.get(a.id);
+      const bBox = nodeClusterMap.get(b.id);
+      if (aBox && bBox && aBox !== bBox) {{
+        // Different cluster bands — route around them
+        drawRoutedEdge(a, b, edgeColor, lw, as);
+        continue;
+      }}
+    }}
 
+    const angle = Math.atan2(b.y - a.y, b.x - a.x);
     if (isBidi) {{
-      // Offset each direction by 5px perpendicular so both arrows are visible
       const ox = Math.sin(angle) * 5 / zoom;
       const oy = -Math.cos(angle) * 5 / zoom;
-      // This direction: A→B (offset to one side)
-      const ax1 = a.x + ox, ay1 = a.y + oy;
-      const bx1 = b.x + ox, by1 = b.y + oy;
-      // Only draw this edge once (the reverse edge will draw the other side)
-      drawArrow(ax1, ay1, bx1, by1, edgeColor, lw, as);
+      drawArrow(a.x + ox, a.y + oy, b.x + ox, b.y + oy, edgeColor, lw, as);
     }} else {{
-      // Simple unidirectional arrow from center to center
-      const sx = a.x, sy = a.y;
       const ex = b.x - Math.cos(angle) * (b.w / 2 + 2);
       const ey = b.y - Math.sin(angle) * (b.h / 2 + 2);
-      drawArrow(sx, sy, ex, ey, edgeColor, lw, as);
+      drawArrow(a.x, a.y, ex, ey, edgeColor, lw, as);
     }}
   }}
 
@@ -900,7 +936,7 @@ function draw() {{
     const innerW = nw - padding * 2;
 
     // ── Section 1: description / title ───────────────────────────────────
-    const titleText = n.description || n.label;
+    const titleText = nodeTitleText(n);
     ctx.fillStyle = textColor;
     ctx.font = `bold ${{12 / zoom}}px -apple-system, sans-serif`;
     // Word-wrap to 2 lines at most

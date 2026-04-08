@@ -283,6 +283,62 @@ def check_cmd(
         raise typer.Exit(1)
 
 
+@app.command(name="context")
+def context_cmd(
+    query: str = typer.Argument(..., help="Search term — file name, path, or concept"),
+    root: Path = typer.Argument(
+        Path("."),
+        help="Repository root. Defaults to current directory.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+    ),
+    depth: int = typer.Option(2, "--depth", "-d", help="BFS hops around matching files"),
+    tokens: int = typer.Option(2000, "--tokens", "-t", help="Approximate token budget for output"),
+    from_json: Optional[Path] = typer.Option(
+        None,
+        "--from",
+        help="Load from prefxplain.json (default: <root>/prefxplain.json).",
+    ),
+    max_files: int = typer.Option(500, "--max-files"),
+) -> None:
+    """Output token-efficient context for AI agents. Loads from prefxplain.json when available."""
+    from .exporter import export_agent_context
+
+    json_path = from_json or (root / "prefxplain.json")
+    if json_path.exists():
+        from .graph import Graph as _Graph
+        graph = _Graph.load(json_path)
+    else:
+        console.print("[yellow]prefxplain.json not found — analyzing from source...[/yellow]")
+        graph = analyze(root, max_files=max_files)
+        graph.infer_roles()
+
+    print(export_agent_context(graph, query, depth=depth, token_budget=tokens))
+
+
+@app.command(name="mcp")
+def mcp_cmd(
+    root: Path = typer.Argument(
+        Path("."),
+        help="Repository root. Defaults to current directory.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+    ),
+    from_json: Optional[Path] = typer.Option(
+        None,
+        "--from",
+        help="Load from prefxplain.json (default: <root>/prefxplain.json).",
+    ),
+) -> None:
+    """Start MCP stdio server for AI agent integration. Requires: pip install 'prefxplain[agent]'"""
+    from .mcp_server import serve
+    serve(root, from_json)
+
+
 def _run(
     root: Path,
     output: Optional[Path],
@@ -446,7 +502,7 @@ def entry_point() -> None:
     `prefxplain create .`.
     """
     args = sys.argv[1:]
-    subcommands = {"create", "update", "check", "--help", "-h", "--version", "-v"}
+    subcommands = {"create", "update", "check", "context", "mcp", "--help", "-h", "--version", "-v"}
     if args and args[0] not in subcommands:
         sys.argv.insert(1, "create")
     app()

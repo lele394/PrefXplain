@@ -78,3 +78,37 @@ class TestRenderer:
         html = render(graph)
         assert "a.py" in html
         assert "b.py" in html
+
+    def test_embedded_js_is_syntactically_valid(self, tmp_path: Path) -> None:
+        """Catch Python-template bugs that produce malformed JS in the output.
+
+        We had a bug where '\\n' in the f-string template got rendered as a
+        literal newline inside a JS string, breaking the whole script. This
+        test syntax-checks the embedded <script> with node if available.
+        """
+        import re
+        import shutil
+        import subprocess
+
+        if not shutil.which("node"):
+            pytest.skip("node not installed — skipping JS syntax check")
+
+        (tmp_path / "a.py").write_text(
+            'def helper():\n'
+            '    """A docstring with quotes \'mixed\' and special <chars>."""\n'
+            '    return 42\n'
+        )
+        graph = analyze(tmp_path)
+        html = render(graph)
+
+        match = re.search(r"<script>(.*?)</script>", html, re.DOTALL)
+        assert match is not None, "rendered HTML missing <script> tag"
+        js_path = tmp_path / "embedded.js"
+        js_path.write_text(match.group(1))
+
+        result = subprocess.run(
+            ["node", "--check", str(js_path)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"embedded JS syntax error:\n{result.stderr}"

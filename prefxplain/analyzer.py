@@ -53,6 +53,31 @@ def _language(path: Path) -> str:
     return "other"
 
 
+def _read_preview(path: Path, max_lines: int = 50, max_bytes: int = 3000) -> str:
+    """Read the first N lines of a file for the sidebar code preview.
+
+    Capped by both line count and byte count so we don't blow up the JSON
+    payload on large files. Returns an empty string on read errors.
+    """
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fp:
+            lines: list[str] = []
+            total_bytes = 0
+            for i, line in enumerate(fp):
+                if i >= max_lines:
+                    break
+                # Truncate over-long lines (e.g. minified JS)
+                if len(line) > 200:
+                    line = line[:200] + "…\n"
+                lines.append(line)
+                total_bytes += len(line)
+                if total_bytes >= max_bytes:
+                    break
+            return "".join(lines).rstrip()
+    except OSError:
+        return ""
+
+
 # ---------------------------------------------------------------------------
 # Python analysis
 # ---------------------------------------------------------------------------
@@ -498,6 +523,10 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
         except OSError:
             size = 0
 
+        # Read first 50 lines for the sidebar code preview.
+        # Capped at ~3KB per file to keep the JSON payload reasonable.
+        preview = _read_preview(fpath, max_lines=50, max_bytes=3000)
+
         node = Node(
             id=rel,
             label=fpath.name,
@@ -505,6 +534,7 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
             symbols=symbols,
             language=lang,
             size=size,
+            preview=preview,
         )
         graph.nodes.append(node)
         node_ids.add(rel)

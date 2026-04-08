@@ -30,12 +30,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+agent = ["mcp>=1.0"]
 llm = ["openai>=1.0"]
 dev = [
     "pytest>=7",
     "pytest-cov",
     "ruff",
     "openai>=1.0",
+    "mcp>=1.0",
 ]
 
 [project.urls]

@@ -133,3 +133,63 @@ def export_dot(graph: Graph) -> str:
 
     lines.append("}")
     return "\n".join(lines) + "\n"
+
+
+def export_agent_context(
+    graph: Graph,
+    query: str,
+    depth: int = 2,
+    token_budget: int = 2000,
+) -> str:
+    """Token-efficient context dump for AI agents.
+
+    BFS around files matching query, serialized as plain text within a token budget.
+    Inspired by graphify's serve.py subgraph_to_text pattern (MIT license).
+    """
+    q = query.lower()
+    seeds = [
+        n.id for n in graph.nodes
+        if q in n.id.lower() or q in n.label.lower() or q in n.description.lower()
+    ]
+    if not seeds:
+        return f"# No files matching '{query}'\n"
+
+    # Merge subgraphs from each seed (cap at 5 to avoid context explosion)
+    visited_ids: set[str] = set()
+    edge_pairs: set[tuple[str, str]] = set()
+    node_map = {n.id: n for n in graph.nodes}
+
+    for seed in seeds[:5]:
+        sub = graph.depth_subgraph(seed, depth)  # reuses existing BFS impl
+        for n in sub.nodes:
+            visited_ids.add(n.id)
+        for e in sub.edges:
+            edge_pairs.add((e.source, e.target))
+
+    # Sort by indegree desc — most-imported files first (highest signal)
+    sorted_ids = sorted(visited_ids, key=lambda nid: graph.indegree(nid), reverse=True)
+
+    char_budget = token_budget * 4  # ~4 chars/token approximation
+    lines: list[str] = [f"# Context: '{query}' — {len(visited_ids)} files, depth {depth}\n"]
+
+    for nid in sorted_ids:
+        n = node_map.get(nid)
+        if not n:
+            continue
+        role_tag = f" role={n.role}" if n.role else ""
+        lines.append(f"FILE {n.id} [{n.language}{role_tag}]")
+        if n.description:
+            lines.append(f"  > {n.description}")
+        if n.symbols:
+            syms = ", ".join(f"{s.name}({s.kind[0]})" for s in n.symbols[:10])
+            lines.append(f"  exports: {syms}")
+
+    if edge_pairs:
+        lines.append("")
+        for src, tgt in sorted(edge_pairs):
+            lines.append(f"IMPORT {src} -> {tgt}")
+
+    output = "\n".join(lines)
+    if len(output) > char_budget:
+        output = output[:char_budget] + f"\n... [truncated — budget ~{token_budget} tokens]\n"
+    return output

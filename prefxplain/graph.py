@@ -38,6 +38,7 @@ class Node:
     language: str = ""
     size: int = 0    # file size in bytes
     role: str = ""   # architectural role: entry_point, utility, data_model, etc.
+    preview: str = ""  # first ~50 lines of the file content (for sidebar code panel)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -50,6 +51,8 @@ class Node:
         }
         if self.role:
             d["role"] = self.role
+        if self.preview:
+            d["preview"] = self.preview
         return d
 
     @classmethod
@@ -62,6 +65,7 @@ class Node:
             language=d.get("language", ""),
             size=d.get("size", 0),
             role=d.get("role", ""),
+            preview=d.get("preview", ""),
         )
 
 

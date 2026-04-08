@@ -32,17 +32,31 @@ Be specific about what the file provides to other parts of the codebase.
 Do not repeat the filename. Do not start with "This file". Write in present tense.
 """
 
+SYSTEM_PROMPT_DETAIL = """\
+You are a senior software engineer writing thorough documentation.
+Given a source file's path, its top-level symbols, and a few lines of content,
+write a detailed paragraph (4-6 sentences) describing:
+1. What this file does and its primary responsibility
+2. Key functions/classes and what they provide
+3. How it fits into the broader system architecture
+4. Any notable patterns, dependencies, or design decisions
+Be specific. Do not repeat the filename. Write in present tense.
+"""
+
 USER_PROMPT_TEMPLATE = """\
 File: {file_path}
 Language: {language}
 Symbols: {symbols}
 
-First 60 lines:
+First {preview_lines} lines:
 ```
 {preview}
 ```
 
-Describe what this file does in 1-2 sentences."""
+Describe what this file does in {length_instruction}."""
+
+_BRIEF_INSTRUCTION = "1-2 sentences"
+_DETAIL_INSTRUCTION = "a detailed paragraph (4-6 sentences)"
 
 
 def _init_cache() -> sqlite3.Connection:
@@ -86,20 +100,25 @@ def _set_cached(conn: sqlite3.Connection, file_path: str, content_hash: str, des
 def _file_preview(root: Path, node: Node, lines: int = 60) -> str:
     fpath = root / node.id
     try:
+        if not fpath.resolve().is_relative_to(root.resolve()):
+            return ""  # path traversal attempt
         text = fpath.read_text(encoding="utf-8", errors="ignore")
         return "\n".join(text.splitlines()[:lines])
     except OSError:
         return ""
 
 
-def _make_prompt(node: Node, root: Path) -> str:
+def _make_prompt(node: Node, root: Path, detail: bool = False) -> str:
     symbols = ", ".join(s.name for s in node.symbols[:20]) or "none"
-    preview = _file_preview(root, node)
+    preview_lines = 120 if detail else 60
+    preview = _file_preview(root, node, lines=preview_lines)
     return USER_PROMPT_TEMPLATE.format(
         file_path=node.id,
         language=node.language,
         symbols=symbols,
         preview=preview,
+        preview_lines=preview_lines,
+        length_instruction=_DETAIL_INSTRUCTION if detail else _BRIEF_INSTRUCTION,
     )
 
 
@@ -110,6 +129,7 @@ def describe(
     api_base: str | None = None,
     model: str = "gpt-4o-mini",
     force: bool = False,
+    detail: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> Graph:
     """Fill in descriptions for all nodes that don't have one yet.
@@ -123,6 +143,7 @@ def describe(
         api_base: Optional custom API base URL (for Ollama, Groq, etc.).
         model: LLM model name.
         force: Re-generate all descriptions, ignoring cache.
+        detail: If True, generate paragraph-length descriptions instead of 1-2 sentences.
         progress_callback: Called with (current, total) for custom progress reporting.
 
     Returns:
@@ -149,7 +170,30 @@ def describe(
         console.print("[yellow]Skipping descriptions. Set OPENAI_API_KEY or use --no-descriptions.[/yellow]")
         return graph
 
+    system_prompt = SYSTEM_PROMPT_DETAIL if detail else SYSTEM_PROMPT
+    max_tokens = 400 if detail else 150
+
     conn = _init_cache()
+    try:
+        return _describe_with_conn(
+            conn, graph, root, client, system_prompt, max_tokens, model, force, detail, progress_callback,
+        )
+    finally:
+        conn.close()
+
+
+def _describe_with_conn(
+    conn: sqlite3.Connection,
+    graph: Graph,
+    root: Path,
+    client: object,
+    system_prompt: str,
+    max_tokens: int,
+    model: str,
+    force: bool,
+    detail: bool,
+    progress_callback: Callable[[int, int], None] | None,
+) -> Graph:
     nodes_to_describe = [n for n in graph.nodes if not n.description or force]
     total = len(nodes_to_describe)
 
@@ -170,9 +214,10 @@ def describe(
             fpath = root / node.id
             content_hash = _content_hash(fpath)
 
-            # Check cache first
+            # Check cache first (detail descriptions use a different key suffix)
+            cache_key = f"{node.id}:detail" if detail else node.id
             if not force and content_hash:
-                cached = _get_cached(conn, node.id, content_hash)
+                cached = _get_cached(conn, cache_key, content_hash)
                 if cached:
                     node.description = cached
                     progress.advance(task)
@@ -185,13 +230,14 @@ def describe(
                 response = client.chat.completions.create(
                     model=model,
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": _make_prompt(node, root)},
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": _make_prompt(node, root, detail=detail)},
                     ],
-                    max_tokens=150,
+                    max_tokens=max_tokens,
                     temperature=0.3,
                 )
-                description = response.choices[0].message.content.strip()
+                content = response.choices[0].message.content if response.choices else None
+                description = content.strip() if content else ""
             except Exception as e:
                 console.print(f"[yellow]  Warning: LLM failed for {node.id}: {e}[/yellow]")
                 description = ""
@@ -199,11 +245,10 @@ def describe(
             node.description = description
 
             if content_hash and description:
-                _set_cached(conn, node.id, content_hash, description)
+                _set_cached(conn, cache_key, content_hash, description)
 
             progress.advance(task)
             if progress_callback:
                 progress_callback(i + 1, total)
 
-    conn.close()
     return graph

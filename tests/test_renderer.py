@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from prefxplain.analyzer import analyze
-from prefxplain.graph import Graph, Node, Edge, GraphMetadata
+from prefxplain.graph import Edge, Graph, GraphMetadata, Node
 from prefxplain.renderer import render
 
 

@@ -5,13 +5,16 @@ Usage:
     prefxplain /path/to/repo            # analyze a specific repo
     prefxplain . --output graph.html    # write to custom path
     prefxplain . --no-descriptions      # skip LLM step (fast, offline)
-    prefxplain update                   # re-analyze changed files only
+    prefxplain . --format matrix        # dependency matrix view
+    prefxplain . --format mermaid       # Mermaid export
+    prefxplain . --filter "src/**"      # only show files matching pattern
+    prefxplain . --depth 2 --focus main.py  # 2 hops around main.py
+    prefxplain . --check-cycles         # exit 1 if circular deps found
+    prefxplain check                    # CI rule enforcement
 """
 
 from __future__ import annotations
 
-import os
-import subprocess
 import sys
 import webbrowser
 from pathlib import Path
@@ -25,8 +28,7 @@ from rich.text import Text
 from . import __version__
 from .analyzer import analyze
 from .describer import describe
-from .graph import Graph
-from .renderer import render
+from .renderer import render, render_matrix
 
 app = typer.Typer(
     name="prefxplain",
@@ -112,6 +114,36 @@ def create(
         "-f",
         help="Re-generate all LLM descriptions, ignoring cache.",
     ),
+    detail: bool = typer.Option(
+        False,
+        "--detail",
+        help="Generate paragraph-length descriptions instead of 1-2 sentences.",
+    ),
+    output_format: str = typer.Option(
+        "html",
+        "--format",
+        help="Output format: html, matrix, mermaid, dot.",
+    ),
+    filter_pattern: Optional[str] = typer.Option(
+        None,
+        "--filter",
+        help="Only include files matching this glob pattern (e.g. 'src/**/*.py').",
+    ),
+    focus: Optional[str] = typer.Option(
+        None,
+        "--focus",
+        help="Focus on this file (used with --depth).",
+    ),
+    depth: Optional[int] = typer.Option(
+        None,
+        "--depth",
+        help="Only show files within N hops of --focus file.",
+    ),
+    check_cycles: bool = typer.Option(
+        False,
+        "--check-cycles",
+        help="Exit with code 1 if circular dependencies are found.",
+    ),
 ) -> None:
     """Analyze a codebase and generate an interactive HTML dependency graph."""
     _run(
@@ -124,7 +156,12 @@ def create(
         max_files=max_files,
         open_browser=open_browser,
         force=force,
-        update_only=False,
+        detail=detail,
+        output_format=output_format,
+        filter_pattern=filter_pattern,
+        focus=focus,
+        depth=depth,
+        check_cycles=check_cycles,
     )
 
 
@@ -173,7 +210,11 @@ def update(
         help="Open the generated HTML in your browser after update.",
     ),
 ) -> None:
-    """Re-analyze the codebase, updating only changed files (uses cache)."""
+    """Re-analyze the codebase. Same as `create` but defaults to not opening the browser.
+
+    Re-analysis is fast: the SQLite cache in describer.py only re-generates
+    descriptions for files whose content hash changed since the last run.
+    """
     _run(
         root=root,
         output=output,
@@ -184,8 +225,62 @@ def update(
         max_files=max_files,
         open_browser=open_browser,
         force=False,
-        update_only=True,
+        detail=False,
+        output_format="html",
+        filter_pattern=None,
+        focus=None,
+        depth=None,
+        check_cycles=False,
     )
+
+
+@app.command(name="check")
+def check_cmd(
+    root: Path = typer.Argument(
+        Path("."),
+        help="Repository root to check.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+    ),
+    config: Path = typer.Option(
+        None,
+        "--config",
+        "-c",
+        help="Path to .prefxplain.yml config. Defaults to <root>/.prefxplain.yml.",
+    ),
+    max_files: int = typer.Option(
+        500,
+        "--max-files",
+    ),
+) -> None:
+    """Check dependency rules (CI enforcement). Exits 1 on violations."""
+    from .checker import check, format_violations, load_rules
+
+    config_path = config or (root / ".prefxplain.yml")
+    if not config_path.exists():
+        console.print(f"[red]Config not found: {config_path}[/red]")
+        console.print("Create a .prefxplain.yml with rules. Example:")
+        console.print("[dim]rules:[/dim]")
+        console.print("[dim]  - name: no-circular-deps[/dim]")
+        console.print("[dim]  - name: max-imports[/dim]")
+        console.print("[dim]    max: 10[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold]PrefXplain Check[/bold] — {root}")
+    rules = load_rules(config_path)
+    console.print(f"  Loaded {len(rules)} rule(s) from {config_path.name}")
+
+    graph = analyze(root, max_files=max_files)
+    console.print(f"  Analyzed {len(graph.nodes)} files, {len(graph.edges)} edges")
+
+    violations = check(graph, rules)
+    console.print(format_violations(violations))
+
+    errors = [v for v in violations if v.severity == "error"]
+    if errors:
+        raise typer.Exit(1)
 
 
 def _run(
@@ -198,10 +293,27 @@ def _run(
     max_files: int,
     open_browser: bool,
     force: bool,
-    update_only: bool,
+    detail: bool,
+    output_format: str,
+    filter_pattern: Optional[str],
+    focus: Optional[str],
+    depth: Optional[int],
+    check_cycles: bool,
 ) -> None:
-    """Shared implementation for create and update commands."""
-    output_path = output or (root / "prefxplain.html")
+    """Shared implementation for create and update commands.
+
+    Both commands run the full pipeline: analyze, describe, render. Re-runs are
+    fast because describer.py caches by (file_path, content_hash) in SQLite.
+    """
+    fmt = output_format.lower()
+    default_ext = {
+        "html": ".html",
+        "matrix": ".html",
+        "mermaid": ".md",
+        "dot": ".dot",
+    }
+    ext = default_ext.get(fmt, ".html")
+    output_path = output or (root / f"prefxplain{ext}")
 
     console.print(
         Panel(
@@ -217,14 +329,61 @@ def _run(
     console.print("[bold blue]1/3[/bold blue] Parsing files and extracting imports...")
     graph = analyze(root, max_files=max_files)
 
+    # Apply filter
+    if filter_pattern:
+        graph = graph.filter_subgraph(filter_pattern)
+        console.print(f"    [dim]Filtered to {len(graph.nodes)} files matching '{filter_pattern}'[/dim]")
+
+    # Apply depth focus
+    if focus and depth is not None:
+        graph = graph.depth_subgraph(focus, depth)
+        console.print(f"    [dim]Focused on {len(graph.nodes)} files within {depth} hops of '{focus}'[/dim]")
+    elif focus and depth is None:
+        console.print("[yellow]    \u26a0 --focus requires --depth. Ignoring --focus.[/yellow]")
+
+    # Infer architectural roles
+    graph.infer_roles()
+
     console.print(
-        f"    [green]✓[/green] Found {len(graph.nodes)} files, {len(graph.edges)} import edges"
+        f"    [green]\u2713[/green] Found {len(graph.nodes)} files, {len(graph.edges)} import edges"
         f" ({', '.join(graph.metadata.languages or ['?'])})"
     )
 
+    # Report cycles
+    cycles = graph.find_cycles()
+    if cycles:
+        console.print(
+            f"    [yellow]\u26a0[/yellow] {len(cycles)} circular dependency chain(s) detected"
+        )
+        for cycle in cycles[:3]:
+            chain = " \u2192 ".join(cycle) + " \u2192 " + cycle[0]
+            console.print(f"      [dim]{chain}[/dim]")
+        if len(cycles) > 3:
+            console.print(f"      [dim]+{len(cycles) - 3} more[/dim]")
+
     # Step 2: LLM descriptions
-    if no_descriptions:
-        console.print("[bold blue]2/3[/bold blue] Skipping descriptions (--no-descriptions)")
+    if no_descriptions or fmt in ("mermaid", "dot"):
+        console.print("[bold blue]2/3[/bold blue] Skipping descriptions")
+        # Preserve descriptions from a previous run so --no-descriptions doesn't
+        # silently wipe them when the output json already exists.
+        prior_json_path = (output or (root / f"prefxplain{ext}")).with_suffix(".json")
+        if prior_json_path.exists():
+            try:
+                from .graph import Graph as _Graph
+
+                prior_graph = _Graph.load(prior_json_path)
+                prior_descs = {n.id: n.description for n in prior_graph.nodes if n.description}
+                preserved = 0
+                for node in graph.nodes:
+                    if node.id in prior_descs:
+                        node.description = prior_descs[node.id]
+                        preserved += 1
+                if preserved:
+                    console.print(
+                        f"    [dim]Preserved {preserved} description(s) from previous run[/dim]"
+                    )
+            except Exception:  # noqa: BLE001 — graceful degradation
+                pass
     else:
         console.print("[bold blue]2/3[/bold blue] Generating natural language descriptions...")
         graph = describe(
@@ -234,59 +393,61 @@ def _run(
             api_base=api_base,
             model=model,
             force=force,
+            detail=detail,
         )
 
-    # Step 3: Render HTML
-    console.print("[bold blue]3/3[/bold blue] Rendering interactive graph...")
-    render(graph, output_path=output_path)
-    console.print(f"    [green]✓[/green] Written to [cyan]{output_path}[/cyan]")
+    # Step 3: Render output
+    console.print(f"[bold blue]3/3[/bold blue] Rendering {fmt} output...")
 
-    # Also save graph.json alongside the HTML for programmatic access
+    if fmt == "matrix":
+        render_matrix(graph, output_path=output_path)
+    elif fmt == "mermaid":
+        from .exporter import export_mermaid
+        mermaid_str = export_mermaid(graph)
+        content = f"```mermaid\n{mermaid_str}```\n"
+        output_path.write_text(content, encoding="utf-8")
+    elif fmt == "dot":
+        from .exporter import export_dot
+        dot_str = export_dot(graph)
+        output_path.write_text(dot_str, encoding="utf-8")
+    else:
+        render(graph, output_path=output_path)
+
+    console.print(f"    [green]\u2713[/green] Written to [cyan]{output_path}[/cyan]")
+
+    # Save graph.json alongside for programmatic access
     json_path = output_path.with_suffix(".json")
     graph.save(json_path)
-    console.print(f"    [green]✓[/green] Graph data at [cyan]{json_path}[/cyan]")
+    console.print(f"    [green]\u2713[/green] Graph data at [cyan]{json_path}[/cyan]")
 
+    # Print metrics summary
+    metrics = graph.metrics()
     console.print()
-    console.print(f"[bold green]Done![/bold green] {len(graph.nodes)} files mapped.")
+    console.print(
+        f"[bold green]Done![/bold green] {metrics['total_files']} files, "
+        f"{metrics['total_edges']} edges, "
+        f"{metrics['components']} component(s), "
+        f"{metrics['cycles']} cycle(s)"
+    )
 
-    if open_browser:
+    if open_browser and fmt in ("html", "matrix"):
         webbrowser.open(f"file://{output_path.resolve()}")
 
-
-# Allow `prefxplain .` (no subcommand) as shorthand for `prefxplain create .`
-@app.command(name="map", hidden=True)
-def map_cmd(
-    root: Path = typer.Argument(Path(".")),
-    output: Optional[Path] = typer.Option(None, "--output", "-o"),
-    no_descriptions: bool = typer.Option(False, "--no-descriptions"),
-    api_key: Optional[str] = typer.Option(None, "--api-key", envvar="OPENAI_API_KEY"),
-    api_base: Optional[str] = typer.Option(None, "--api-base"),
-    model: str = typer.Option("gpt-4o-mini", "--model"),
-    max_files: int = typer.Option(500, "--max-files"),
-    open_browser: bool = typer.Option(True, "--open/--no-open"),
-    force: bool = typer.Option(False, "--force", "-f"),
-) -> None:
-    """Alias for create (hidden)."""
-    create(
-        root=root,
-        output=output,
-        no_descriptions=no_descriptions,
-        api_key=api_key,
-        api_base=api_base,
-        model=model,
-        max_files=max_files,
-        open_browser=open_browser,
-        force=force,
-    )
+    if check_cycles and cycles:
+        console.print(f"\n[red bold]FAIL:[/red bold] {len(cycles)} circular dependency chain(s) found.")
+        raise typer.Exit(1)
 
 
 def entry_point() -> None:
-    """Entry point that handles bare `prefxplain <path>` without a subcommand."""
-    # If first arg looks like a path or is missing, route to `create`
+    """Entry point that handles bare `prefxplain <path>` without a subcommand.
+
+    If the first arg looks like a path or is missing, prepend `create` so typer
+    routes correctly. This makes `prefxplain .` work as shorthand for
+    `prefxplain create .`.
+    """
     args = sys.argv[1:]
-    subcommands = {"create", "update", "map", "--help", "-h", "--version", "-v"}
+    subcommands = {"create", "update", "check", "--help", "-h", "--version", "-v"}
     if args and args[0] not in subcommands:
-        # Prepend "create" so typer routes correctly
         sys.argv.insert(1, "create")
     app()
 

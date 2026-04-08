@@ -40,3 +40,4 @@ prefxplain.json
 # Distribution / packaging
 *.tar.gz
 *.zip
+.gstack/

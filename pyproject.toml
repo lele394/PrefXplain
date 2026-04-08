@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefxplain"
-version = "0.1.0"
-description = "Understand your codebase. Visual dependency maps + natural language descriptions."
+version = "0.2.0"
+description = "Self-documenting architecture diagrams. Dependency graphs + AI descriptions + cycle detection."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "PrefXplain Contributors" }]
-keywords = ["codebase", "visualization", "dependency-graph", "claude", "ai"]
+keywords = ["codebase", "visualization", "dependency-graph", "claude", "ai", "cycle-detection", "architecture"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -39,8 +39,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/prefxplain"
-Repository = "https://github.com/your-org/prefxplain"
+Homepage = "https://github.com/remi-ajr/prefxplain"
+Repository = "https://github.com/remi-ajr/prefxplain"
 
 [project.scripts]
 prefxplain = "prefxplain.cli:entry_point"
@@ -55,8 +55,8 @@ target-version = "py39"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
-ignore = ["E501"]
+ignore = ["E501", "UP045"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--tb=short"
+addopts = "--tb=short --cov=prefxplain --cov-report=term-missing"

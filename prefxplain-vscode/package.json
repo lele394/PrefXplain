@@ -1,0 +1,33 @@
+{
+  "name": "prefxplain-vscode",
+  "displayName": "PrefXplain Preview",
+  "description": "Opens prefxplain.html in a clean webview tab with no toolbar, no URL bar, and auto-refresh on file change.",
+  "publisher": "prefxplain",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": ["Other"],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:prefxplain.preview",
+    "onUri"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "prefxplain.preview",
+        "title": "PrefXplain: Preview diagram"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.80.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

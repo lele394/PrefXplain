@@ -1,129 +1,146 @@
 # PrefXplain
 
-Understand your codebase. Visual dependency maps + natural language descriptions.
+**Explain your codebase in 30 seconds.** Architecture diagrams that actually tell a story.
 
-PrefXplain parses your source code, extracts import relationships, generates AI-powered file descriptions, and renders an interactive dependency graph as a self-contained HTML file.
+PrefXplain generates interactive architecture maps from your source code. Each file gets a plain-English description, a role label, and a position in a layered diagram that shows how everything connects. The output is a single HTML file you can share with your team, your manager, your investors, or drop into a pitch deck.
 
-## What it does
+Built for two audiences: **developers** who need to understand and present code they didn't write (or wrote with AI), and **founders** who need to explain their technical architecture to non-technical stakeholders.
 
-1. **Static analysis** - walks Python and JS/TS files, extracts symbols and import edges (supports `tsconfig.json` path aliases like `@/`)
-2. **AI descriptions** - generates a 1-2 sentence description of each file using an LLM (cached in SQLite so re-runs are instant)
-3. **Interactive graph** - renders a force-directed graph in a single HTML file (no server, no CDN, shareable)
-4. **Agent context** - exports a token-efficient context dump for AI coding agents via CLI or MCP server (`get_context`, `get_file`, `search_files` tools)
+## Why this exists
+
+AI writes code fast. Humans review it slow. The bottleneck is no longer writing code, it's understanding it. PrefXplain closes that gap: run one command, get a visual explanation of your entire codebase that anyone can read.
+
+## What you get
+
+- **Executive summary** at the top of the page: what the project does, the main layers, the critical path. Copy-paste this into a pitch deck.
+- **Architecture health score** (1-10) with plain-English interpretation: "No circular dependencies. graph.py is a single point of failure. Test coverage is solid."
+- **Layered diagram** organized by abstraction level: Surface (entry points, tests) > Features > Services > Foundation (core modules everything depends on).
+- **Blast radius on click**: select any file and instantly see every file that would be affected if you changed it. Highlighted in amber on the diagram.
+- **Smart search**: type "authentication" or "database" and it matches on descriptions, not just filenames.
+- **Language breakdown**: GitHub-style percentage bar showing code distribution by language.
+
+## Quick start
+
+### With Claude Code (recommended, free)
+
+No API key needed. Claude generates all descriptions directly in your session.
+
+```bash
+pip install prefxplain
+make install               # installs Claude Code skills + VS Code extension
+```
+
+Then in Claude Code:
+
+```
+/prefxplain-create         # analyze, describe, render, open in IDE
+/prefxplain-show           # reopen the diagram without regenerating
+/prefxplain-update         # update after code changes (preserves existing descriptions)
+```
+
+The diagram opens automatically in a VS Code / Cursor / Windsurf tab.
+
+### With the CLI
+
+```bash
+pip install prefxplain
+
+# Analyze and open (descriptions require an API key)
+prefxplain .
+
+# Skip descriptions (fast, offline, still useful)
+prefxplain . --no-descriptions
+
+# Custom output path
+prefxplain . --output architecture.html
+
+# Re-analyze after changes (cached descriptions are preserved)
+prefxplain update .
+```
 
 ## Install
 
 ```bash
-pip install -e .             # core (analysis + rendering)
-pip install -e ".[llm]"      # + OpenAI-compatible LLM for descriptions
-pip install -e ".[agent]"    # + MCP server for AI agent integration
-pip install -e ".[llm,agent]"  # everything
+pip install prefxplain                # core: analysis + rendering
+pip install 'prefxplain[llm]'         # + LLM descriptions via API
+pip install 'prefxplain[agent]'       # + MCP server for AI agents
+pip install 'prefxplain[llm,agent]'   # everything
 ```
 
-## Usage
-
-### CLI
+### IDE integration (VS Code, Cursor, Windsurf)
 
 ```bash
-# Analyze current directory (opens in browser)
-prefxplain .
-
-# Custom output path, skip LLM descriptions
-prefxplain . --output graph.html --no-descriptions
-
-# Use a different model or API endpoint
-prefxplain . --model gpt-4o --api-base http://localhost:11434/v1
-
-# Re-analyze (only changed files get new descriptions)
-prefxplain update .
-
-# Token-efficient context dump for AI agents
-prefxplain context "auth" --depth 2 --tokens 2000
-
-# Start MCP server (requires prefxplain[agent])
-prefxplain mcp .
-
-# Enforce architectural rules in CI
-prefxplain check . --config .prefxplain.yml
+make install
 ```
 
-### Claude Code Skills
+This does two things:
+1. Symlinks the Claude Code skills (`/prefxplain-create`, `/prefxplain-show`, `/prefxplain-update`) into `~/.claude/commands/`
+2. Builds and installs a tiny VS Code extension (3KB) that enables automatic diagram preview in an IDE tab
 
-No API key needed. Claude generates descriptions directly.
+Works with any VS Code fork: VS Code, Cursor, Windsurf, VS Code Insiders.
 
-```
-/prefxplain-create          # analyze and render
-/prefxplain-update          # re-analyze changed files
-```
+## The diagram
 
-Install the skill commands:
-```bash
-cp commands/prefxplain-*.md ~/.claude/commands/
-```
+The HTML output is self-contained (no server, no CDN, works offline) and includes:
 
-## AI Agent Integration
+### Layout
 
-PrefXplain can serve your codebase graph to AI coding agents — giving them structured,
-token-efficient context instead of reading every file raw.
+Files are organized top-to-bottom by dependency depth:
 
-### `prefxplain context` (no extra deps)
+| Layer | What's there | Why it matters |
+|-------|-------------|----------------|
+| **Surface** | Tests, CLI entry points, standalone scripts | Nothing depends on these. Safe to change. |
+| **Features** | Main application logic | The features your users interact with. |
+| **Services** | Shared modules used across features | Changes here ripple upward. |
+| **Foundation** | Core data models, utilities | Everything depends on these. Change with care. |
 
-```bash
-prefxplain create . --no-descriptions   # generate prefxplain.json once
-prefxplain context "auth" --depth 2     # instant context dump, loads from JSON
-```
+Each layer has a colored band with a subtitle explaining the count and relationship (e.g., "3 files, shared across features").
 
-Output example:
-```
-# Context: 'auth' — 4 files, depth 2
+### Node cards
 
-FILE src/auth/token.py [python role=utility]
-  > Handles JWT generation and validation for API endpoints.
-  exports: sign(f), verify(f), decode(f)
-FILE src/auth/middleware.py [python role=api_route]
-  > Request middleware that validates bearer tokens on protected routes.
-  exports: require_auth(f)
+Each file is a card showing:
+- **Short title** (1-3 words): the role of the file, like "Graph Engine" or "JWT Validator"
+- **Filename** in small text below
+- **Import count** badge showing how many files depend on it
 
-IMPORT src/api/routes.py -> src/auth/middleware.py
-IMPORT src/auth/middleware.py -> src/auth/token.py
-```
+### Sidebar (click any node)
 
-### MCP server (Claude Code, Cursor, Windsurf)
+- Full file path, language, size
+- Plain-English description
+- Blast radius count ("8 files affected if you change this")
+- Exported symbols (functions, classes)
+- Import/imported-by lists with clickable navigation
+- Code preview (first 50 lines)
 
-```bash
-pip install 'prefxplain[agent]'
-prefxplain mcp .
-```
+### Header
 
-Configure in Claude Code (`~/.claude/mcp.json`):
-```json
-{
-  "mcpServers": {
-    "prefxplain": {
-      "command": "prefxplain",
-      "args": ["mcp", "/path/to/your/repo"]
-    }
-  }
-}
-```
+- Language percentage bar (GitHub-style)
+- File and edge counts
+- "Start here" and "Core file" quick links
+- Search box (matches filenames, descriptions, and titles)
 
-Once configured, Claude Code can call `get_context("auth")` before navigating the codebase,
-reducing context usage significantly on large repos.
+## Claude Code skills
 
-## Output
+The skills are the recommended way to use PrefXplain. Claude reads each file and writes descriptions directly, so no API key is needed and it's completely free.
 
-- `prefxplain.html` - self-contained interactive graph (open in any browser)
-- `prefxplain.json` - raw graph data for programmatic access
+| Skill | What it does |
+|-------|-------------|
+| `/prefxplain-create` | Full pipeline: analyze, describe every file, generate summary + health score, render HTML, open in IDE |
+| `/prefxplain-update` | Re-analyze after code changes. Preserves descriptions for unchanged files, generates new ones for added/modified files. |
+| `/prefxplain-show` | Reopen the diagram in the IDE without regenerating anything. Reuses or starts the local preview server. |
 
-### Graph features
+### What the skill generates
 
-- Force-directed layout with pan, zoom, and drag
-- Nodes colored by language (Python blue, TypeScript cyan, JS yellow)
-- Click a node to see: file path, description, exported symbols, imports, imported-by
-- Search box filters nodes by filename
-- Clickable neighbor navigation in sidebar
+For each file:
+- **short_title**: 1-3 word role label (e.g., "AST Parser", "Auth Tests")
+- **description**: 1-2 sentence explanation of what the file exposes and who uses it
 
-## CLI Options
+For the project:
+- **executive summary**: 3-5 sentences covering what the project does, main layers, critical path
+- **health score**: 1-10 rating based on cycles, orphans, test coverage, single points of failure
+- **health notes**: plain-English interpretation of the score
+
+## CLI reference
 
 ### `prefxplain create` / `prefxplain update`
 
@@ -137,30 +154,44 @@ reducing context usage significantly on large repos.
 | `--model` | `gpt-4o-mini` | LLM model name |
 | `--max-files` | 500 | Maximum files to analyze |
 | `--force`, `-f` | false | Regenerate all descriptions |
-| `--open/--no-open` | true (create) | Open result in browser |
-| `--filter` | — | Only include files matching glob (e.g. `src/**/*.py`) |
-| `--focus` | — | Focus file for depth-limited view |
-| `--depth` | — | Hops around `--focus` file |
+| `--open/--no-open` | true (create) | Open result in browser or IDE |
+| `--filter` | - | Only include files matching glob (e.g. `src/**/*.py`) |
+| `--focus` | - | Focus file for depth-limited view |
+| `--depth` | - | Hops around `--focus` file |
 | `--check-cycles` | false | Exit 1 if circular dependencies found |
 
 ### `prefxplain context`
 
+Token-efficient context dump for AI coding agents. No server needed.
+
+```bash
+prefxplain context "auth" --depth 2 --tokens 2000
+```
+
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--depth`, `-d` | 2 | BFS hops around matching files |
-| `--tokens`, `-t` | 2000 | Approximate token budget for output |
-| `--from` | `<root>/prefxplain.json` | Load from existing graph JSON |
-| `--max-files` | 500 | Max files if re-analyzing from source |
+| `--tokens`, `-t` | 2000 | Approximate token budget |
+| `--from` | `prefxplain.json` | Load from existing graph |
 
-Loads from `prefxplain.json` when it exists (instant). Falls back to re-analyzing from source.
+### `prefxplain check`
+
+CI rule enforcement. Define rules in `.prefxplain.yml`, exit 1 on violations.
+
+```bash
+prefxplain check . --config .prefxplain.yml
+```
 
 ### `prefxplain mcp`
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--from` | `<root>/prefxplain.json` | Load from existing graph JSON |
+MCP stdio server for AI agent integration (Claude Code, Cursor, Windsurf).
 
-Starts a stdio MCP server exposing three tools to any MCP-compatible client (Claude Code, Cursor, Windsurf):
+```bash
+pip install 'prefxplain[agent]'
+prefxplain mcp .
+```
+
+Exposes three tools:
 
 | Tool | Description |
 |------|-------------|
@@ -168,26 +199,51 @@ Starts a stdio MCP server exposing three tools to any MCP-compatible client (Cla
 | `get_file(file_path)` | Description, role, and exports for one file |
 | `search_files(query)` | List matching file paths |
 
+## Supported languages
+
+| Language | Parser | Status |
+|----------|--------|--------|
+| Python | `ast` module (built-in) | Stable |
+| TypeScript | Regex + `tsconfig.json` path aliases | Stable |
+| JavaScript | Regex (import/require) | Stable |
+
+More languages (Go, Rust, Java) planned via tree-sitter grammars.
+
 ## Architecture
 
 ```
 prefxplain/
-  analyzer.py    # Python ast + JS/TS regex, two-pass graph build
-  graph.py       # Graph/Node/Edge/Symbol dataclasses, JSON I/O, BFS/cycle/centrality
+  analyzer.py    # AST parsing (Python) + regex (JS/TS), two-pass graph build
+  graph.py       # Node/Edge/Symbol/Graph dataclasses, cycle detection, centrality
+  renderer.py    # Self-contained HTML: canvas layout, layers, sidebar, search
   describer.py   # LLM descriptions with SHA-256 SQLite cache
-  renderer.py    # Self-contained HTML canvas force-directed graph
-  exporter.py    # Mermaid, DOT, and agent context text export
-  checker.py     # CI rule enforcement (.prefxplain.yml)
-  mcp_server.py  # MCP stdio server (get_context, get_file, search_files)
+  exporter.py    # Mermaid + Graphviz DOT export
+  checker.py     # CI rule enforcement from .prefxplain.yml
+  mcp_server.py  # MCP stdio server for AI agents
   cli.py         # Typer CLI: create, update, check, context, mcp
+
+commands/
+  prefxplain-create.md   # Claude Code skill: full pipeline
+  prefxplain-update.md   # Claude Code skill: incremental update
+  prefxplain-show.md     # Claude Code skill: open preview
+
+vscode-extension/
+  src/extension.ts       # URI handler for auto-opening in IDE
+  package.json           # Extension manifest
+
+scripts/
+  open-in-ide.sh         # IDE detection + URI dispatch
 ```
 
 ## Development
 
 ```bash
+git clone https://github.com/remi-ajr/prefxplain.git
+cd prefxplain
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest tests/ -v
+make test
+make lint
 ```
 
 ## License

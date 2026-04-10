@@ -15,6 +15,9 @@ Usage:
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import webbrowser
 from pathlib import Path
@@ -38,6 +41,24 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+def _in_ide() -> bool:
+    """Detect if we're running inside VS Code or JetBrains terminal."""
+    return bool(
+        os.environ.get("VSCODE_PID")
+        or os.environ.get("TERM_PROGRAM") == "vscode"
+        or os.environ.get("TERMINAL_EMULATOR") == "JetBrains-JediTerm"
+    )
+
+
+def _open_output(path: Path) -> None:
+    """Open the output file in the IDE tab if possible, otherwise in the browser."""
+    resolved = str(path.resolve())
+    if _in_ide() and shutil.which("code"):
+        subprocess.Popen(["code", resolved], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        webbrowser.open(f"file://{resolved}")
 
 
 def _version_callback(value: bool) -> None:
@@ -494,7 +515,7 @@ def _run(
     )
 
     if open_browser and fmt in ("html", "matrix"):
-        webbrowser.open(f"file://{output_path.resolve()}")
+        _open_output(output_path)
 
     if check_cycles and cycles:
         console.print(f"\n[red bold]FAIL:[/red bold] {len(cycles)} circular dependency chain(s) found.")

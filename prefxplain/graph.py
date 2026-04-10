@@ -41,6 +41,7 @@ class Node:
     id: str          # relative file path from repo root, e.g. "src/auth/token.py"
     label: str       # filename only, e.g. "token.py"
     description: str = ""
+    short_title: str = ""  # 1-3 word role label shown on the card, e.g. "Graph Engine"
     symbols: list[Symbol] = field(default_factory=list)
     language: str = ""
     size: int = 0    # file size in bytes
@@ -52,6 +53,7 @@ class Node:
             "id": self.id,
             "label": self.label,
             "description": self.description,
+            "short_title": self.short_title,
             "symbols": [s.to_dict() for s in self.symbols],
             "language": self.language,
             "size": self.size,
@@ -68,6 +70,7 @@ class Node:
             id=d["id"],
             label=d["label"],
             description=d.get("description", ""),
+            short_title=d.get("short_title", ""),
             symbols=[Symbol.from_dict(s) for s in d.get("symbols", [])],
             language=d.get("language", ""),
             size=d.get("size", 0),
@@ -108,15 +111,25 @@ class GraphMetadata:
     total_files: int
     languages: list[str]
     codemap_version: str = "0.1.0"
+    summary: str = ""       # LLM-generated plain-English overview of the codebase
+    health_score: int = 0   # 1-10 architecture health rating
+    health_notes: str = ""  # plain-English health interpretation
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "repo": self.repo,
             "generated_at": self.generated_at,
             "total_files": self.total_files,
             "languages": self.languages,
             "codemap_version": self.codemap_version,
         }
+        if self.summary:
+            d["summary"] = self.summary
+        if self.health_score:
+            d["health_score"] = self.health_score
+        if self.health_notes:
+            d["health_notes"] = self.health_notes
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> GraphMetadata:
@@ -126,6 +139,9 @@ class GraphMetadata:
             total_files=d["total_files"],
             languages=d["languages"],
             codemap_version=d.get("codemap_version", "0.1.0"),
+            summary=d.get("summary", ""),
+            health_score=d.get("health_score", 0),
+            health_notes=d.get("health_notes", ""),
         )
 
 
@@ -672,10 +688,13 @@ class Graph:
                 "in_cycle": n.id in cycle_node_set,
             }
 
-        # Language breakdown
+        # Language breakdown — by bytes (like GitHub), with file count alongside
         lang_counts: dict[str, int] = defaultdict(int)
+        lang_file_counts: dict[str, int] = defaultdict(int)
         for n in self.nodes:
-            lang_counts[n.language or "other"] += 1
+            lang = n.language or "other"
+            lang_counts[lang] += n.size if n.size > 0 else 1
+            lang_file_counts[lang] += 1
 
         base.update({
             "clusters": clusters,
@@ -688,6 +707,7 @@ class Graph:
             "node_metrics": node_metrics,
             "health": health,
             "language_counts": dict(lang_counts),
+            "language_file_counts": dict(lang_file_counts),
         })
         return base
 

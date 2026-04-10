@@ -559,6 +559,31 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
                 graph.edges.append(Edge(source=rel, target=target, type="imports"))
                 seen_edges.add((rel, target))
 
+    # ── Prune trivial nodes that add noise to the diagram ──────────────
+    # Compute in/out degree for pruning decisions
+    in_deg: dict[str, int] = {n.id: 0 for n in graph.nodes}
+    out_deg: dict[str, int] = {n.id: 0 for n in graph.nodes}
+    for e in graph.edges:
+        in_deg[e.target] = in_deg.get(e.target, 0) + 1
+        out_deg[e.source] = out_deg.get(e.source, 0) + 1
+
+    prune_ids: set[str] = set()
+    for n in graph.nodes:
+        # Trivial __init__.py: tiny, no real code (no classes/functions), low connectivity
+        if n.label == "__init__.py" and n.size < 500:
+            has_real_code = any(
+                s.kind in ("function", "class") for s in n.symbols
+            )
+            if not has_real_code and in_deg.get(n.id, 0) + out_deg.get(n.id, 0) <= 1:
+                prune_ids.add(n.id)
+
+    if prune_ids:
+        graph.nodes = [n for n in graph.nodes if n.id not in prune_ids]
+        graph.edges = [
+            e for e in graph.edges
+            if e.source not in prune_ids and e.target not in prune_ids
+        ]
+
     # Update metadata
     languages = sorted(set(n.language for n in graph.nodes if n.language))
     graph.metadata.total_files = len(graph.nodes)

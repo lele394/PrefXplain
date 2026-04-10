@@ -45,36 +45,49 @@ _HTML_TEMPLATE = """\
 <title>PrefXplain — {repo}</title>
 <style>
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", monospace; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }}
-  header {{ padding: 12px 20px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; align-items: center; gap: 16px; flex-shrink: 0; flex-wrap: wrap; }}
-  header h1 {{ font-size: 15px; font-weight: 600; color: #e6edf3; }}
-  header .stats {{ font-size: 12px; color: #8b949e; }}
-  header input {{ padding: 5px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 12px; width: 200px; outline: none; }}
-  header input:focus {{ border-color: #58a6ff; }}
-  .legend {{ display: flex; gap: 12px; align-items: center; }}
-  .legend-item {{ display: flex; align-items: center; gap: 4px; font-size: 11px; color: #8b949e; }}
-  .legend-dot {{ width: 10px; height: 10px; border-radius: 50%; }}
-  .toolbar {{ display: flex; gap: 8px; align-items: center; }}
-  .toolbar button {{ padding: 4px 10px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 11px; cursor: pointer; }}
-  .toolbar button:hover {{ background: #30363d; }}
-  .toolbar button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
-  .cycle-badge {{ background: #f8514930; border: 1px solid #f85149; color: #f85149; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }}
-  .health-badge {{ padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }}
-  #statsbar {{ padding: 6px 20px; background: #0d1117; border-bottom: 1px solid #21262d; display: flex; gap: 24px; align-items: center; flex-shrink: 0; flex-wrap: wrap; font-size: 11px; color: #8b949e; }}
-  #statsbar .stat-group {{ display: flex; gap: 6px; align-items: center; }}
-  #statsbar .stat-label {{ color: #6e7681; }}
-  #statsbar .stat-value {{ color: #e6edf3; font-weight: 600; }}
-  #statsbar .role-chip {{ padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; margin-right: 2px; }}
-  main {{ display: flex; flex: 1; overflow: hidden; position: relative; }}
-  #minimap {{ position: absolute; bottom: 12px; right: 328px; width: 160px; height: 100px; background: #161b22cc; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; z-index: 10; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; overflow: hidden; }}
+
+  /* ── Left panel (collapsible) ──────────────────────────────────────── */
+  #left-panel {{ width: 240px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width .2s, padding .2s; }}
+  #left-panel.collapsed {{ width: 0; padding: 0; overflow: hidden; border-right: none; }}
+  #left-panel .lp-section {{ padding: 12px 16px; border-bottom: 1px solid #21262d; }}
+  #left-panel .lp-brand {{ font-size: 11px; font-weight: 600; color: #58a6ff; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2px; }}
+  #left-panel h1 {{ font-size: 14px; font-weight: 700; color: #e6edf3; line-height: 1.3; }}
+  #left-panel .lp-stats {{ font-size: 11px; color: #6e7681; margin-top: 4px; line-height: 1.6; }}
+  #left-panel .lp-stats span {{ color: #e6edf3; font-weight: 600; }}
+  #left-panel .lp-summary {{ font-size: 12px; color: #8b949e; line-height: 1.6; }}
+  #left-panel .lp-health {{ display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }}
+  #left-panel .lp-health-bar {{ width: 60px; height: 5px; background: #21262d; border-radius: 3px; overflow: hidden; flex-shrink: 0; }}
+  #left-panel .lp-health-fill {{ height: 100%; border-radius: 3px; }}
+  #left-panel .lp-health-notes {{ font-size: 11px; color: #6e7681; margin-top: 6px; line-height: 1.5; }}
+  #left-panel .lp-langbar {{ display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #21262d; margin-top: 8px; }}
+  #left-panel .lp-langbar .lang-segment {{ height: 100%; min-width: 2px; }}
+  #left-panel .lp-lang-labels {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }}
+  #left-panel .lp-lang-label {{ display: flex; align-items: center; gap: 4px; font-size: 10px; color: #8b949e; }}
+  #left-panel .lp-lang-dot {{ width: 6px; height: 6px; border-radius: 50%; }}
+  #left-panel .lp-search {{ width: 100%; padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 12px; outline: none; }}
+  #left-panel .lp-search:focus {{ border-color: #58a6ff; }}
+  #left-panel .lp-toolbar {{ display: flex; gap: 6px; margin-top: 8px; }}
+  #left-panel .lp-toolbar button {{ flex: 1; padding: 4px 0; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 11px; cursor: pointer; }}
+  #left-panel .lp-toolbar button:hover {{ background: #30363d; }}
+  #left-panel .lp-toolbar button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
+
+  /* ── Toggle button ─────────────────────────────────────────────────── */
+  #panel-toggle {{ position: absolute; top: 8px; left: 8px; z-index: 15; width: 28px; height: 28px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: left .2s; }}
+  #panel-toggle:hover {{ background: #30363d; color: #e6edf3; }}
+  body:not(.panel-collapsed) #panel-toggle {{ left: 248px; }}
+
+  /* ── Center (graph) ────────────────────────────────────────────────── */
+  #center {{ flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; }}
+  #canvas {{ flex: 1; min-width: 0; cursor: grab; display: block; }}
+  #canvas.dragging {{ cursor: grabbing; }}
+  #minimap {{ position: absolute; bottom: 12px; right: 12px; width: 140px; height: 90px; background: #161b22cc; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; z-index: 10; }}
   #help-overlay {{ display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 24px; z-index: 20; min-width: 280px; }}
   #help-overlay h3 {{ color: #e6edf3; font-size: 14px; margin-bottom: 12px; }}
   #help-overlay kbd {{ background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: monospace; }}
   #help-overlay .kb-row {{ display: flex; justify-content: space-between; gap: 20px; padding: 4px 0; font-size: 12px; color: #c9d1d9; }}
-  #ego-banner {{ display: none; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #58a6ff20; border: 1px solid #58a6ff60; border-radius: 6px; padding: 4px 12px; font-size: 12px; color: #58a6ff; z-index: 10; }}
-  /* Only the main canvas should grow to fill flex space — minimap is absolute. */
-  #canvas {{ flex: 1; min-width: 0; cursor: grab; display: block; }}
-  #canvas.dragging {{ cursor: grabbing; }}
+
+  /* ── Right sidebar (click details) ─────────────────────────────────── */
   #sidebar {{ width: 320px; background: #161b22; border-left: 1px solid #30363d; padding: 16px; overflow-y: auto; flex-shrink: 0; font-size: 13px; display: flex; flex-direction: column; gap: 12px; }}
   #sidebar h2 {{ font-size: 13px; font-weight: 600; color: #e6edf3; word-break: break-all; }}
   #sidebar .desc {{ color: #8b949e; line-height: 1.5; }}
@@ -94,71 +107,59 @@ _HTML_TEMPLATE = """\
   .cycle-warning {{ background: #f8514920; border: 1px solid #f85149; border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #f85149; }}
   .cycle-warning strong {{ color: #ff7b72; }}
   .metrics-panel {{ background: #21262d; border-radius: 6px; padding: 10px 12px; }}
-  /* Code preview panel — like CodeViz, monospace with line numbers */
   .code-preview {{
-    background: #010409;
-    border: 1px solid #30363d;
-    border-radius: 6px;
-    padding: 10px 0;
-    margin-top: 6px;
-    max-height: 360px;
-    overflow: auto;
-    font-family: "SF Mono", Monaco, Menlo, "Courier New", monospace;
-    font-size: 11px;
-    line-height: 1.55;
-    color: #c9d1d9;
-    white-space: pre;
+    background: #010409; border: 1px solid #30363d; border-radius: 6px;
+    padding: 10px 0; margin-top: 6px; max-height: 360px; overflow: auto;
+    font-family: "SF Mono", Monaco, Menlo, monospace; font-size: 11px;
+    line-height: 1.55; color: #c9d1d9; white-space: pre;
   }}
   .code-preview code {{ display: block; padding: 0 12px; }}
-  .code-preview .ln {{
-    display: inline-block;
-    width: 32px;
-    margin-right: 12px;
-    color: #484f58;
-    text-align: right;
-    user-select: none;
-  }}
-  /* Make the sidebar wider so the code preview is actually readable */
-  #sidebar {{ width: 360px; }}
+  .code-preview .ln {{ display: inline-block; width: 32px; margin-right: 12px; color: #484f58; text-align: right; user-select: none; }}
 </style>
 </head>
 <body>
-<header>
-  <h1>PrefXplain &mdash; {repo}</h1>
-  <span class="stats">{total_files} files &middot; {total_edges} edges &middot; {languages}</span>
-  {cycle_badge_html}
-  <div class="legend">
-    {legend_html}
+<!-- Left panel (project info, collapsible) -->
+<div id="left-panel">
+  <div class="lp-section">
+    <div class="lp-brand">PrefXplain</div>
+    <h1>{repo}</h1>
+    <div class="lp-stats">
+      <span>{total_files}</span> files &middot; <span>{total_edges}</span> edges<br>
+      {languages} {cycle_badge_html}
+    </div>
   </div>
-  <div class="toolbar">
-    <button id="btnColorLang" class="active" onclick="setColorMode('language')">By Language</button>
-    <button id="btnColorRole" onclick="setColorMode('role')">By Role</button>
-    <button id="btnClusters" onclick="toggleClusters()">By Purpose</button>
-    <button id="btnEdges" onclick="toggleEdgeMode()">Edges: Hover</button>
-    <button onclick="zoomToFit()">Fit</button>
-    <button onclick="toggleHelp()">?</button>
+  <div class="lp-section" id="lp-summary"></div>
+  <div class="lp-section" id="lp-langs"></div>
+  <div class="lp-section">
+    <input type="text" id="search" class="lp-search" placeholder="Search files..." autocomplete="off">
+    <div class="lp-toolbar">
+      <button id="btnEdges" onclick="toggleEdgeMode()">Edges</button>
+      <button onclick="zoomToFit()">Fit</button>
+      <button onclick="toggleHelp()">?</button>
+    </div>
   </div>
-  <input type="text" id="search" placeholder="/ to search..." autocomplete="off" style="margin-left:auto">
-</header>
-<div id="statsbar"></div>
-<main>
+  <div class="lp-section" id="lp-statsbar"></div>
+</div>
+
+<button id="panel-toggle" onclick="toggleLeftPanel()" title="Toggle panel">&lsaquo;</button>
+
+<!-- Center (graph canvas) -->
+<div id="center">
   <canvas id="canvas"></canvas>
   <canvas id="minimap"></canvas>
-  <div id="ego-banner">Ego view &mdash; press <kbd>Esc</kbd> to exit</div>
   <div id="help-overlay">
     <h3>Keyboard Shortcuts</h3>
     <div class="kb-row"><span><kbd>/</kbd></span><span>Focus search</span></div>
-    <div class="kb-row"><span><kbd>Esc</kbd></span><span>Deselect / exit ego view</span></div>
-    <div class="kb-row"><span><kbd>E</kbd></span><span>Ego-centric view (selected node)</span></div>
+    <div class="kb-row"><span><kbd>Esc</kbd></span><span>Deselect</span></div>
     <div class="kb-row"><span><kbd>F</kbd></span><span>Zoom to fit all nodes</span></div>
-    <div class="kb-row"><span><kbd>C</kbd></span><span>Toggle cluster backgrounds</span></div>
     <div class="kb-row"><span><kbd>?</kbd></span><span>Toggle this help panel</span></div>
-    <div style="margin-top:12px;font-size:11px;color:#6e7681">Double-click a node to enter ego view</div>
   </div>
+
+  <!-- Right sidebar (click details) -->
   <div id="sidebar">
     <p class="placeholder">Click a node to see details.</p>
   </div>
-</main>
+</div>
 
 <script>
 const GRAPH = {graph_json};
@@ -179,26 +180,35 @@ const METRICS = {metrics_json};
 const NODE_METRICS = {node_metrics_json};
 const HEALTH = {health_json};
 const LANG_COUNTS = {lang_counts_json};
+const LANG_FILE_COUNTS = {lang_file_counts_json};
+const SUMMARY = {summary_json};
+const HEALTH_SCORE = {health_score_json};
+const HEALTH_NOTES = {health_notes_json};
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const sidebar = document.getElementById('sidebar');
 const searchInput = document.getElementById('search');
 
+// ── Left panel toggle ────────────────────────────────────────────────────────
+function toggleLeftPanel() {{
+  const lp = document.getElementById('left-panel');
+  const btn = document.getElementById('panel-toggle');
+  lp.classList.toggle('collapsed');
+  document.body.classList.toggle('panel-collapsed');
+  btn.innerHTML = lp.classList.contains('collapsed') ? '&rsaquo;' : '&lsaquo;';
+  // Resize canvas after transition
+  setTimeout(() => {{ resize(); draw(); drawMinimap(); }}, 220);
+}}
+
 // ── State ───────────────────────────────────────────────────────────────────
-let colorMode = 'language'; // 'language' | 'role'
+let colorMode = 'language';
 let clusterMode = 'off'; // 'off' | 'dir' | 'role'
 let edgeMode = 'hover'; // 'hover' | 'all'
+let layoutMode = 'layered'; // 'layered' | 'force'
 
 // Convenience getter used throughout the code (replaces the old showClusters bool)
 function showClusters() {{ return clusterMode !== 'off'; }}
-
-function setColorMode(mode) {{
-  colorMode = mode;
-  document.getElementById('btnColorLang').classList.toggle('active', mode === 'language');
-  document.getElementById('btnColorRole').classList.toggle('active', mode === 'role');
-  draw();
-}}
 
 // Toggle between the two cluster views: role ↔ dir
 function toggleClusters() {{
@@ -347,6 +357,140 @@ function layoutClusters(mode) {{
 // Alias kept for any direct callers
 function layoutClustersAsGrid() {{ layoutClusters('dir'); }}
 
+// ── Layered layout (by abstraction level) ──────────────────────────────────
+// Uses BFS depth from sources (indegree=0) to assign horizontal lanes.
+// Lane 0 = entry points / high-level files (top).
+// Lane N = core utilities / low-level (bottom).
+// Labels each lane with its role description.
+
+function layoutLayered() {{
+  // Compute depth via BFS
+  const inDeg = {{}}, adj = {{}};
+  for (const n of nodes) {{ inDeg[n.id] = 0; adj[n.id] = []; }}
+  for (const e of edges) {{
+    if (inDeg[e.target.id] !== undefined) inDeg[e.target.id]++;
+    if (adj[e.source.id]) adj[e.source.id].push(e.target.id);
+  }}
+  const layer = {{}};
+  const queue = nodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
+  queue.forEach(id => {{ layer[id] = 0; }});
+  for (let i = 0; i < queue.length; i++) {{
+    const id = queue[i];
+    for (const child of (adj[id] || [])) {{
+      if (layer[child] === undefined || layer[child] < layer[id] + 1) {{
+        layer[child] = layer[id] + 1;
+        queue.push(child);
+      }}
+    }}
+  }}
+  for (const n of nodes) if (layer[n.id] === undefined) layer[n.id] = 0;
+
+  const maxLayer = Math.max(0, ...Object.values(layer));
+
+  // Group nodes by layer
+  const byLayer = {{}};
+  for (let l = 0; l <= maxLayer; l++) byLayer[l] = [];
+  for (const n of nodes) byLayer[layer[n.id]].push(n);
+
+  // Sort within each layer by number of connections (most connected = center)
+  for (const l in byLayer) {{
+    byLayer[l].sort((a, b) => (b.indegree + b.outdegree) - (a.indegree + a.outdegree));
+  }}
+
+  // ── Layer labels: relationship-based, accessible to everyone ───────
+  // Top = nothing depends on these (tests, CLIs, standalone scripts)
+  // Bottom = everything depends on these (core data structures, shared libs)
+  // Middle = connecting layers
+  function layerLabel(l, layerNodes) {{
+    const count = layerNodes.length;
+    const s = count === 1 ? '' : 's';
+    if (maxLayer === 0) return {{ title: 'All files', subtitle: count + ' file' + s }};
+    if (l === 0) {{
+      return {{ title: 'Surface', subtitle: count + ' file' + s + ' \u2014 nothing depends on these' }};
+    }}
+    if (l === maxLayer) {{
+      // Find the max indegree in this layer to show impact
+      const maxIn = Math.max(...layerNodes.map(n => n.indegree || 0));
+      const depStr = maxIn > 1 ? ' \u2014 up to ' + maxIn + ' files depend on each' : '';
+      return {{ title: 'Foundation', subtitle: count + ' file' + s + depStr }};
+    }}
+    // Middle layers: position relative to total depth
+    const ratio = l / maxLayer;
+    if (ratio <= 0.4) {{
+      return {{ title: 'Features', subtitle: count + ' file' + s + ' \u2014 main functionality' }};
+    }}
+    if (ratio <= 0.7) {{
+      return {{ title: 'Services', subtitle: count + ' file' + s + ' \u2014 shared across features' }};
+    }}
+    return {{ title: 'Core', subtitle: count + ' file' + s + ' \u2014 used by most of the codebase' }};
+  }}
+
+  // Compute positions
+  const LANE_PAD_TOP = 60;  // space for lane label + subtitle
+  const NODE_GAP_X = 28;
+  const NODE_GAP_Y = 40;
+  const LANE_GAP = 30;
+
+  let currentY = 40;
+  window.__layerBands = [];
+
+  for (let l = 0; l <= maxLayer; l++) {{
+    const layerNodes = byLayer[l];
+    if (layerNodes.length === 0) continue;
+
+    const bandTop = currentY;
+    currentY += LANE_PAD_TOP;
+
+    // Lay out nodes in a centered row, wrapping if needed
+    const maxPerRow = Math.max(1, Math.floor(1200 / (NODE_W + NODE_GAP_X)));
+    const rows = [];
+    for (let i = 0; i < layerNodes.length; i += maxPerRow) {{
+      rows.push(layerNodes.slice(i, i + maxPerRow));
+    }}
+
+    for (const row of rows) {{
+      const totalW = row.length * NODE_W + (row.length - 1) * NODE_GAP_X;
+      const startX = (1200 - totalW) / 2 + NODE_W / 2;
+      for (let i = 0; i < row.length; i++) {{
+        const n = row[i];
+        n.x = startX + i * (NODE_W + NODE_GAP_X);
+        n.y = currentY + nodeHeight(n) / 2;
+        n.vx = 0; n.vy = 0;
+      }}
+      currentY += Math.max(...row.map(n => nodeHeight(n))) + NODE_GAP_Y;
+    }}
+
+    const bandBottom = currentY + LANE_GAP / 2;
+    const ll = layerLabel(l, layerNodes);
+
+    window.__layerBands.push({{ top: bandTop, bottom: bandBottom, title: ll.title, subtitle: ll.subtitle, layer: l }});
+    currentY = bandBottom + LANE_GAP / 2;
+  }}
+
+  simRunning = false;
+}}
+
+function toggleLayout() {{
+  const btn = document.getElementById('btnLayout');
+  if (layoutMode === 'layered') {{
+    layoutMode = 'force';
+    btn.textContent = 'Force';
+    btn.classList.remove('active');
+    // Restart force sim
+    simRunning = true;
+    startAnim();
+  }} else {{
+    layoutMode = 'layered';
+    btn.textContent = 'Layered';
+    btn.classList.add('active');
+    layoutLayered();
+    draw();
+    drawMinimap();
+    // Auto-fit
+    zoomToFit();
+  }}
+}}
+
 // ── Layout ──────────────────────────────────────────────────────────────────
 
 function resize() {{
@@ -362,10 +506,9 @@ const NODE_W = 220, NODE_H_BASE = 44, NODE_R = 6;
 // Taller nodes need more space — bump repulsion and spring length
 const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
-// Dynamic height: base + 16px per symbol shown (max 4), plus 10px for dividers
+// Fixed height — symbols are shown in the sidebar on click, not on the card
 function nodeHeight(n) {{
-  const symCount = Math.min((n.symbols || []).length, 4);
-  return NODE_H_BASE + symCount * 16 + (symCount > 0 ? 10 : 0);
+  return NODE_H_BASE;
 }}
 
 // ── Topology-aware initial placement ─────────────────────────────────────────
@@ -451,20 +594,9 @@ function nodeSubtitle(n) {{
   return parts.join(' \u00b7 ');
 }}
 
-// Primary title text — natural language preferred over filename
-const _ROLE_HINTS = {{
-  entry_point: 'Program entry', api_route: 'API\u00a0route',
-  data_model: 'Data\u00a0model', utility: 'Helper\u00a0module',
-  config: 'Configuration', test: 'Test\u00a0suite',
-}};
+// Primary title text — short_title if set, otherwise filename
 function nodeTitleText(n) {{
-  if (n.description) return n.description;
-  // No description: build something meaningful from role + symbol names
-  const roleHint = _ROLE_HINTS[n.role] || 'Module';
-  const topSyms = (n.symbols || [])
-    .filter(s => s.kind === 'function' || s.kind === 'class')
-    .slice(0, 3).map(s => s.name).join(', ');
-  return topSyms ? roleHint + ': ' + topSyms : roleHint;
+  return n.short_title || n.label;
 }}
 
 const edges = GRAPH.edges.map(e => ({{
@@ -574,7 +706,7 @@ function applyRepulsion(cell, n) {{
 }}
 
 function tickSim() {{
-  if (!simRunning) return;
+  if (!simRunning || layoutMode === 'layered') return;
 
   for (const n of nodes) {{ n.fx = 0; n.fy = 0; }}
 
@@ -670,7 +802,10 @@ function nodeTextColor(n) {{
 
 function isVisible(n) {{
   if (!searchQuery) return true;
-  return n.id.toLowerCase().includes(searchQuery) || n.label.toLowerCase().includes(searchQuery);
+  return n.id.toLowerCase().includes(searchQuery)
+    || n.label.toLowerCase().includes(searchQuery)
+    || (n.description || '').toLowerCase().includes(searchQuery)
+    || (n.short_title || '').toLowerCase().includes(searchQuery);
 }}
 
 function isCycleEdge(e) {{
@@ -791,6 +926,44 @@ function draw() {{
 
   // Cluster backgrounds
   drawClusters();
+
+  // Layer bands (when in layered mode) — each layer gets a distinct color
+  if (layoutMode === 'layered' && window.__layerBands) {{
+    const BAND_COLORS = [
+      {{ bg: '#22c55e12', border: '#22c55e30', text: '#22c55e' }},  // green  — entry points
+      {{ bg: '#3b82f612', border: '#3b82f630', text: '#3b82f6' }},  // blue   — app logic
+      {{ bg: '#a78bfa12', border: '#a78bfa30', text: '#a78bfa' }},  // purple — services
+      {{ bg: '#f59e0b12', border: '#f59e0b30', text: '#f59e0b' }},  // amber  — models
+      {{ bg: '#6b728012', border: '#6b728030', text: '#6b7280' }},  // gray   — config
+      {{ bg: '#ef444412', border: '#ef444430', text: '#ef4444' }},  // red    — tests
+    ];
+    const bands = window.__layerBands;
+    for (let i = 0; i < bands.length; i++) {{
+      const b = bands[i];
+      const palette = BAND_COLORS[i % BAND_COLORS.length];
+      // Band background
+      ctx.fillStyle = palette.bg;
+      ctx.fillRect(-2000, b.top, 6000, b.bottom - b.top);
+      // Top border line
+      ctx.strokeStyle = palette.border;
+      ctx.lineWidth = 1.5 / zoom;
+      ctx.beginPath();
+      ctx.moveTo(-2000, b.top);
+      ctx.lineTo(4000, b.top);
+      ctx.stroke();
+      // Lane title (bold, colored)
+      ctx.font = `bold ${{14 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.fillStyle = palette.text;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(b.title, 20, b.top + 8);
+      // Lane subtitle (smaller, muted)
+      const titleW = ctx.measureText(b.title).width;
+      ctx.font = `${{11 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.fillStyle = '#6e7681';
+      ctx.fillText(b.subtitle, 20 + titleW + 10, b.top + 10);
+    }}
+  }}
 
   // Pre-compute bidirectional pairs once per draw call
   const edgeKeySet = new Set(GRAPH.edges.map(e => e.source + '|' + e.target));
@@ -926,17 +1099,18 @@ function draw() {{
     const isSelected = selectedNode === n;
     const isHovered = hoveredNode === n;
     const inCycle = n.inCycle;
+    const inBlast = blastRadiusSet.has(n.id);
 
-    // Shadow for selected/hovered
-    if (isSelected || isHovered) {{
-      ctx.shadowColor = color;
-      ctx.shadowBlur = (isSelected ? 14 : 6) / zoom;
+    // Shadow for selected/hovered/blast
+    if (isSelected || isHovered || inBlast) {{
+      ctx.shadowColor = inBlast ? '#f59e0b' : color;
+      ctx.shadowBlur = (isSelected ? 14 : inBlast ? 10 : 6) / zoom;
     }}
 
-    // Rounded rect
-    ctx.fillStyle = isSelected ? color : (isHovered ? '#21262d' : '#161b22');
-    ctx.strokeStyle = inCycle ? '#f85149' : (isSelected ? color : (isHovered ? color : '#30363d'));
-    ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : 1) / zoom;
+    // Rounded rect — blast radius nodes get an amber tint
+    ctx.fillStyle = isSelected ? color : (inBlast ? '#2d2008' : (isHovered ? '#21262d' : '#161b22'));
+    ctx.strokeStyle = inCycle ? '#f85149' : (inBlast ? '#f59e0b' : (isSelected ? color : (isHovered ? color : '#30363d')));
+    ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : inBlast ? 1.5 : 1) / zoom;
     roundRect(ctx, x, y, nw, nh, NODE_R);
     ctx.fill();
     ctx.stroke();
@@ -1031,12 +1205,10 @@ function draw() {{
       }}
     }}
 
-    const syms = (n.symbols || []).slice(0, 4);
-    const hasSyms = syms.length > 0;
     // Top of text content in screen px (NODE_R * zoom = border radius in screen px)
     let curY = screenY - screenH / 2 + NODE_R * zoom + 6;
 
-    // Title line(s)
+    // Title line(s) — symbols are in the sidebar, not on the card
     ctx.fillStyle = textColor;
     ctx.font = `bold 12px -apple-system, sans-serif`;
     ctx.textBaseline = 'top';
@@ -1048,44 +1220,6 @@ function draw() {{
       curY += 14;
     }}
     curY += 4;
-
-    if (hasSyms) {{
-      // ── Divider ─────────────────────────────────────────────────────────
-      ctx.strokeStyle = divColor;
-      ctx.lineWidth = 0.5;
-      ctx.beginPath();
-      ctx.moveTo(screenX - screenW / 2 + padding, curY);
-      ctx.lineTo(screenX + screenW / 2 - padding, curY);
-      ctx.stroke();
-      curY += 5;
-
-      // ── Section 2: symbol list ──────────────────────────────────────────
-      ctx.textAlign = 'left';
-      for (const s of syms) {{
-        const icon = s.kind === 'function' ? '\u0192' : s.kind === 'class' ? '\u25c6' : '\u00b7';
-        ctx.font = `10px "SF Mono", monospace`;
-        ctx.fillStyle = s.kind === 'function' ? symFnColor : s.kind === 'class' ? symClsColor : mutedColor;
-        const nameText = icon + ' ' + s.name;
-        ctx.fillText(nameText, screenX - screenW / 2 + padding + 2, curY);
-        const nameW = ctx.measureText(nameText).width;
-        if (s.description) {{
-          ctx.font = `9px -apple-system, sans-serif`;
-          ctx.fillStyle = mutedColor;
-          const sep = ' \u2014 ';
-          const sepW = ctx.measureText(sep).width;
-          const availW = innerW - 8 - nameW - sepW;
-          if (availW > 20) {{
-            const maxDescChars = Math.floor(availW / 5.5);
-            const descText = s.description.length > maxDescChars
-              ? s.description.slice(0, maxDescChars - 1) + '\u2026'
-              : s.description;
-            ctx.fillText(sep + descText, screenX - screenW / 2 + padding + 2 + nameW, curY);
-          }}
-        }}
-        curY += 13;
-      }}
-      curY += 3;
-    }}
 
     // ── Bottom divider + footer ──────────────────────────────────────────
     ctx.strokeStyle = divColor;
@@ -1222,13 +1356,14 @@ canvas.addEventListener('wheel', e => {{
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
 function selectNode(n) {{
-  if (egoMode) exitEgoMode();
   selectedNode = selectedNode === n ? null : n;
   if (selectedNode) {{
     highlightSet = nhopNeighborhood(n.id, 1);
+    blastRadiusSet = computeBlastRadius(n.id);
     renderSidebar(n);
   }} else {{
     highlightSet = null;
+    blastRadiusSet = new Set();
     renderDefaultSidebar();
   }}
   draw();
@@ -1332,7 +1467,7 @@ function renderSidebar(n) {{
     <div class="metrics-panel">
       ${{metricRow('Imported by', n.indegree + ' file' + (n.indegree !== 1 ? 's' : ''))}}
       ${{metricRow('Imports', n.outdegree + ' file' + (n.outdegree !== 1 ? 's' : ''))}}
-      ${{metricRow('PageRank', n.pagerank.toFixed(4))}}
+      ${{blastRadiusSet.size > 0 ? metricRow('Blast radius', blastRadiusSet.size + ' file' + (blastRadiusSet.size !== 1 ? 's' : '') + ' affected', '#f59e0b') : ''}}
     </div>
     <div>
       <p class="section-title">Exports / Symbols</p>
@@ -1347,11 +1482,6 @@ function renderSidebar(n) {{
       <div style="margin-top:4px">${{neighborHtml(importedBy, '\u2190')}}</div>
     </div>
     ${{codePanelHtml}}
-    <div style="margin-top:8px">
-      <button onclick="enterEgoMode(nodeIndex['${{esc(n.id)}}'])" style="padding:4px 10px;background:#21262d;border:1px solid #30363d;border-radius:6px;color:#58a6ff;font-size:11px;cursor:pointer;width:100%">
-        Ego view (2-hop neighborhood)
-      </button>
-    </div>
   `;
 }}
 
@@ -1448,9 +1578,7 @@ minimap.addEventListener('click', e => {{
   draw();
 }});
 
-// ── Ego-centric mode ──────────────────────────────────────────────────────────
-
-let egoMode = false;
+// ── Neighbor highlight ────────────────────────────────────────────────────────
 
 function nhopNeighborhood(nodeId, hops) {{
   const visited = new Set([nodeId]);
@@ -1468,29 +1596,6 @@ function nhopNeighborhood(nodeId, hops) {{
   return visited;
 }}
 
-function enterEgoMode(n) {{
-  egoMode = true;
-  highlightSet = nhopNeighborhood(n.id, 2);
-  document.getElementById('ego-banner').style.display = 'block';
-  draw();
-}}
-
-function exitEgoMode() {{
-  egoMode = false;
-  highlightSet = selectedNode ? nhopNeighborhood(selectedNode.id, 1) : null;
-  document.getElementById('ego-banner').style.display = 'none';
-  draw();
-}}
-
-canvas.addEventListener('dblclick', e => {{
-  const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
-  const n = nodeAt(wx, wy);
-  if (n) {{
-    selectNode(n);
-    enterEgoMode(n);
-  }}
-}});
-
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', e => {{
@@ -1504,17 +1609,10 @@ document.addEventListener('keydown', e => {{
       document.getElementById('search').focus();
       break;
     case 'Escape':
-      if (egoMode) {{ exitEgoMode(); }}
-      else {{ selectedNode = null; highlightSet = null; renderDefaultSidebar(); draw(); }}
-      break;
-    case 'e': case 'E':
-      if (selectedNode) enterEgoMode(selectedNode);
+      selectedNode = null; highlightSet = null; blastRadiusSet = new Set(); renderDefaultSidebar(); draw();
       break;
     case 'f': case 'F':
       zoomToFit();
-      break;
-    case 'c': case 'C':
-      toggleClusters();
       break;
     case '?':
       toggleHelp();
@@ -1552,7 +1650,7 @@ function toggleHelp() {{
 // ── Stats bar ─────────────────────────────────────────────────────────────────
 
 function renderStatsBar() {{
-  const sb = document.getElementById('statsbar');
+  const sb = document.getElementById('lp-statsbar');
   if (!METRICS) return;
 
   // Entry point (where the program starts)
@@ -1604,6 +1702,89 @@ function renderStatsBar() {{
   sb.innerHTML = html;
 }}
 
+// ── Language bar (GitHub-style) ──────────────────────────────────────────────
+
+function renderLangBar() {{
+  const container = document.getElementById('lp-langs');
+  if (!container) return;
+  if (!LANG_COUNTS || Object.keys(LANG_COUNTS).length === 0) {{
+    container.style.display = 'none';
+    return;
+  }}
+
+  const total = Object.values(LANG_COUNTS).reduce((a, b) => a + b, 0);
+  if (total === 0) {{ container.style.display = 'none'; return; }}
+
+  const sorted = Object.entries(LANG_COUNTS).sort((a, b) => b[1] - a[1]);
+
+  let barHTML = '<div class="lp-langbar">';
+  let labelsHTML = '<div class="lp-lang-labels">';
+
+  for (const [lang, bytes] of sorted) {{
+    const pct = (bytes / total * 100);
+    const pctStr = pct < 0.1 ? '<0.1' : pct.toFixed(1);
+    const color = COLORS[lang] || COLORS['other'] || '#888';
+    const name = lang.charAt(0).toUpperCase() + lang.slice(1);
+
+    barHTML += `<div class="lang-segment" style="width:${{pct}}%;background:${{color}}"></div>`;
+    labelsHTML += `<div class="lp-lang-label"><span class="lp-lang-dot" style="background:${{color}}"></span>${{pctStr}}% ${{name}}</div>`;
+  }}
+
+  barHTML += '</div>';
+  labelsHTML += '</div>';
+  container.innerHTML = barHTML + labelsHTML;
+}}
+
+// ── Summary + Health panel ───────────────────────────────────────────────────
+
+function renderSummary() {{
+  const panel = document.getElementById('lp-summary');
+  if (!panel) return;
+  if (!SUMMARY && !HEALTH_SCORE) {{ panel.style.display = 'none'; return; }}
+  let html = '';
+  if (SUMMARY) {{
+    html += `<div class="lp-summary">${{esc(SUMMARY)}}</div>`;
+  }}
+  if (HEALTH_SCORE) {{
+    const score = Math.max(1, Math.min(10, HEALTH_SCORE));
+    const pct = score * 10;
+    const color = score >= 8 ? '#22c55e' : score >= 5 ? '#f59e0b' : '#ef4444';
+    html += `<div class="lp-health">`;
+    html += `<span style="color:#6e7681">Health</span>`;
+    html += `<div class="lp-health-bar"><div class="lp-health-fill" style="width:${{pct}}%;background:${{color}}"></div></div>`;
+    html += `<span style="color:${{color}};font-weight:600;font-size:13px">${{score}}/10</span>`;
+    html += `</div>`;
+  }}
+  if (HEALTH_NOTES) {{
+    html += `<div class="lp-health-notes">${{esc(HEALTH_NOTES)}}</div>`;
+  }}
+  panel.innerHTML = html;
+}}
+
+// ── Blast radius ────────────────────────────────────────────────────────────
+// BFS from a selected node following REVERSE edges (importedBy) to find all
+// transitively affected files. Returns set of node IDs.
+
+let blastRadiusSet = new Set();
+
+function computeBlastRadius(nodeId) {{
+  const visited = new Set();
+  const queue = [nodeId];
+  visited.add(nodeId);
+  while (queue.length > 0) {{
+    const id = queue.shift();
+    const dependents = importedByNode[id] || [];
+    for (const dep of dependents) {{
+      if (!visited.has(dep.id)) {{
+        visited.add(dep.id);
+        queue.push(dep.id);
+      }}
+    }}
+  }}
+  visited.delete(nodeId); // don't include the node itself
+  return visited;
+}}
+
 // ── Animation loop ────────────────────────────────────────────────────────────
 
 let animating = false;
@@ -1633,23 +1814,20 @@ function startAnim() {{
 // Initial sidebar with metrics
 renderDefaultSidebar();
 renderStatsBar();
+renderLangBar();
+renderSummary();
 
 // Initialize minimap size
 minimap.width = 160;
 minimap.height = 100;
 
-// Start in "By Purpose" mode — hierarchical layout is the default view.
-// Run layout before physics so nodes start in the right positions.
+// Start in layered layout — organises by abstraction level (high→low).
 (function initLayout() {{
-  const btn = document.getElementById('btnClusters');
-  clusterMode = 'role';
-  btn.textContent = 'By Purpose';
-  btn.classList.add('active');
-  layoutClusters('role');
-  simRunning = false; // deterministic layout — no physics needed
+  layoutMode = 'layered';
+  layoutLayered();
+  simRunning = false;
   draw();
   drawMinimap();
-  // Fit viewport after layout
   setTimeout(() => {{ zoomToFit(); draw(); drawMinimap(); }}, 50);
 }})();
 </script>
@@ -1787,6 +1965,12 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
     node_metrics_json = _safe_json(render_data.get("node_metrics", {}))
     health_json = _safe_json(render_data.get("health", {}))
     lang_counts_json = _safe_json(render_data.get("language_counts", {}))
+    lang_file_counts_json = _safe_json(render_data.get("language_file_counts", {}))
+
+    # Summary + health from metadata
+    summary_json = _safe_json(meta.summary if meta else "")
+    health_score_json = _safe_json(meta.health_score if meta else 0)
+    health_notes_json = _safe_json(meta.health_notes if meta else "")
 
     html = _HTML_TEMPLATE.format(
         repo=repo,
@@ -1809,6 +1993,10 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
         node_metrics_json=node_metrics_json,
         health_json=health_json,
         lang_counts_json=lang_counts_json,
+        lang_file_counts_json=lang_file_counts_json,
+        summary_json=summary_json,
+        health_score_json=health_score_json,
+        health_notes_json=health_notes_json,
     )
 
     if output_path:

@@ -115,13 +115,13 @@ class TestRenderer:
 
     def test_layout_supports_vertical_shrink(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
-        assert ":root { --viewport-height: 100vh; }" in html
+        assert ":root { --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 200px; }" in html
         assert "body { font-family:" in html
-        assert "display: flex; min-height: 0; max-height: var(--viewport-height);" in html
-        assert "#left-panel { width: 240px; height: var(--viewport-height); min-height: 0; max-height: var(--viewport-height);" in html
-        assert "#center { flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height);" in html
-        assert "#graph-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height);" in html
-        assert "#sidebar { width: 320px; height: var(--viewport-height); min-width: 0; min-height: 0; max-height: var(--viewport-height);" in html
+        assert "display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height);" in html
+        assert "#left-panel { width: 100%; height: calc(var(--top-panel-header-height) + var(--top-details-height)); max-height: calc(var(--top-panel-header-height) + var(--top-details-height));" in html
+        assert "#center { flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: 0; overflow: hidden; }" in html
+        assert "#graph-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }" in html
+        assert "#sidebar { flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height);" in html
         assert "#sidebar > * { flex-shrink: 0; }" in html
         assert "max-height: min(360px, 34vh);" in html
 
@@ -130,16 +130,19 @@ class TestRenderer:
         assert "const rootEl = document.documentElement;" in html
         assert "const bodyEl = document.body;" in html
         assert "const leftPanel = document.getElementById('left-panel');" in html
+        assert "const panelHeader = document.getElementById('panel-header');" in html
         assert "const centerPane = document.getElementById('center');" in html
         assert "const graphArea = document.getElementById('graph-area');" in html
         assert "function applyViewportHeight() {" in html
         assert "const hostWidth = window.__prefxplainHostWidth;" in html
         assert "const hostHeight = window.__prefxplainHostHeight;" in html
+        assert "const headerHeight = Math.max(0, Math.ceil(panelHeader ? panelHeader.getBoundingClientRect().height : 0));" in html
+        assert "const detailsHeight = Math.max(0, Math.min(200, vp.height - headerHeight));" in html
         assert "rootEl.style.setProperty('--viewport-height'" in html
-        assert "leftPanel.style.height = `${vp.height}px`;" in html
+        assert "rootEl.style.setProperty('--top-panel-header-height', `${headerHeight}px`);" in html
+        assert "rootEl.style.setProperty('--top-details-height', `${detailsHeight}px`);" in html
         assert "centerPane.style.height = `${vp.height}px`;" in html
         assert "graphArea.style.height = `${vp.height}px`;" in html
-        assert "sidebar.style.height = `${vp.height}px`;" in html
         assert "const rect = graphArea.getBoundingClientRect();" in html
         assert "function syncViewport() {" in html
         assert "let fitZoomLevel = 1;" in html
@@ -162,10 +165,7 @@ class TestRenderer:
         assert "function layoutBlocks(nodeList, edgeList) {" in html
         assert "function layoutGroupedBlocks(nodeList, edgeList) {" in html
         assert "function layoutExpandedBlock(nodeList) {" in html
-        assert 'placeholder="Search files or blocks..."' in html
-        assert "Click a block to open it, or double-click a block or file for its workflow diagram." in html
-        assert "Click a block to open it, or double-click it for a workflow diagram." in html
-        assert "Click a file to inspect it, or double-click a file or block for its workflow diagram." in html
+        assert 'placeholder="Search... (/)"' in html
         assert "Click</span><span>Open a block or inspect a file</span>" in html
         assert "Double-click</span><span>Open the workflow diagram</span>" in html
         assert "Starting points" not in html

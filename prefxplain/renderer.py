@@ -50,14 +50,14 @@ _HTML_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PrefXplain — {repo}</title>
 <style>
-  :root {{ --viewport-height: 100vh; }}
+  :root {{ --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 200px; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   html, body {{ height: var(--viewport-height); min-height: var(--viewport-height); max-height: var(--viewport-height); width: 100%; overflow: hidden; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height); }}
 
   /* ── Top panel (collapsible, vertical content, full width) ──────────── */
-  #left-panel {{ width: 100%; height: 240px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; transition: height .2s ease; }}
-  #left-panel.collapsed {{ height: 0; border-bottom: none; }}
+  #left-panel {{ width: 100%; height: calc(var(--top-panel-header-height) + var(--top-details-height)); max-height: calc(var(--top-panel-header-height) + var(--top-details-height)); background: #161b22; border-bottom: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; transition: height .2s ease, max-height .2s ease; }}
+  #left-panel.collapsed {{ height: 0; max-height: 0; border-bottom: none; }}
   /* Compact header bar: brand, stats, search, buttons — single strip */
   #panel-header {{ display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-bottom: 1px solid #21262d; flex-shrink: 0; flex-wrap: nowrap; overflow: hidden; }}
   #panel-header .ph-brand {{ font-size: 11px; font-weight: 700; color: #58a6ff; white-space: nowrap; }}
@@ -117,7 +117,7 @@ _HTML_TEMPLATE = """\
   }}
 
   /* ── Detail section (fills remaining height in top panel, scrollable) */
-  #sidebar {{ flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }}
+  #sidebar {{ flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height); overflow-y: auto; padding: 6px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }}
   #sidebar.hidden {{ display: none; }}
   #sidebar > * {{ flex-shrink: 0; }}
   #sidebar h2 {{ font-size: 13px; font-weight: 600; color: #e6edf3; word-break: break-all; }}
@@ -235,6 +235,7 @@ const bodyEl = document.body;
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const leftPanel = document.getElementById('left-panel');
+const panelHeader = document.getElementById('panel-header');
 const centerPane = document.getElementById('center');
 const graphArea = document.getElementById('graph-area');
 const sidebar = document.getElementById('sidebar');
@@ -1298,17 +1299,17 @@ function viewportSize() {{
 
 function applyViewportHeight() {{
   const vp = viewportSize();
+  const headerHeight = Math.max(0, Math.ceil(panelHeader ? panelHeader.getBoundingClientRect().height : 0));
+  const detailsHeight = Math.max(0, Math.min(200, vp.height - headerHeight));
   rootEl.style.setProperty('--viewport-height', `${{vp.height}}px`);
+  rootEl.style.setProperty('--top-panel-header-height', `${{headerHeight}}px`);
+  rootEl.style.setProperty('--top-details-height', `${{detailsHeight}}px`);
   bodyEl.style.height = `${{vp.height}}px`;
   bodyEl.style.maxHeight = `${{vp.height}}px`;
-  leftPanel.style.height = `${{vp.height}}px`;
-  leftPanel.style.maxHeight = `${{vp.height}}px`;
   centerPane.style.height = `${{vp.height}}px`;
   centerPane.style.maxHeight = `${{vp.height}}px`;
   graphArea.style.height = `${{vp.height}}px`;
   graphArea.style.maxHeight = `${{vp.height}}px`;
-  sidebar.style.height = `${{vp.height}}px`;
-  sidebar.style.maxHeight = `${{vp.height}}px`;
   return vp;
 }}
 

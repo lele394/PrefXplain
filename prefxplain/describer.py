@@ -40,8 +40,31 @@ Start with a verb (e.g. "Handles...", "Reads...", "Manages..."). Do not mention 
 - "symbols": for each symbol name, write 3-6 words saying what it does \
 (e.g. "run": "starts the web server", "User": "stores user account data"). \
 Only include functions and classes, not imports or variables.
+- "flowchart": a flowchart showing the main logic of the file. \
+Use 3-7 nodes. Each node has "id" (string "1","2"...), "label" (3-6 words describing the step), \
+"type" ("start", "end", "decision", or "step"), and "description" (1 plain-English sentence \
+explaining what happens here — like you're telling a smart friend who doesn't know this codebase). \
+Each edge has "from" and "to" (node ids) and "label" (condition text for decisions, or "" for unconditional). \
+The flowchart should reflect the ACTUAL logic flow, not be generic. \
+Decision nodes MUST have at least 2 outgoing edges with meaningful condition labels (e.g. "yes"/"no", "found"/"not found", "valid"/"invalid"). \
+Start with one "start" node and end with one "end" node.
 Respond with valid JSON only, no markdown fences.
-Example: {"file": "Manages database connections and query helpers.", "symbols": {"connect": "opens a database connection", "run_query": "executes SQL and returns rows"}}
+Example: {"file": "Manages database connections.", "symbols": {"connect": "opens a database connection"}, \
+"flowchart": {"nodes": [{"id": "1", "label": "Receive query request", "type": "start", \
+"description": "Someone wants to run a database query."}, \
+{"id": "2", "label": "Connection pool available?", "type": "decision", \
+"description": "Checks if there's already an open connection we can reuse instead of creating a new one."}, \
+{"id": "3", "label": "Reuse existing connection", "type": "step", \
+"description": "Grabs an idle connection from the pool — faster than opening a new one."}, \
+{"id": "4", "label": "Create new connection", "type": "step", \
+"description": "Opens a fresh connection to the database since the pool was empty."}, \
+{"id": "5", "label": "Return query results", "type": "end", \
+"description": "Runs the SQL, sends back the rows, and returns the connection to the pool for reuse."}], \
+"edges": [{"from": "1", "to": "2", "label": ""}, \
+{"from": "2", "to": "3", "label": "available"}, \
+{"from": "2", "to": "4", "label": "empty"}, \
+{"from": "3", "to": "5", "label": ""}, \
+{"from": "4", "to": "5", "label": ""}]}}
 """
 
 SYSTEM_PROMPT_DETAIL = """\
@@ -252,13 +275,55 @@ def describe(
         conn.close()
 
 
+def _validate_flowchart(fc: dict | None) -> dict | None:
+    """Validate and sanitize an AI-generated flowchart structure."""
+    if not fc or not isinstance(fc, dict):
+        return None
+    nodes = fc.get("nodes")
+    edges = fc.get("edges")
+    if not isinstance(nodes, list) or not isinstance(edges, list):
+        return None
+    if len(nodes) < 2 or len(nodes) > 12:
+        return None
+    valid_types = {"start", "end", "decision", "step"}
+    node_ids: set[str] = set()
+    clean_nodes = []
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        nid = str(n.get("id", ""))
+        label = str(n.get("label", ""))
+        ntype = str(n.get("type", "step"))
+        if not nid or not label:
+            continue
+        if ntype not in valid_types:
+            ntype = "step"
+        node_ids.add(nid)
+        clean_nodes.append({"id": nid, "label": label, "type": ntype})
+    clean_edges = []
+    for e in edges:
+        if not isinstance(e, dict):
+            continue
+        efrom = str(e.get("from", ""))
+        eto = str(e.get("to", ""))
+        elabel = str(e.get("label", ""))
+        if efrom in node_ids and eto in node_ids:
+            clean_edges.append({"from": efrom, "to": eto, "label": elabel})
+    if len(clean_nodes) < 2 or len(clean_edges) < 1:
+        return None
+    return {"nodes": clean_nodes, "edges": clean_edges}
+
+
 def _apply_v2_data(node: Node, data: dict) -> None:
-    """Apply a v2 JSON response (file desc + symbol descs) to a node."""
+    """Apply a v2 JSON response (file desc + symbol descs + flowchart) to a node."""
     node.description = data.get("file", "").strip()
     sym_descs: dict[str, str] = data.get("symbols", {})
     for sym in node.symbols:
         if sym.name in sym_descs:
             sym.description = str(sym_descs[sym.name]).strip()
+    flowchart = _validate_flowchart(data.get("flowchart"))
+    if flowchart:
+        node.flowchart = flowchart
 
 
 def _describe_with_conn(
@@ -335,7 +400,7 @@ def _describe_with_conn(
                             {"role": "system", "content": SYSTEM_PROMPT_V2},
                             {"role": "user", "content": _make_prompt_v2(node, root)},
                         ],
-                        max_tokens=300,
+                        max_tokens=600,
                         temperature=0.2,
                     )
                     content = response.choices[0].message.content if response.choices else None

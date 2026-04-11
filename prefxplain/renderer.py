@@ -18,6 +18,12 @@ LANG_COLORS = {
     "python":     "#4B8BBE",  # Python blue
     "typescript": "#3178C6",  # TS blue
     "javascript": "#F7DF1E",  # JS yellow (text will be dark)
+    "c":          "#555555",  # C grey
+    "c++":        "#f34b7d",  # C++ pink
+    "go":         "#00ADD8",  # Go cyan
+    "rust":       "#DEA584",  # Rust orange
+    "java":       "#b07219",  # Java brown
+    "kotlin":     "#A97BFF",  # Kotlin purple
     "other":      "#888888",
 }
 
@@ -44,13 +50,15 @@ _HTML_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PrefXplain — {repo}</title>
 <style>
+  :root {{ --viewport-height: 100vh; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; height: 100vh; display: flex; overflow: hidden; }}
+  html, body {{ height: var(--viewport-height); min-height: var(--viewport-height); max-height: var(--viewport-height); width: 100%; overflow: hidden; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; display: flex; min-height: 0; max-height: var(--viewport-height); }}
 
   /* ── Left panel (collapsible) ──────────────────────────────────────── */
-  #left-panel {{ width: 240px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width .2s, padding .2s; }}
+  #left-panel {{ width: 240px; height: var(--viewport-height); min-height: 0; max-height: var(--viewport-height); background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width .2s, padding .2s; }}
   #left-panel.collapsed {{ width: 0; padding: 0; overflow: hidden; border-right: none; }}
-  #left-panel .lp-section {{ padding: 12px 16px; border-bottom: 1px solid #21262d; }}
+  #left-panel .lp-section {{ padding: 12px 16px; border-bottom: 1px solid #21262d; flex-shrink: 0; }}
   #left-panel .lp-brand {{ font-size: 11px; font-weight: 600; color: #58a6ff; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2px; }}
   #left-panel h1 {{ font-size: 14px; font-weight: 700; color: #e6edf3; line-height: 1.3; }}
   #left-panel .lp-stats {{ font-size: 11px; color: #6e7681; margin-top: 4px; line-height: 1.6; }}
@@ -78,7 +86,8 @@ _HTML_TEMPLATE = """\
   body:not(.panel-collapsed) #panel-toggle {{ left: 248px; }}
 
   /* ── Center (graph) ────────────────────────────────────────────────── */
-  #center {{ flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; }}
+  #center {{ flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height); overflow: hidden; }}
+  #graph-area {{ flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height); overflow: hidden; }}
   #canvas {{ flex: 1; min-width: 0; cursor: grab; display: block; }}
   #canvas.dragging {{ cursor: grabbing; }}
   #minimap {{ position: absolute; bottom: 12px; right: 12px; width: 140px; height: 90px; background: #161b22cc; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; z-index: 10; }}
@@ -86,9 +95,41 @@ _HTML_TEMPLATE = """\
   #help-overlay h3 {{ color: #e6edf3; font-size: 14px; margin-bottom: 12px; }}
   #help-overlay kbd {{ background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: monospace; }}
   #help-overlay .kb-row {{ display: flex; justify-content: space-between; gap: 20px; padding: 4px 0; font-size: 12px; color: #c9d1d9; }}
+  #flow-overlay {{ display: none; position: absolute; inset: 0; align-items: center; justify-content: center; padding: 28px; background: rgba(1, 4, 9, 0.72); z-index: 25; }}
+  #flow-overlay.open {{ display: flex; }}
+  #flow-panel {{ width: min(960px, calc(100vw - 180px)); max-height: calc(var(--viewport-height) - 72px); overflow: auto; background: #161b22; border: 1px solid #30363d; border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }}
+  #flow-panel header {{ display: flex; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid #21262d; }}
+  #flow-panel .flow-eyebrow {{ font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #58a6ff; font-weight: 700; }}
+  #flow-panel h3 {{ font-size: 18px; color: #e6edf3; line-height: 1.25; margin-top: 4px; }}
+  #flow-panel .flow-subtitle {{ font-size: 13px; color: #8b949e; margin-top: 8px; line-height: 1.5; }}
+  #flow-close {{ flex-shrink: 0; width: 32px; height: 32px; border-radius: 999px; border: 1px solid #30363d; background: #21262d; color: #c9d1d9; cursor: pointer; font-size: 18px; line-height: 1; }}
+  #flow-close:hover {{ background: #30363d; color: #ffffff; }}
+  #flow-body {{ padding: 18px 20px 22px; }}
+  .flow-meta {{ display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }}
+  .flow-pill {{ display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; background: #0d1117; border: 1px solid #30363d; border-radius: 999px; font-size: 11px; color: #8b949e; }}
+  .flow-pill strong {{ color: #e6edf3; font-weight: 600; }}
+  .flow-graph-wrap {{ border: 1px solid #21262d; border-radius: 12px; background: radial-gradient(circle at top, #1d2633, #0f141b 78%); padding: 16px; overflow: auto; }}
+  .flow-svg {{ width: 100%; min-width: 720px; height: auto; display: block; }}
+  .flow-svg .flow-node-group {{ cursor: default; }}
+  .flow-svg .flow-node-group:hover .flow-node-shape {{ stroke-width: 3; filter: brightness(1.3); }}
+  .flow-svg .flow-node-shape {{ stroke-width: 2; transition: stroke-width .15s, filter .15s; }}
+  #flow-tooltip, #group-tooltip {{ display: none; position: fixed; z-index: 50; max-width: 300px; padding: 8px 12px; background: #1c2333; border: 1px solid #58a6ff44; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.5); pointer-events: none; }}
+  #flow-tooltip .ft-detail, #group-tooltip .gt-detail {{ font-size: 12px; color: #c9d1d9; line-height: 1.5; }}
+  .flow-svg .flow-node-label {{ fill: #e6edf3; font-size: 16px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }}
+  .flow-svg .flow-node-caption {{ fill: #b8c3cf; font-size: 13px; text-anchor: middle; }}
+  .flow-svg .flow-edge {{ stroke: #58a6ff; stroke-width: 3; fill: none; }}
+  .flow-svg .flow-edge-label {{ fill: #79c0ff; font-size: 12px; font-weight: 600; text-anchor: middle; }}
+  .flow-note {{ margin-top: 16px; font-size: 13px; color: #9aa4af; line-height: 1.55; }}
+  @media (max-width: 900px) {{
+    #flow-overlay {{ padding: 16px; }}
+    #flow-panel {{ width: min(100%, calc(100vw - 32px)); max-height: calc(var(--viewport-height) - 32px); }}
+    .flow-svg {{ min-width: 560px; }}
+  }}
 
   /* ── Right sidebar (click details) ─────────────────────────────────── */
-  #sidebar {{ width: 320px; background: #161b22; border-left: 1px solid #30363d; padding: 16px; overflow-y: auto; flex-shrink: 0; font-size: 13px; display: flex; flex-direction: column; gap: 12px; }}
+  #sidebar {{ position: absolute; right: 0; top: 0; width: 320px; height: var(--viewport-height); max-height: var(--viewport-height); background: #161b22ee; border-left: 1px solid #30363d; padding: 16px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 12px; z-index: 10; transition: transform 0.15s ease, opacity 0.15s ease; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }}
+  #sidebar.hidden {{ transform: translateX(100%); opacity: 0; pointer-events: none; }}
+  #sidebar > * {{ flex-shrink: 0; }}
   #sidebar h2 {{ font-size: 13px; font-weight: 600; color: #e6edf3; word-break: break-all; }}
   #sidebar .desc {{ color: #8b949e; line-height: 1.5; }}
   #sidebar .section-title {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6e7681; margin-top: 4px; }}
@@ -109,7 +150,7 @@ _HTML_TEMPLATE = """\
   .metrics-panel {{ background: #21262d; border-radius: 6px; padding: 10px 12px; }}
   .code-preview {{
     background: #010409; border: 1px solid #30363d; border-radius: 6px;
-    padding: 10px 0; margin-top: 6px; max-height: 360px; overflow: auto;
+    padding: 10px 0; margin-top: 6px; max-height: min(360px, 34vh); overflow: auto;
     font-family: "SF Mono", Monaco, Menlo, monospace; font-size: 11px;
     line-height: 1.55; color: #c9d1d9; white-space: pre;
   }}
@@ -131,9 +172,11 @@ _HTML_TEMPLATE = """\
   <div class="lp-section" id="lp-summary"></div>
   <div class="lp-section" id="lp-langs"></div>
   <div class="lp-section">
-    <input type="text" id="search" class="lp-search" placeholder="Search files..." autocomplete="off">
+    <input type="text" id="search" class="lp-search" placeholder="Search files or blocks..." autocomplete="off">
     <div class="lp-toolbar">
-      <button id="btnEdges" onclick="toggleEdgeMode()">Edges</button>
+      <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
+      <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
+      <button id="btnSidebar" onclick="toggleSidebarEnabled()">Panel: On</button>
       <button onclick="zoomToFit()">Fit</button>
       <button onclick="toggleHelp()">?</button>
     </div>
@@ -143,22 +186,37 @@ _HTML_TEMPLATE = """\
 
 <button id="panel-toggle" onclick="toggleLeftPanel()" title="Toggle panel">&lsaquo;</button>
 
-<!-- Center (graph canvas) -->
+<!-- Center: graph + sidebar side by side -->
 <div id="center">
-  <canvas id="canvas"></canvas>
-  <canvas id="minimap"></canvas>
-  <div id="help-overlay">
-    <h3>Keyboard Shortcuts</h3>
-    <div class="kb-row"><span><kbd>/</kbd></span><span>Focus search</span></div>
-    <div class="kb-row"><span><kbd>Esc</kbd></span><span>Deselect</span></div>
-    <div class="kb-row"><span><kbd>F</kbd></span><span>Zoom to fit all nodes</span></div>
-    <div class="kb-row"><span><kbd>?</kbd></span><span>Toggle this help panel</span></div>
+  <div id="graph-area">
+    <canvas id="canvas"></canvas>
+    <canvas id="minimap"></canvas>
+    <div id="help-overlay">
+      <h3>Keyboard Shortcuts</h3>
+      <div class="kb-row"><span><kbd>/</kbd></span><span>Focus search</span></div>
+      <div class="kb-row"><span><kbd>Esc</kbd></span><span>Deselect</span></div>
+      <div class="kb-row"><span><kbd>F</kbd></span><span>Zoom to fit all nodes</span></div>
+      <div class="kb-row"><span>Click</span><span>Open a block or inspect a file</span></div>
+      <div class="kb-row"><span>Double-click</span><span>Open the workflow diagram</span></div>
+      <div class="kb-row"><span><kbd>?</kbd></span><span>Toggle this help panel</span></div>
+    </div>
+    <div id="flow-overlay">
+      <div id="flow-panel">
+        <header>
+          <div>
+            <div id="flow-eyebrow" class="flow-eyebrow">Workflow Diagram</div>
+            <h3 id="flow-title">How this part works</h3>
+            <p id="flow-subtitle" class="flow-subtitle"></p>
+          </div>
+          <button id="flow-close" type="button" aria-label="Close workflow overlay">&times;</button>
+        </header>
+        <div id="flow-body"></div>
+      </div>
+    </div>
+    <div id="flow-tooltip"></div>
+    <div id="group-tooltip"></div>
   </div>
-
-  <!-- Right sidebar (click details) -->
-  <div id="sidebar">
-    <p class="placeholder">Click a node to see details.</p>
-  </div>
+  <div id="sidebar" class="hidden"></div>
 </div>
 
 <script>
@@ -174,6 +232,8 @@ const CYCLE_NODES = new Set({cycle_nodes_json});
 const CYCLE_EDGES = new Set({cycle_edges_json});
 const CLUSTERS = {clusters_json};
 const CLUSTERS_BY_ROLE = {clusters_by_role_json};
+const CLUSTERS_BY_GROUP = {clusters_by_group_json};
+const GROUP_DESCRIPTIONS = {group_descriptions_json};
 const ROLE_ORDER = {role_order_json};
 const ROLE_SUBTITLES = {role_subtitles_json};
 const METRICS = {metrics_json};
@@ -185,10 +245,21 @@ const SUMMARY = {summary_json};
 const HEALTH_SCORE = {health_score_json};
 const HEALTH_NOTES = {health_notes_json};
 
+const rootEl = document.documentElement;
+const bodyEl = document.body;
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
+const leftPanel = document.getElementById('left-panel');
+const centerPane = document.getElementById('center');
+const graphArea = document.getElementById('graph-area');
 const sidebar = document.getElementById('sidebar');
 const searchInput = document.getElementById('search');
+const flowOverlay = document.getElementById('flow-overlay');
+const flowEyebrow = document.getElementById('flow-eyebrow');
+const flowTitle = document.getElementById('flow-title');
+const flowSubtitle = document.getElementById('flow-subtitle');
+const flowBody = document.getElementById('flow-body');
+const flowClose = document.getElementById('flow-close');
 
 // ── Left panel toggle ────────────────────────────────────────────────────────
 function toggleLeftPanel() {{
@@ -197,28 +268,498 @@ function toggleLeftPanel() {{
   lp.classList.toggle('collapsed');
   document.body.classList.toggle('panel-collapsed');
   btn.innerHTML = lp.classList.contains('collapsed') ? '&rsaquo;' : '&lsaquo;';
-  // Resize canvas after transition
-  setTimeout(() => {{ resize(); draw(); drawMinimap(); }}, 220);
+  // Resize canvas and refit after transition
+  setTimeout(() => {{ resize(); zoomToFit(); draw(); drawMinimap(); }}, 250);
 }}
 
 // ── State ───────────────────────────────────────────────────────────────────
 let colorMode = 'language';
-let clusterMode = 'off'; // 'off' | 'dir' | 'role'
-let edgeMode = 'hover'; // 'hover' | 'all'
+let clusterMode = 'off';
+let edgeMode = 'all'; // 'hover' | 'all'
 let layoutMode = 'layered'; // 'layered' | 'force'
+let flowDirection = 'auto'; // 'auto' | 'horizontal' | 'vertical'
+let groupingState = 'flat'; // 'grouped' | 'flat'
+const pinnedGroupIds = new Set();
+let viewportWasManuallyMoved = false;
+let fitZoomLevel = 1;
+let userZoomScale = 1;
+let spreadFactor = 1.0; // controls spacing between blocks (scroll wheel)
 
-// Convenience getter used throughout the code (replaces the old showClusters bool)
 function showClusters() {{ return clusterMode !== 'off'; }}
 
-// Toggle between the two cluster views: role ↔ dir
-function toggleClusters() {{
-  clusterMode = (clusterMode === 'role') ? 'dir' : 'role';
-  const btn = document.getElementById('btnClusters');
-  btn.textContent = clusterMode === 'dir' ? 'By Directory' : 'By Purpose';
-  btn.classList.add('active');
-  layoutClusters(clusterMode);
+// ── Directory grouping ──────────────────────────────────────────────────────
+
+const groupMap = {{}};       // groupId -> group object
+const nodeToGroup = {{}};    // nodeId -> groupId
+let visibleNodes = [];
+let visibleEdges = [];
+let groupSourceKind = 'directory';
+
+const TEST_SEGMENTS = new Set(['test', 'tests', 'spec', 'specs', '__tests__']);
+const GENERIC_DIR_SEGMENTS = new Set([
+  'src', 'lib', 'libs', 'app', 'apps', 'pkg', 'packages', 'modules', 'module',
+  'services', 'service', 'internal', 'core',
+]);
+
+function humanizeLabel(value) {{
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\\b\\w/g, c => c.toUpperCase());
+}}
+
+function mergeOverflowClusters(clusterMap, maxGroups) {{
+  const entries = Object.entries(clusterMap)
+    .filter(([, ids]) => ids.length > 0)
+    .sort((a, b) => b[1].length - a[1].length);
+  if (entries.length <= maxGroups) return Object.fromEntries(entries);
+  const kept = entries.slice(0, maxGroups - 1);
+  const otherIds = entries.slice(maxGroups - 1).flatMap(([, ids]) => ids);
+  return Object.fromEntries([...kept, ['(other)', otherIds]]);
+}}
+
+function compressClusterKey(dirName, depth) {{
+  if (dirName === '(root)' || dirName === '(other)') return dirName;
+  const parts = dirName.split('/').filter(Boolean);
+  return parts.slice(0, Math.min(depth, parts.length)).join('/');
+}}
+
+function mergeDirectoryClusters(depth) {{
+  const merged = {{}};
+  for (const [dirName, ids] of Object.entries(CLUSTERS)) {{
+    const key = compressClusterKey(dirName, depth);
+    if (!merged[key]) merged[key] = [];
+    merged[key].push(...ids);
+  }}
+  return mergeOverflowClusters(merged, 10);
+}}
+
+function clusterStats(clusterMap) {{
+  const groups = Object.values(clusterMap).filter(ids => ids.length > 0);
+  if (groups.length === 0) {{
+    return {{ count: 0, meaningful: 0, maxShare: 1 }};
+  }}
+  return {{
+    count: groups.length,
+    meaningful: groups.filter(ids => ids.length >= 2).length,
+    maxShare: Math.max(...groups.map(ids => ids.length)) / Math.max(nodes.length, 1),
+  }};
+}}
+
+function isUsefulClusterMap(clusterMap) {{
+  const stats = clusterStats(clusterMap);
+  return (
+    stats.count >= 2 &&
+    stats.count <= 10 &&
+    stats.meaningful >= 2 &&
+    stats.maxShare <= 0.78
+  );
+}}
+
+function selectGroupSource() {{
+  // Prefer AI-defined architectural groups when available
+  if (Object.keys(CLUSTERS_BY_GROUP).length >= 2) {{
+    return {{ kind: 'group', clusters: CLUSTERS_BY_GROUP }};
+  }}
+
+  const dirDepths = [...new Set(
+    Object.keys(CLUSTERS)
+      .filter(dirName => dirName !== '(root)' && dirName !== '(other)')
+      .map(dirName => dirName.split('/').filter(Boolean).length)
+  )].sort((a, b) => b - a);
+
+  for (const depth of dirDepths) {{
+    const candidate = mergeDirectoryClusters(depth);
+    if (isUsefulClusterMap(candidate)) {{
+      return {{ kind: 'directory', clusters: candidate }};
+    }}
+  }}
+
+  const directDirectoryClusters = mergeOverflowClusters(CLUSTERS, 10);
+  if (isUsefulClusterMap(directDirectoryClusters)) {{
+    return {{ kind: 'directory', clusters: directDirectoryClusters }};
+  }}
+
+  return {{
+    kind: 'role',
+    clusters: mergeOverflowClusters(CLUSTERS_BY_ROLE, 8),
+  }};
+}}
+
+function dominantRole(childNodes) {{
+  const counts = {{}};
+  for (const node of childNodes) {{
+    if (!node.role) continue;
+    counts[node.role] = (counts[node.role] || 0) + 1;
+  }}
+  const winner = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return winner ? winner[0] : '';
+}}
+
+function isTestGroup(groupKey, childNodes, label) {{
+  if (label === 'Tests') return true;
+  if (groupKey === '(other)') return false;
+  if (TEST_SEGMENTS.has(groupKey.toLowerCase())) return true;
+  const role = dominantRole(childNodes);
+  if (role === 'test') return true;
+  return childNodes.every(node => TEST_SEGMENTS.has(node.label.toLowerCase()) || node.role === 'test');
+}}
+
+function groupDisplayLabel(groupKey, childNodes) {{
+  if (groupSourceKind === 'group') {{
+    return groupKey;  // AI-defined group names are already human-readable
+  }}
+  if (groupSourceKind === 'role') {{
+    if (groupKey === 'Other') return 'Miscellaneous';
+    return groupKey;
+  }}
+  if (groupKey === '(root)') return 'Root Files';
+  if (groupKey === '(other)') return 'Miscellaneous';
+
+  const parts = groupKey.split('/').filter(Boolean);
+  const lowered = parts.map(part => part.toLowerCase());
+  if (lowered.some(part => TEST_SEGMENTS.has(part))) return 'Tests';
+
+  let chosen = parts[parts.length - 1] || groupKey;
+  for (let i = parts.length - 1; i >= 0; i--) {{
+    if (!GENERIC_DIR_SEGMENTS.has(lowered[i])) {{
+      chosen = parts[i];
+      break;
+    }}
+  }}
+
+  if (TEST_SEGMENTS.has(chosen.toLowerCase())) return 'Tests';
+  if (chosen.toLowerCase() === 'src') return 'Source Files';
+  if (chosen.toLowerCase() === 'app') return 'App Files';
+  return humanizeLabel(chosen);
+}}
+
+function firstSentence(text) {{
+  if (!text) return '';
+  const cleaned = text.replace(WHITESPACE_RE, ' ').trim();
+  const match = cleaned.match(/.+?[.!?](?:\\s|$)/);
+  return match ? match[0].trim() : cleaned;
+}}
+
+function rankChildNodes(childNodes) {{
+  return [...childNodes].sort((a, b) => {{
+    const aScore = (a.pagerank || 0) * 100 + (a.indegree || 0) * 2 + (a.outdegree || 0);
+    const bScore = (b.pagerank || 0) * 100 + (b.indegree || 0) * 2 + (b.outdegree || 0);
+    return bScore - aScore;
+  }});
+}}
+
+function summarizeGroup(groupKey, label, childNodes) {{
+  // Use AI group description when available
+  if (GROUP_DESCRIPTIONS[groupKey]) return GROUP_DESCRIPTIONS[groupKey];
+
+  const ranked = rankChildNodes(childNodes);
+  const snippets = ranked
+    .map(node => firstSentence(node.description))
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (isTestGroup(groupKey, childNodes, label)) {{
+    if (snippets.length > 0) return snippets.join(' ');
+    const titles = ranked.slice(0, 3).map(node => node.short_title || node.label.replace(JS_EXT_RE, ''));
+    return titles.length > 0 ? `Covers ${{titles.join(', ')}}.` : 'Test coverage for the project.';
+  }}
+
+  if (snippets.length > 0) return snippets.join(' ');
+
+  const titles = ranked
+    .slice(0, 3)
+    .map(node => node.short_title || node.label.replace(JS_EXT_RE, ''))
+    .filter(Boolean);
+  return titles.length > 0 ? `Contains ${{titles.join(', ')}}.` : '';
+}}
+
+function buildGroups() {{
+  for (const key of Object.keys(groupMap)) delete groupMap[key];
+  for (const key of Object.keys(nodeToGroup)) delete nodeToGroup[key];
+
+  const source = selectGroupSource();
+  groupSourceKind = source.kind;
+  if (!source.clusters || Object.keys(source.clusters).length < 2) {{
+    groupingState = 'flat';
+    visibleNodes = nodes;
+    visibleEdges = edges;
+    return;
+  }}
+
+  groupingState = 'grouped';
+
+  for (const [groupKey, ids] of Object.entries(source.clusters)) {{
+    const childNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
+    if (childNodes.length === 0) continue;
+    const label = groupDisplayLabel(groupKey, childNodes);
+    const role = isTestGroup(groupKey, childNodes, label) ? 'test' : dominantRole(childNodes);
+    const desc = summarizeGroup(groupKey, label, childNodes);
+
+    // Dominant language
+    const langCounts = {{}};
+    for (const n of childNodes) {{ langCounts[n.language] = (langCounts[n.language] || 0) + 1; }}
+    const lang = Object.entries(langCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || '';
+
+    const totalSize = childNodes.reduce((s, n) => s + (n.size || 0), 0);
+
+    const group = {{
+      id: 'group:' + groupKey,
+      label,
+      fullPath: groupKey,
+      description: desc,
+      short_title: label,
+      childIds: ids,
+      isGroup: true,
+      language: lang,
+      size: totalSize,
+      fileCount: childNodes.length,
+      x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0, pinned: false,
+      w: NODE_W + 56, h: NODE_H_BASE + 28, // temporary, replaced below
+      indegree: 0, outdegree: 0, pagerank: 0,
+      symbols: [], role, preview: '', inCycle: false,
+    }};
+
+    groupMap[group.id] = group;
+    for (const id of ids) nodeToGroup[id] = group.id;
+  }}
+
+  // Store closed dimensions — layout uses these.
+  // Open dimensions computed on-the-fly when hovering/pinning.
+  for (const g of Object.values(groupMap)) {{
+    g._closedW = g.w;
+    g._closedH = g.h;
+  }}
+
+  // Compute group-level in/out degree from aggregated edges
+  computeVisibleState();
+}}
+
+function computeVisibleState() {{
+  if (groupingState === 'flat') {{
+    visibleNodes = nodes;
+    visibleEdges = edges;
+    return;
+  }}
+
+  // Always show all groups as nodes (children drawn inline when open)
+  const vNodes = [];
+  for (const g of Object.values(groupMap)) vNodes.push(g);
+  visibleNodes = vNodes;
+
+  // Aggregate edges at group level
+  const aggMap = {{}};
+  for (const e of edges) {{
+    const srcId = e._srcId || e.source.id || e.source;
+    const tgtId = e._tgtId || e.target.id || e.target;
+
+    const srcVisible = nodeToGroup[srcId] || srcId;
+    const tgtVisible = nodeToGroup[tgtId] || tgtId;
+
+    if (srcVisible === tgtVisible) continue; // internal
+
+    const key = srcVisible + '|' + tgtVisible;
+    if (aggMap[key]) {{
+      aggMap[key].weight++;
+    }} else {{
+      const srcNode = nodeIndex[srcVisible] || groupMap[srcVisible];
+      const tgtNode = nodeIndex[tgtVisible] || groupMap[tgtVisible];
+      if (!srcNode || !tgtNode) continue;
+      aggMap[key] = {{
+        source: srcNode, target: tgtNode,
+        _srcId: srcVisible, _tgtId: tgtVisible,
+        weight: 1, type: 'imports', symbols: [],
+      }};
+    }}
+  }}
+
+  visibleEdges = Object.values(aggMap);
+
+  // Update group degrees from aggregated edges
+  for (const g of Object.values(groupMap)) {{ g.indegree = 0; g.outdegree = 0; }}
+  for (const e of visibleEdges) {{
+    const src = e.source; const tgt = e.target;
+    if (src.isGroup) src.outdegree++;
+    if (tgt.isGroup) tgt.indegree++;
+  }}
+}}
+
+function isGroupOpen(g) {{
+  if (!g || !g.isGroup) return false;
+  if (pinnedGroupIds.has(g.id)) return true;
+  if (hoveredNode === g) return true;
+  // Also open if hovering a child inside this group
+  if (hoveredNode && !hoveredNode.isGroup && nodeToGroup[hoveredNode.id] === g.id) return true;
+  return false;
+}}
+
+function toggleGroupPin(groupId) {{
+  if (pinnedGroupIds.has(groupId)) {{
+    pinnedGroupIds.delete(groupId);
+  }} else {{
+    pinnedGroupIds.add(groupId);
+  }}
+  // Clear any file selection so the graph doesn't dim
+  selectedNode = null;
+  highlightSet = null;
+  blastRadiusSet = new Set();
+  resolveGroupOverlaps();
+  renderDefaultSidebar();
+  draw();
+}}
+
+// Resolve overlaps between ALL groups using their actual dimensions
+// (expanded for open groups, collapsed for closed ones).
+// Called once when open-state changes, not every frame.
+function resolveGroupOverlaps() {{
+  if (groupingState === 'flat') return;
+  const groups = Object.values(groupMap);
+
+  // Save layout positions once (after relayout)
+  for (const g of groups) {{
+    if (g._layoutX === undefined) {{ g._layoutX = g.x; g._layoutY = g.y; }}
+  }}
+  // Reset ALL to layout positions
+  for (const g of groups) {{
+    g.x = g._layoutX;
+    g.y = g._layoutY;
+  }}
+
+  // Compute effective bounds for each group (open = expanded, closed = collapsed)
+  function groupBounds(g) {{
+    const open = isGroupOpen(g);
+    let w, h;
+    if (open) {{
+      const layout = layoutOpenGroupChildren(g);
+      w = layout.openW;
+      h = layout.openH;
+    }} else {{
+      w = g._closedW;
+      h = g._closedH;
+    }}
+    const top = g.y - g._closedH / 2; // anchor at original closed-top
+    return {{ left: g.x - w / 2, right: g.x + w / 2, top: top, bottom: top + h, w, h }};
+  }}
+
+  // Sort by layout Y (top to bottom) — process top groups first
+  const sorted = [...groups].sort((a, b) => a._layoutY - b._layoutY);
+
+  // Sweep top-down: each group pushes all groups below it if they overlap
+  for (let pass = 0; pass < 12; pass++) {{
+    let moved = false;
+    for (let i = 0; i < sorted.length; i++) {{
+      const a = sorted[i];
+      const ab = groupBounds(a);
+      for (let j = i + 1; j < sorted.length; j++) {{
+        const b = sorted[j];
+        const bb = groupBounds(b);
+        // Horizontal overlap — generous margin so adjacent columns are caught
+        if (bb.right <= ab.left - 30 || bb.left >= ab.right + 30) continue;
+        // Vertical overlap check
+        if (bb.top >= ab.bottom + 16) continue;
+        // Push b down below a
+        const newY = ab.bottom + 80 + b._closedH / 2;
+        if (newY > b.y) {{
+          b.y = newY;
+          moved = true;
+        }}
+      }}
+    }}
+    if (!moved) break;
+  }}
+}}
+
+function collapseGroups() {{
+  pinnedGroupIds.clear();
+  selectedNode = null; highlightSet = null; blastRadiusSet = new Set();
+  computeVisibleState();
+  renderDefaultSidebar();
+  relayout();
+}}
+
+// Position children inside an open group as a grid of full-size cards.
+// Returns {{ items: [{{ node, cx, cy }}], openW, openH, cols, rows }}.
+const OPEN_GROUP_HEADER = 50;
+const OPEN_GROUP_PAD = 14;
+const OPEN_GROUP_GAP = 16;
+
+function layoutOpenGroupChildren(group) {{
+  const children = (group.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
+  if (children.length === 0) return {{ items: [], openW: group.w, openH: group.h, cols: 0, rows: 0 }};
+  const ranked = rankChildNodes(children);
+  const n = ranked.length;
+  const cols = n <= 2 ? 1 : (n <= 6 ? 2 : 3);
+  const rows = Math.ceil(n / cols);
+  const cellW = NODE_W;
+  const cellH = Math.max(...ranked.map(c => c.h || NODE_H_BASE));
+  const openW = cols * cellW + (cols - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD * 2;
+  const openH = OPEN_GROUP_HEADER + rows * cellH + (rows - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD;
+  const topY = group.y - group.h / 2; // anchor to original top
+  const leftX = group.x - openW / 2;
+
+  const items = ranked.map((node, i) => {{
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const cx = leftX + OPEN_GROUP_PAD + col * (cellW + OPEN_GROUP_GAP) + cellW / 2;
+    const cy = topY + OPEN_GROUP_HEADER + row * (cellH + OPEN_GROUP_GAP) + cellH / 2;
+    return {{ node, cx, cy }};
+  }});
+  return {{ items, openW, openH, cols, rows }};
+}}
+
+function openGroupVisualHeight(group) {{
+  return layoutOpenGroupChildren(group).openH;
+}}
+
+function openGroupVisualWidth(group) {{
+  return layoutOpenGroupChildren(group).openW;
+}}
+
+function relayout() {{
+  layoutBlocks(visibleNodes, visibleEdges);
+  // Clear cached layout positions so resolveGroupOverlaps re-captures them
+  for (const g of Object.values(groupMap)) {{ delete g._layoutX; delete g._layoutY; }}
+  viewportWasManuallyMoved = false;
   simRunning = false;
   draw();
+  drawMinimap();
+  setTimeout(() => {{ zoomToFit(); draw(); drawMinimap(); }}, 50);
+}}
+
+function resolvedFlowDirection() {{
+  if (flowDirection !== 'auto') return flowDirection;
+  // Use the actual DOM element size, not the canvas buffer
+  const rect = graphArea.getBoundingClientRect();
+  const w = rect.width || canvasW();
+  const h = rect.height || canvasH();
+  return w > h * 1.3 ? 'horizontal' : 'vertical';
+}}
+
+function toggleFlowDirection() {{
+  const cycle = {{ auto: 'horizontal', horizontal: 'vertical', vertical: 'auto' }};
+  flowDirection = cycle[flowDirection] || 'auto';
+  const btn = document.getElementById('btnFlow');
+  if (btn) {{
+    const labels = {{ auto: 'Flow: Auto', horizontal: 'Flow: \u2192', vertical: 'Flow: \u2193' }};
+    btn.textContent = labels[flowDirection];
+  }}
+  if (groupingState !== 'flat') relayout();
+}}
+
+let sidebarEnabled = true;
+function toggleSidebarEnabled() {{
+  sidebarEnabled = !sidebarEnabled;
+  const btn = document.getElementById('btnSidebar');
+  if (btn) btn.textContent = sidebarEnabled ? 'Panel: On' : 'Panel: Off';
+  if (!sidebarEnabled) {{
+    sidebar.classList.add('hidden');
+    sidebar.innerHTML = '';
+    }} else if (selectedNode) {{
+    renderSidebar(selectedNode);
+  }} else if (hoveredNode && !hoveredNode.isGroup) {{
+    renderSidebar(hoveredNode);
+  }} else if (hoveredNode && hoveredNode.isGroup) {{
+    renderGroupSidebar(hoveredNode);
+  }}
 }}
 
 function toggleEdgeMode() {{
@@ -227,6 +768,234 @@ function toggleEdgeMode() {{
   btn.textContent = edgeMode === 'hover' ? 'Edges: Hover' : 'Edges: All';
   btn.classList.toggle('active', edgeMode === 'all');
   draw();
+}}
+
+function blockScore(n) {{
+  return ((n.pagerank || 0) * 160) + ((n.indegree || 0) * 6) + ((n.outdegree || 0) * 4) + (n.fileCount || 1);
+}}
+
+function rankBlocks(blocks) {{
+  return [...blocks].sort((a, b) => {{
+    const delta = blockScore(b) - blockScore(a);
+    if (delta !== 0) return delta;
+    return a.label.localeCompare(b.label);
+  }});
+}}
+
+function topologicalDepths(nodeList, edgeList) {{
+  const inDeg = {{}};
+  const adj = {{}};
+  for (const n of nodeList) {{
+    inDeg[n.id] = 0;
+    adj[n.id] = [];
+  }}
+  for (const e of edgeList) {{
+    const srcId = e.source.id || e.source;
+    const tgtId = e.target.id || e.target;
+    if (!(srcId in adj) || !(tgtId in inDeg)) continue;
+    adj[srcId].push(tgtId);
+    inDeg[tgtId]++;
+  }}
+
+  const depth = {{}};
+  const queue = nodeList.filter(n => inDeg[n.id] === 0).map(n => n.id);
+  queue.forEach(id => {{ depth[id] = 0; }});
+  for (let i = 0; i < queue.length; i++) {{
+    const id = queue[i];
+    for (const nextId of adj[id]) {{
+      const nextDepth = depth[id] + 1;
+      if (depth[nextId] === undefined || depth[nextId] < nextDepth) {{
+        depth[nextId] = nextDepth;
+        queue.push(nextId);
+      }}
+    }}
+  }}
+  for (const n of nodeList) {{
+    if (depth[n.id] === undefined) depth[n.id] = 0;
+  }}
+  const maxDepth = Math.max(0, ...Object.values(depth));
+  return {{ depth, maxDepth }};
+}}
+
+function stackNodesVertically(nodeList, centerX, startY, gapY) {{
+  let y = startY;
+  for (const n of nodeList) {{
+    n.x = centerX;
+    n.y = y + n.h / 2;
+    n.vx = 0;
+    n.vy = 0;
+    n.pinned = true;
+    y += n.h + gapY;
+  }}
+}}
+
+// Vertical flow: each row = one topo depth, blocks arranged left-to-right within rows
+function layoutBlockRows(rows) {{
+  const nonEmpty = rows.filter(r => r.length > 0);
+  if (nonEmpty.length === 0) return;
+
+  const ROW_GAP = Math.max(140, 140 * spreadFactor);
+  const COL_GAP = Math.max(80, 80 * spreadFactor);
+  const rowHeights = nonEmpty.map(row => Math.max(...row.map(n => n.h)));
+  const rowWidths = nonEmpty.map(row =>
+    row.reduce((sum, n) => sum + n.w, 0) + Math.max(0, row.length - 1) * COL_GAP
+  );
+  const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0) + Math.max(0, rowHeights.length - 1) * ROW_GAP;
+
+  let cursorY = -totalHeight / 2;
+  nonEmpty.forEach((row, ri) => {{
+    const height = rowHeights[ri];
+    const centerY = cursorY + height / 2;
+    const rw = rowWidths[ri];
+    let cursorX = -rw / 2;
+    row.forEach(n => {{
+      n.x = cursorX + n.w / 2;
+      n.y = centerY;
+      cursorX += n.w + COL_GAP;
+    }});
+    cursorY += height + ROW_GAP;
+  }});
+}}
+
+// Horizontal flow: each column = one topo depth, blocks stacked vertically
+function layoutBlockColumns(columns) {{
+  const nonEmpty = columns.filter(col => col.length > 0);
+  if (nonEmpty.length === 0) return;
+
+  const COLUMN_GAP = Math.max(180, 180 * spreadFactor);
+  const ROW_GAP = Math.max(80, 80 * spreadFactor);
+  const widths = nonEmpty.map(col => Math.max(...col.map(n => n.w)));
+  const heights = nonEmpty.map(col => col.reduce((sum, n) => sum + n.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0) + Math.max(0, widths.length - 1) * COLUMN_GAP;
+
+  let cursorX = -totalWidth / 2;
+  nonEmpty.forEach((col, index) => {{
+    const width = widths[index];
+    const centerX = cursorX + width / 2;
+    const startY = -heights[index] / 2;
+    stackNodesVertically(col, centerX, startY, ROW_GAP);
+    cursorX += width + COLUMN_GAP;
+  }});
+}}
+
+function layoutGroupedBlocks(nodeList, edgeList) {{
+  const blocks = nodeList.filter(n => n.isGroup);
+  if (blocks.length === 0) return;
+
+  const ranked = rankBlocks(blocks);
+  const groupEdges = edgeList.filter(e => e.source.isGroup && e.target.isGroup);
+  const {{ depth, maxDepth }} = topologicalDepths(blocks, groupEdges);
+  const dir = resolvedFlowDirection();
+
+  // Assign blocks to lanes (by topo depth). Depth 0 = first lane.
+  const laneCount = Math.max(1, maxDepth + 1);
+  const lanes = Array.from({{ length: laneCount }}, () => []);
+
+  if (maxDepth > 0) {{
+    for (const block of ranked) {{
+      const d = depth[block.id] || 0;
+      // Tests go in last lane
+      const laneIdx = block.role === 'test' ? laneCount - 1 : Math.min(d, laneCount - 1);
+      lanes[laneIdx].push(block);
+    }}
+  }} else {{
+    // No topo structure — just put all in one lane
+    ranked.forEach(block => lanes[0].push(block));
+  }}
+
+  // Sort within each lane: tests last, then by score
+  lanes.forEach(lane => {{
+    lane.sort((a, b) => {{
+      if (a.role === 'test' && b.role !== 'test') return 1;
+      if (b.role === 'test' && a.role !== 'test') return -1;
+      return blockScore(b) - blockScore(a);
+    }});
+  }});
+
+  // If all ended up in one lane, use the old column-based fallback
+  const nonEmptyLanes = lanes.filter(l => l.length > 0);
+  if (nonEmptyLanes.length <= 1 && blocks.length > 1) {{
+    // Fallback: split by score into 2 columns
+    const columns = [[], []];
+    ranked.forEach((block, i) => {{
+      const col = block.role === 'test' ? 1 : i % 2;
+      columns[col].push(block);
+    }});
+    if (dir === 'horizontal') {{
+      layoutBlockColumns(columns);
+    }} else {{
+      layoutBlockRows(columns);
+    }}
+    return;
+  }}
+
+  if (dir === 'horizontal') {{
+    // Horizontal flow: topo depth = column (left to right)
+    layoutBlockColumns(nonEmptyLanes);
+  }} else {{
+    // Vertical flow: topo depth = row (top to bottom)
+    layoutBlockRows(nonEmptyLanes);
+  }}
+
+  layoutBlockColumns(columns);
+}}
+
+function layoutExpandedBlock(nodeList) {{
+  const blocks = rankBlocks(nodeList.filter(n => n.isGroup));
+  const files = rankChildNodes(nodeList.filter(n => !n.isGroup));
+  if (files.length === 0) {{
+    layoutGroupedBlocks(blocks, []);
+    return;
+  }}
+
+  const sideWidth = blocks.length > 0 ? Math.max(...blocks.map(n => n.w)) + 28 : 0;
+  const sideGap = blocks.length > 0 ? 96 : 0;
+  const GRID_GAP_X = 30;
+  const GRID_GAP_Y = 28;
+  const cols = files.length === 1
+    ? 1
+    : Math.min(4, Math.max(2, Math.ceil(Math.sqrt(files.length))));
+  const rows = Math.ceil(files.length / cols);
+  const cellW = Math.max(...files.map(n => n.w));
+  const cellH = Math.max(...files.map(n => n.h));
+  const gridWidth = cols * cellW + Math.max(0, cols - 1) * GRID_GAP_X;
+  const gridHeight = rows * cellH + Math.max(0, rows - 1) * GRID_GAP_Y;
+  const totalWidth = sideWidth + sideGap + gridWidth;
+  const leftEdge = -totalWidth / 2;
+
+  if (blocks.length > 0) {{
+    const sideCenterX = leftEdge + sideWidth / 2;
+    const sideHeight = blocks.reduce((sum, n) => sum + n.h, 0) + Math.max(0, blocks.length - 1) * 34;
+    stackNodesVertically(blocks, sideCenterX, -sideHeight / 2, 34);
+  }}
+
+  const gridLeft = leftEdge + sideWidth + sideGap;
+  const gridTop = -gridHeight / 2;
+  files.forEach((n, index) => {{
+    const row = Math.floor(index / cols);
+    const col = index % cols;
+    n.x = gridLeft + col * (cellW + GRID_GAP_X) + cellW / 2;
+    n.y = gridTop + row * (cellH + GRID_GAP_Y) + cellH / 2;
+    n.vx = 0;
+    n.vy = 0;
+    n.pinned = true;
+  }});
+}}
+
+function layoutBlocks(nodeList, edgeList) {{
+  nodeList = nodeList || visibleNodes || nodes;
+  edgeList = edgeList || visibleEdges || edges;
+  window.__clusterBoxes = null;
+  window.__nodeClusterMap = null;
+  window.__layerBands = null;
+
+  if (groupingState === 'flat') {{
+    layoutLayered(nodeList, edgeList);
+    window.__layerBands = null;
+    return;
+  }}
+
+  layoutGroupedBlocks(nodeList, edgeList);
 }}
 
 // One-shot grid layout when Clusters mode is enabled.
@@ -266,7 +1035,7 @@ function layoutClusters(mode) {{
     }}).filter(Boolean);
 
     const startX = 60, startY = 60;
-    const wrapW = Math.max(800, canvas.width - 120);
+    const wrapW = Math.max(800, canvasW() - 120);
     let cx = startX, cy = startY, rowH = 0;
     for (const cb of clusterBoxes) {{
       if (cx + cb.boxW > startX + wrapW && cx > startX) {{
@@ -287,8 +1056,8 @@ function layoutClusters(mode) {{
     const orderedLabels = ROLE_ORDER.map(roleKey => labelMap[roleKey] || roleKey)
       .filter(label => CLUSTERS_BY_ROLE[label] && CLUSTERS_BY_ROLE[label].length > 0);
 
-    const canvasW = Math.max(canvas.width, 900);
-    const bandW = canvasW - 120;
+    const canvasWide = Math.max(canvasW(), 900);
+    const bandW = canvasWide - 120;
     const HEADER_H = 56; // title (16px) + subtitle (12px) + padding
     const startX = 60, startY = 60;
     let cy = startY;
@@ -342,8 +1111,8 @@ function layoutClusters(mode) {{
     maxY = Math.max(maxY, n.y + n.h / 2);
   }}
   const layoutW = maxX - minX, layoutH = maxY - minY;
-  pan.x = (canvas.width - layoutW * zoom) / 2 - minX * zoom;
-  pan.y = (canvas.height - layoutH * zoom) / 2 - minY * zoom;
+  pan.x = (canvasW() - layoutW * zoom) / 2 - minX * zoom;
+  pan.y = (canvasH() - layoutH * zoom) / 2 - minY * zoom;
 
   window.__clusterBoxes = clusterBoxes;
 
@@ -363,16 +1132,20 @@ function layoutClustersAsGrid() {{ layoutClusters('dir'); }}
 // Lane N = core utilities / low-level (bottom).
 // Labels each lane with its role description.
 
-function layoutLayered() {{
+function layoutLayered(nodeList, edgeList) {{
+  nodeList = nodeList || visibleNodes || nodes;
+  edgeList = edgeList || visibleEdges || edges;
   // Compute depth via BFS
   const inDeg = {{}}, adj = {{}};
-  for (const n of nodes) {{ inDeg[n.id] = 0; adj[n.id] = []; }}
-  for (const e of edges) {{
-    if (inDeg[e.target.id] !== undefined) inDeg[e.target.id]++;
-    if (adj[e.source.id]) adj[e.source.id].push(e.target.id);
+  for (const n of nodeList) {{ inDeg[n.id] = 0; adj[n.id] = []; }}
+  for (const e of edgeList) {{
+    const srcId = e.source.id || e.source;
+    const tgtId = e.target.id || e.target;
+    if (inDeg[tgtId] !== undefined) inDeg[tgtId]++;
+    if (adj[srcId]) adj[srcId].push(tgtId);
   }}
   const layer = {{}};
-  const queue = nodes.filter(n => inDeg[n.id] === 0).map(n => n.id);
+  const queue = nodeList.filter(n => inDeg[n.id] === 0).map(n => n.id);
   queue.forEach(id => {{ layer[id] = 0; }});
   for (let i = 0; i < queue.length; i++) {{
     const id = queue[i];
@@ -383,50 +1156,22 @@ function layoutLayered() {{
       }}
     }}
   }}
-  for (const n of nodes) if (layer[n.id] === undefined) layer[n.id] = 0;
+  for (const n of nodeList) if (layer[n.id] === undefined) layer[n.id] = 0;
 
   const maxLayer = Math.max(0, ...Object.values(layer));
 
   // Group nodes by layer
   const byLayer = {{}};
   for (let l = 0; l <= maxLayer; l++) byLayer[l] = [];
-  for (const n of nodes) byLayer[layer[n.id]].push(n);
+  for (const n of nodeList) byLayer[layer[n.id]].push(n);
 
   // Sort within each layer by number of connections (most connected = center)
   for (const l in byLayer) {{
     byLayer[l].sort((a, b) => (b.indegree + b.outdegree) - (a.indegree + a.outdegree));
   }}
 
-  // ── Layer labels: relationship-based, accessible to everyone ───────
-  // Top = nothing depends on these (tests, CLIs, standalone scripts)
-  // Bottom = everything depends on these (core data structures, shared libs)
-  // Middle = connecting layers
-  function layerLabel(l, layerNodes) {{
-    const count = layerNodes.length;
-    const s = count === 1 ? '' : 's';
-    if (maxLayer === 0) return {{ title: 'All files', subtitle: count + ' file' + s }};
-    if (l === 0) {{
-      return {{ title: 'Surface', subtitle: count + ' file' + s + ' \u2014 nothing depends on these' }};
-    }}
-    if (l === maxLayer) {{
-      // Find the max indegree in this layer to show impact
-      const maxIn = Math.max(...layerNodes.map(n => n.indegree || 0));
-      const depStr = maxIn > 1 ? ' \u2014 up to ' + maxIn + ' files depend on each' : '';
-      return {{ title: 'Foundation', subtitle: count + ' file' + s + depStr }};
-    }}
-    // Middle layers: position relative to total depth
-    const ratio = l / maxLayer;
-    if (ratio <= 0.4) {{
-      return {{ title: 'Features', subtitle: count + ' file' + s + ' \u2014 main functionality' }};
-    }}
-    if (ratio <= 0.7) {{
-      return {{ title: 'Services', subtitle: count + ' file' + s + ' \u2014 shared across features' }};
-    }}
-    return {{ title: 'Core', subtitle: count + ' file' + s + ' \u2014 used by most of the codebase' }};
-  }}
-
   // Compute positions
-  const LANE_PAD_TOP = 60;  // space for lane label + subtitle
+  const LANE_PAD_TOP = 72;  // space for lane label + subtitle
   const NODE_GAP_X = 28;
   const NODE_GAP_Y = 40;
   const LANE_GAP = 30;
@@ -461,9 +1206,6 @@ function layoutLayered() {{
     }}
 
     const bandBottom = currentY + LANE_GAP / 2;
-    const ll = layerLabel(l, layerNodes);
-
-    window.__layerBands.push({{ top: bandTop, bottom: bandBottom, title: ll.title, subtitle: ll.subtitle, layer: l }});
     currentY = bandBottom + LANE_GAP / 2;
   }}
 
@@ -493,20 +1235,214 @@ function toggleLayout() {{
 
 // ── Layout ──────────────────────────────────────────────────────────────────
 
-function resize() {{
-  canvas.width = canvas.offsetWidth;
-  canvas.height = canvas.offsetHeight;
+function viewportSize() {{
+  const hostWidth = window.__prefxplainHostWidth;
+  const hostHeight = window.__prefxplainHostHeight;
+  if (hostWidth && hostHeight) {{
+    return {{
+      width: Math.max(1, Math.floor(hostWidth)),
+      height: Math.max(1, Math.floor(hostHeight)),
+    }};
+  }}
+  const vv = window.visualViewport;
+  return {{
+    width: Math.max(1, Math.floor(vv ? vv.width : window.innerWidth || 1)),
+    height: Math.max(1, Math.floor(vv ? vv.height : window.innerHeight || 1)),
+  }};
 }}
-window.addEventListener('resize', () => {{ resize(); draw(); }});
+
+function applyViewportHeight() {{
+  const vp = viewportSize();
+  rootEl.style.setProperty('--viewport-height', `${{vp.height}}px`);
+  bodyEl.style.height = `${{vp.height}}px`;
+  bodyEl.style.maxHeight = `${{vp.height}}px`;
+  leftPanel.style.height = `${{vp.height}}px`;
+  leftPanel.style.maxHeight = `${{vp.height}}px`;
+  centerPane.style.height = `${{vp.height}}px`;
+  centerPane.style.maxHeight = `${{vp.height}}px`;
+  graphArea.style.height = `${{vp.height}}px`;
+  graphArea.style.maxHeight = `${{vp.height}}px`;
+  sidebar.style.height = `${{vp.height}}px`;
+  sidebar.style.maxHeight = `${{vp.height}}px`;
+  return vp;
+}}
+
+function resize() {{
+  applyViewportHeight();
+  const dpr = window.devicePixelRatio || 1;
+  const rect = graphArea.getBoundingClientRect();
+  const cssW = Math.max(1, Math.floor(rect.width));
+  const cssH = Math.max(1, Math.floor(rect.height));
+  const bufW = Math.floor(cssW * dpr);
+  const bufH = Math.floor(cssH * dpr);
+  const prevWidth = canvas._cssW || 0;
+  const prevHeight = canvas._cssH || 0;
+  if (canvas.width !== bufW || canvas.height !== bufH) {{
+    canvas.width = bufW;
+    canvas.height = bufH;
+    canvas.style.width = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }}
+  canvas._cssW = cssW;
+  canvas._cssH = cssH;
+  return {{
+    width: cssW, height: cssH, prevWidth, prevHeight,
+    changed: prevWidth !== cssW || prevHeight !== cssH,
+  }};
+}}
+function canvasW() {{ return canvas._cssW || Math.floor(canvas.width / (window.devicePixelRatio || 1)); }}
+function canvasH() {{ return canvas._cssH || Math.floor(canvas.height / (window.devicePixelRatio || 1)); }}
+
+function keepViewportCenter(prevWidth, prevHeight, width, height) {{
+  if (!prevWidth || !prevHeight) return;
+  pan.x += (width - prevWidth) / 2;
+  pan.y += (height - prevHeight) / 2;
+}}
+
+function fitNodesForViewport() {{
+  return (groupingState !== 'flat') ? visibleNodes : nodes;
+}}
+
+function graphBounds(nodeList) {{
+  if (!nodeList || nodeList.length === 0) return null;
+  let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
+  for (const n of nodeList) {{
+    // Use expanded dimensions for open groups
+    const box = (typeof nodeBox === 'function') ? nodeBox(n) : {{ x: n.x, y: n.y, w: n.w, h: n.h }};
+    wx0 = Math.min(wx0, box.x - box.w / 2);
+    wy0 = Math.min(wy0, box.y - box.h / 2);
+    wx1 = Math.max(wx1, box.x + box.w / 2);
+    wy1 = Math.max(wy1, box.y + box.h / 2);
+  }}
+  return {{ wx0, wy0, wx1, wy1 }};
+}}
+
+function computeFitZoom(width, height, nodeList) {{
+  const bounds = graphBounds(nodeList);
+  if (!bounds) return 1;
+  const pad = 80;
+  const spanX = Math.max(bounds.wx1 - bounds.wx0, 1);
+  const spanY = Math.max(bounds.wy1 - bounds.wy0, 1);
+  const zx = Math.max(0.01, (width - pad * 2) / spanX);
+  const zy = Math.max(0.01, (height - pad * 2) / spanY);
+  return Math.max(0.3, Math.min(zx, zy, 2));
+}}
+
+function syncZoomScale(width, height) {{
+  fitZoomLevel = computeFitZoom(width, height, fitNodesForViewport());
+  if (fitZoomLevel > 0) {{
+    userZoomScale = zoom / fitZoomLevel;
+  }}
+}}
+
+function viewportCenterWorld(width, height) {{
+  return {{
+    x: (width / 2 - pan.x) / zoom,
+    y: (height / 2 - pan.y) / zoom,
+  }};
+}}
+
+function setViewportForWorldCenter(centerWorld, nextZoom, width, height) {{
+  zoom = Math.max(0.5, Math.min(2.5, nextZoom));
+  pan.x = width / 2 - centerWorld.x * zoom;
+  pan.y = height / 2 - centerWorld.y * zoom;
+}}
+
+let _lastFlowDir = '';
+function syncViewport() {{
+  const size = resize();
+  const centerWorld = (size.prevWidth && size.prevHeight)
+    ? viewportCenterWorld(size.prevWidth, size.prevHeight)
+    : null;
+  if (size.changed) {{
+    // Re-layout if auto flow direction changed due to aspect ratio
+    if (flowDirection === 'auto' && groupingState !== 'flat') {{
+      const newDir = resolvedFlowDirection();
+      if (newDir !== _lastFlowDir) {{
+        _lastFlowDir = newDir;
+        relayout();
+      }}
+    }}
+    fitZoomLevel = computeFitZoom(size.width, size.height, fitNodesForViewport());
+    const shouldRefit =
+      !viewportWasManuallyMoved &&
+      !selectedNode &&
+      !hoveredNode &&
+      !searchQuery;
+
+    if (shouldRefit) {{
+      zoomToFit();
+      drawMinimap();
+      return;
+    }}
+
+    if (centerWorld) {{
+      setViewportForWorldCenter(
+        centerWorld,
+        fitZoomLevel * userZoomScale,
+        size.width,
+        size.height,
+      );
+    }}
+  }}
+  clampPan();
+  draw();
+  drawMinimap();
+}}
+
+window.addEventListener('resize', () => {{ syncViewport(); }});
+window.addEventListener('prefxplain-host-resize', () => {{ syncViewport(); }});
+// Also use ResizeObserver for IDE preview resizes that do not emit window.resize.
+if (typeof ResizeObserver !== 'undefined') {{
+  new ResizeObserver(() => {{ syncViewport(); }}).observe(graphArea);
+}}
+if (window.visualViewport) {{
+  window.visualViewport.addEventListener('resize', () => {{ syncViewport(); }});
+}}
 resize();
+
+let lastViewportWatch = '';
+function watchViewport() {{
+  const vp = applyViewportHeight();
+  const rect = graphArea.getBoundingClientRect();
+  const next = `${{vp.width}}x${{vp.height}}:${{Math.floor(rect.width)}}x${{Math.floor(rect.height)}}`;
+  if (next !== lastViewportWatch) {{
+    lastViewportWatch = next;
+    syncViewport();
+  }}
+  window.requestAnimationFrame(watchViewport);
+}}
+window.requestAnimationFrame(watchViewport);
+
+// ── Pan limits — keep the diagram in view ────────────────────────────────────
+function clampPan() {{
+  const list = (groupingState !== 'flat') ? visibleNodes : nodes;
+  if (list.length === 0) return;
+  let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
+  for (const n of list) {{
+    wx0 = Math.min(wx0, n.x - (n.w || NODE_W) / 2);
+    wy0 = Math.min(wy0, n.y - (n.h || NODE_H_BASE) / 2);
+    wx1 = Math.max(wx1, n.x + (n.w || NODE_W) / 2);
+    wy1 = Math.max(wy1, n.y + (n.h || NODE_H_BASE) / 2);
+  }}
+  // Allow panning up to half the canvas beyond the diagram edges
+  const margin = 0.4;
+  const minPanX = -(wx1 * zoom) + canvasW() * margin;
+  const maxPanX = -(wx0 * zoom) + canvasW() * (1 - margin);
+  const minPanY = -(wy1 * zoom) + canvasH() * margin;
+  const maxPanY = -(wy0 * zoom) + canvasH() * (1 - margin);
+  pan.x = Math.max(minPanX, Math.min(maxPanX, pan.x));
+  pan.y = Math.max(minPanY, Math.min(maxPanY, pan.y));
+}}
 
 // ── Force simulation ─────────────────────────────────────────────────────────
 
-const NODE_W = 220, NODE_H_BASE = 44, NODE_R = 6;
+const NODE_W = 220, NODE_H_BASE = 76, NODE_R = 6;
 // Taller nodes need more space — bump repulsion and spring length
 const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
-// Fixed height — symbols are shown in the sidebar on click, not on the card
+// Fixed height sized to fit a short explanation under each node title.
 function nodeHeight(n) {{
   return NODE_H_BASE;
 }}
@@ -547,7 +1483,7 @@ function nodeHeight(n) {{
   for (const n of GRAPH.nodes) byLayer[layer[n.id]].push(n.id);
 
   // Store positions on GRAPH nodes so the map below can read them
-  const cw = Math.max(canvas.width, 800), ch = Math.max(canvas.height, 600);
+  const cw = Math.max(canvasW(), 800), ch = Math.max(canvasH(), 600);
   const padX = 120, padY = 80;
   for (let l = 0; l <= maxLayer; l++) {{
     const ids = byLayer[l];
@@ -562,8 +1498,8 @@ function nodeHeight(n) {{
 
 const nodes = GRAPH.nodes.map(n => ({{
   ...n,
-  x: n._ix !== undefined ? n._ix : canvas.width / 2 + (Math.random() - 0.5) * 400,
-  y: n._iy !== undefined ? n._iy : canvas.height / 2 + (Math.random() - 0.5) * 300,
+  x: n._ix !== undefined ? n._ix : canvasW() / 2 + (Math.random() - 0.5) * 400,
+  y: n._iy !== undefined ? n._iy : canvasH() / 2 + (Math.random() - 0.5) * 300,
   vx: 0, vy: 0,
   fx: 0, fy: 0,
   pinned: false,
@@ -599,6 +1535,37 @@ function nodeTitleText(n) {{
   return n.short_title || n.label;
 }}
 
+function nodeSummaryText(n) {{
+  if (n.description) return n.description.replace(WHITESPACE_RE, ' ').trim();
+  if (n.role && ROLE_SUBTITLES[n.role]) return ROLE_SUBTITLES[n.role];
+  return '';
+}}
+
+function wrapTextLines(ctx, text, maxWidth, maxLines) {{
+  if (!text) return [];
+  const words = text.split(WHITESPACE_RE).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {{
+    const test = current ? current + ' ' + word : word;
+    if (ctx.measureText(test).width <= maxWidth) {{
+      current = test;
+      continue;
+    }}
+    if (current) lines.push(current);
+    current = word;
+    if (lines.length === maxLines - 1) break;
+  }}
+  if (current && lines.length < maxLines) lines.push(current);
+  const consumedWords = lines.join(' ').split(WHITESPACE_RE).filter(Boolean).length;
+  if (consumedWords < words.length && lines.length > 0) {{
+    let tail = lines[lines.length - 1];
+    while (tail && ctx.measureText(tail + '\u2026').width > maxWidth) tail = tail.slice(0, -1);
+    lines[lines.length - 1] = (tail || lines[lines.length - 1]) + '\u2026';
+  }}
+  return lines;
+}}
+
 const edges = GRAPH.edges.map(e => ({{
   ...e,
   source: nodeIndex[e.source],
@@ -620,6 +1587,9 @@ for (const e of GRAPH.edges) {{
   if (importsByNode[e.source]) importsByNode[e.source].push({{ id: e.target, dir: 'out' }});
   if (importedByNode[e.target]) importedByNode[e.target].push({{ id: e.source, dir: 'in' }});
 }}
+
+const WHITESPACE_RE = new RegExp('\\\\s+', 'g');
+const JS_EXT_RE = new RegExp('\\\\.(py|js|ts)$');
 
 let simRunning = true;
 let simTicks = 0;
@@ -718,8 +1688,8 @@ function tickSim() {{
 
   // Gravity toward center
   for (const n of nodes) {{
-    n.fx += (canvas.width / 2 - n.x) * GRAVITY;
-    n.fy += (canvas.height / 2 - n.y) * GRAVITY;
+    n.fx += (canvasW() / 2 - n.x) * GRAVITY;
+    n.fy += (canvasH() / 2 - n.y) * GRAVITY;
   }}
 
   // Spring forces along edges
@@ -789,6 +1759,7 @@ let selectedNode = null;
 let hoveredNode = null;
 let searchQuery = '';
 let highlightSet = null;
+let lastMouseWX = 0, lastMouseWY = 0; // last known mouse position in world coords
 
 function nodeColor(n) {{
   if (colorMode === 'role' && n.role) return ROLE_COLORS[n.role] || '#888888';
@@ -802,10 +1773,18 @@ function nodeTextColor(n) {{
 
 function isVisible(n) {{
   if (!searchQuery) return true;
-  return n.id.toLowerCase().includes(searchQuery)
-    || n.label.toLowerCase().includes(searchQuery)
-    || (n.description || '').toLowerCase().includes(searchQuery)
-    || (n.short_title || '').toLowerCase().includes(searchQuery);
+  const matchesNode = node => node.id.toLowerCase().includes(searchQuery)
+    || node.label.toLowerCase().includes(searchQuery)
+    || (node.description || '').toLowerCase().includes(searchQuery)
+    || (node.short_title || '').toLowerCase().includes(searchQuery);
+  if (matchesNode(n)) return true;
+  if (n.isGroup && n.childIds) {{
+    return n.childIds.some(childId => {{
+      const child = nodeIndex[childId];
+      return child ? matchesNode(child) : false;
+    }});
+  }}
+  return false;
 }}
 
 function isCycleEdge(e) {{
@@ -918,8 +1897,49 @@ function drawClusters() {{
   }});
 }}
 
+// ── Group color palette ─────────────────────────────────────────────────────
+const GROUP_COLORS = [
+  '#58a6ff', // blue
+  '#7ee787', // green
+  '#d2a8ff', // purple
+  '#f0883e', // orange
+  '#ff7b72', // red
+  '#79c0ff', // light blue
+  '#56d364', // lime
+  '#f778ba', // pink
+];
+const _groupColorMap = {{}};
+let _groupColorIdx = 0;
+function groupColor(groupId) {{
+  if (_groupColorMap[groupId]) return _groupColorMap[groupId];
+  const c = GROUP_COLORS[_groupColorIdx % GROUP_COLORS.length];
+  _groupColorIdx++;
+  _groupColorMap[groupId] = c;
+  return c;
+}}
+
+// Get the effective bounding box of a node (expanded if open group)
+function nodeBox(n) {{
+  if (n.isGroup && isGroupOpen(n)) {{
+    const layout = layoutOpenGroupChildren(n);
+    return {{ x: n.x, y: n.y - n._closedH / 2 + layout.openH / 2,
+             w: layout.openW, h: layout.openH }};
+  }}
+  return {{ x: n.x, y: n.y, w: n.w, h: n.h }};
+}}
+
 function draw() {{
+
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas._cssW || canvas.width;
+  const cssH = canvas._cssH || canvas.height;
+  // Clear the full buffer, then reset dpr base transform
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.restore();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
   ctx.save();
   ctx.translate(pan.x, pan.y);
   ctx.scale(zoom, zoom);
@@ -928,7 +1948,7 @@ function draw() {{
   drawClusters();
 
   // Layer bands (when in layered mode) — each layer gets a distinct color
-  if (layoutMode === 'layered' && window.__layerBands) {{
+  if (layoutMode === 'layered' && groupingState === 'flat' && window.__layerBands && window.__layerBands.length) {{
     const BAND_COLORS = [
       {{ bg: '#22c55e12', border: '#22c55e30', text: '#22c55e' }},  // green  — entry points
       {{ bg: '#3b82f612', border: '#3b82f630', text: '#3b82f6' }},  // blue   — app logic
@@ -951,17 +1971,18 @@ function draw() {{
       ctx.moveTo(-2000, b.top);
       ctx.lineTo(4000, b.top);
       ctx.stroke();
-      // Lane title (bold, colored)
+      // Lane title — positioned relative to viewport center, not world origin
+      // This keeps labels visible regardless of pan position
+      const labelX = (-pan.x / zoom) + 20 / zoom;
       ctx.font = `bold ${{14 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       ctx.fillStyle = palette.text;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
-      ctx.fillText(b.title, 20, b.top + 8);
-      // Lane subtitle (smaller, muted)
-      const titleW = ctx.measureText(b.title).width;
+      ctx.fillText(b.title, labelX, b.top + 8);
+      // Lane subtitle on its own line so the meaning stays readable.
       ctx.font = `${{11 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       ctx.fillStyle = '#6e7681';
-      ctx.fillText(b.subtitle, 20 + titleW + 10, b.top + 10);
+      ctx.fillText(b.subtitle, labelX, b.top + 28);
     }}
   }}
 
@@ -974,8 +1995,8 @@ function draw() {{
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(x2, y2);
-    ctx.lineTo(x2 - arrowSize * Math.cos(angle - 0.42), y2 - arrowSize * Math.sin(angle - 0.42));
-    ctx.lineTo(x2 - arrowSize * Math.cos(angle + 0.42), y2 - arrowSize * Math.sin(angle + 0.42));
+    ctx.lineTo(x2 - arrowSize * Math.cos(angle - 0.55), y2 - arrowSize * Math.sin(angle - 0.55));
+    ctx.lineTo(x2 - arrowSize * Math.cos(angle + 0.55), y2 - arrowSize * Math.sin(angle + 0.55));
     ctx.closePath();
     ctx.fill();
   }}
@@ -1002,93 +2023,443 @@ function draw() {{
     return h % N_LANES;
   }}
 
-  // Route an edge as a bezier curve that exits LEFT from source, travels down
-  // a lane in the LEFT MARGIN (between x=8 and cluster left edge-8), then
-  // enters LEFT into target. Lanes are spread evenly across the margin width.
+  // ── Smart edge routing ────────────────────────────────────────────────
+  // Routes edges around group bounding boxes using orthogonal paths.
+  // Edges exit from the nearest side of the source, travel through clear
+  // corridors between groups, and enter the nearest side of the target.
+
+  function nodeEdgePoint(n, side) {{
+    if (side === 'top')    return {{ x: n.x, y: n.y - n.h / 2 }};
+    if (side === 'bottom') return {{ x: n.x, y: n.y + n.h / 2 }};
+    if (side === 'left')   return {{ x: n.x - n.w / 2, y: n.y }};
+    return                        {{ x: n.x + n.w / 2, y: n.y }};
+  }}
+
+  function bestSide(a, b) {{
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if (Math.abs(dx) > Math.abs(dy)) {{
+      return dx > 0 ? ['right', 'left'] : ['left', 'right'];
+    }}
+    return dy > 0 ? ['bottom', 'top'] : ['top', 'bottom'];
+  }}
+
+  function rectContains(box, x, y, pad) {{
+    return x >= box.x - pad && x <= box.x + box.boxW + pad &&
+           y >= box.y - pad && y <= box.y + box.boxH + pad;
+  }}
+
+  function segmentIntersectsRect(x1, y1, x2, y2, box, pad) {{
+    const bx = box.x - pad, by = box.y - pad;
+    const bw = box.boxW + 2 * pad, bh = box.boxH + 2 * pad;
+    // Check if a horizontal or vertical segment crosses the box
+    if (x1 === x2) {{ // vertical
+      const minY = Math.min(y1, y2), maxY = Math.max(y1, y2);
+      return x1 >= bx && x1 <= bx + bw && maxY >= by && minY <= by + bh;
+    }}
+    if (y1 === y2) {{ // horizontal
+      const minX = Math.min(x1, x2), maxX = Math.max(x1, x2);
+      return y1 >= by && y1 <= by + bh && maxX >= bx && minX <= bx + bw;
+    }}
+    return false;
+  }}
+
   function drawRoutedEdge(a, b, color, lw, arrowSize) {{
-    const boxes = window.__clusterBoxes || [];
-    const clusterLeft = boxes.length > 0 ? boxes[0].x : 60;
-    const marginRight = clusterLeft - 6;  // just left of cluster band
-    const marginLeft = 8;                  // left edge of canvas
-    const N_LANES = 8;
+    const boxes = (window.__clusterBoxes || []).filter(Boolean);
+    const nodeCluster = window.__nodeClusterMap;
+    const aBox = nodeCluster ? nodeCluster.get(a.id) : null;
+    const bBox = nodeCluster ? nodeCluster.get(b.id) : null;
+
+    // Pick exit/entry sides
+    const [aSide, bSide] = bestSide(a, b);
+    const start = nodeEdgePoint(a, aSide);
+    const end = nodeEdgePoint(b, bSide);
+
+    // Corridor offset based on edge hash to spread parallel edges
     const lane = edgeLaneIndex(a, b);
-    const laneX = marginLeft + (lane / (N_LANES - 1)) * (marginRight - marginLeft);
-    const sx = a.x - a.w / 2;
-    const sy = a.y;
-    const ex = b.x - b.w / 2;
-    const ey = b.y;
-    // S-curve: exit source horizontally → down the lane → enter target horizontally
-    const cp1x = laneX, cp1y = sy;
-    const cp2x = laneX, cp2y = ey;
-    const endX = ex - arrowSize * 0.6;
+    const spread = (lane - 3.5) * 6 / zoom;
+
+    // Compute midpoints for orthogonal path
+    const midX = (start.x + end.x) / 2 + spread;
+    const midY = (start.y + end.y) / 2 + spread;
+
+    // Build candidate path points
+    let waypoints;
+    const isHorizontal = aSide === 'left' || aSide === 'right';
+    if (isHorizontal) {{
+      // Exit horizontally → vertical segment → enter horizontally
+      waypoints = [start, {{x: midX, y: start.y}}, {{x: midX, y: end.y}}, end];
+    }} else {{
+      // Exit vertically → horizontal segment → enter vertically
+      waypoints = [start, {{x: start.x, y: midY}}, {{x: end.x, y: midY}}, end];
+    }}
+
+    // Check if the middle segments pass through any box (that isn't source or target's box)
+    const otherBoxes = boxes.filter(box => box !== aBox && box !== bBox);
+    for (const box of otherBoxes) {{
+      for (let i = 0; i < waypoints.length - 1; i++) {{
+        if (segmentIntersectsRect(waypoints[i].x, waypoints[i].y,
+            waypoints[i + 1].x, waypoints[i + 1].y, box, 4)) {{
+          // Reroute around the box: go around its edge
+          const boxCx = box.x + box.boxW / 2;
+          const boxCy = box.y + box.boxH / 2;
+          const goRight = midX > boxCx;
+          const goDown = midY > boxCy;
+          const detourX = goRight ? box.x + box.boxW + 16 / zoom : box.x - 16 / zoom;
+          const detourY = goDown ? box.y + box.boxH + 16 / zoom : box.y - 16 / zoom;
+          if (isHorizontal) {{
+            waypoints = [start, {{x: detourX, y: start.y}}, {{x: detourX, y: end.y}}, end];
+          }} else {{
+            waypoints = [start, {{x: start.x, y: detourY}}, {{x: end.x, y: detourY}}, end];
+          }}
+          break; // one reroute is enough
+        }}
+      }}
+    }}
+
+    // Draw smooth path through waypoints
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, endX, ey);
+    ctx.moveTo(waypoints[0].x, waypoints[0].y);
+    for (let i = 1; i < waypoints.length; i++) {{
+      const prev = waypoints[i - 1];
+      const curr = waypoints[i];
+      // Rounded corners: use a small arc radius
+      if (i < waypoints.length - 1) {{
+        const next = waypoints[i + 1];
+        const r = Math.min(12 / zoom, Math.abs(curr.x - prev.x) / 2, Math.abs(curr.y - prev.y) / 2,
+                           Math.abs(next.x - curr.x) / 2, Math.abs(next.y - curr.y) / 2) || 0;
+        if (r > 0.5) {{
+          ctx.arcTo(curr.x, curr.y, next.x, next.y, r);
+        }} else {{
+          ctx.lineTo(curr.x, curr.y);
+        }}
+      }} else {{
+        ctx.lineTo(curr.x, curr.y);
+      }}
+    }}
     ctx.strokeStyle = color;
     ctx.lineWidth = lw;
     ctx.stroke();
-    drawArrowHead(cp2x, cp2y, ex, ey, color, arrowSize);
+
+    // Arrowhead at the last segment
+    const last = waypoints[waypoints.length - 1];
+    const prev = waypoints[waypoints.length - 2];
+    drawArrowHead(prev.x, prev.y, last.x, last.y, color, arrowSize);
   }}
 
   const nodeClusterMap = window.__nodeClusterMap;
 
-  // Edges
-  for (const e of edges) {{
-    const a = e.source, b = e.target;
-    const vis = isVisible(a) && isVisible(b);
-    if (!vis) continue;
+  // ── Edge color palette (for source-colored edges) ─────────────────────
+  const EDGE_PALETTE = [
+    '#58a6ff', '#7ee787', '#d2a8ff', '#f0883e', '#ff7b72',
+    '#79c0ff', '#56d364', '#bc8cff', '#ffa657', '#ffa198',
+  ];
+  const edgeColorCache = {{}};
+  let edgeColorIdx = 0;
+  function edgeColorForSource(srcId) {{
+    if (edgeColorCache[srcId]) return edgeColorCache[srcId];
+    // Use source group's color for consistency
+    const c = groupColor(srcId) || EDGE_PALETTE[edgeColorIdx++ % EDGE_PALETTE.length];
+    edgeColorCache[srcId] = c;
+    return c;
+  }}
 
-    // Only show an edge if the focal node (selected or hovered) is one of its endpoints.
-    // Using highlightSet membership would also light up edges between neighbors, which is noisy.
-    const focalId = selectedNode ? selectedNode.id : (hoveredNode ? hoveredNode.id : null);
-    const isDirect = focalId && (a.id === focalId || b.id === focalId);
-    const inHighlight = isDirect; // kept for opacity logic below
-    const faded = highlightSet && !isDirect && !(highlightSet.has(a.id) && highlightSet.has(b.id));
+  // Find the point where a line from (fx,fy) to rect center (nx,ny) exits the rect border
+  function rectEdgePoint(fx, fy, nx, ny, hw, hh) {{
+    const dx = fx - nx, dy = fy - ny;
+    if (dx === 0 && dy === 0) return {{ x: nx + hw, y: ny }};
+    const sx = dx !== 0 ? hw / Math.abs(dx) : 1e9;
+    const sy = dy !== 0 ? hh / Math.abs(dy) : 1e9;
+    const s = Math.min(sx, sy);
+    return {{ x: nx + dx * s, y: ny + dy * s }};
+  }}
 
-    // Hover mode: only draw edges when a node is selected/hovered
-    if (edgeMode === 'hover' && !isDirect) continue;
+  // Check if a straight line from (x1,y1)→(x2,y2) intersects a rect
+  function lineHitsRect(x1, y1, x2, y2, rx, ry, rw, rh, pad) {{
+    const left = rx - rw / 2 - pad, right = rx + rw / 2 + pad;
+    const top = ry - rh / 2 - pad, bottom = ry + rh / 2 + pad;
+    // Parametric line: P(t) = (x1,y1) + t*(x2-x1, y2-y1), t in [0,1]
+    const dx = x2 - x1, dy = y2 - y1;
+    let tmin = 0, tmax = 1;
+    if (dx !== 0) {{
+      let t1 = (left - x1) / dx, t2 = (right - x1) / dx;
+      if (t1 > t2) {{ const tmp = t1; t1 = t2; t2 = tmp; }}
+      tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+    }} else if (x1 < left || x1 > right) return false;
+    if (dy !== 0) {{
+      let t1 = (top - y1) / dy, t2 = (bottom - y1) / dy;
+      if (t1 > t2) {{ const tmp = t1; t1 = t2; t2 = tmp; }}
+      tmin = Math.max(tmin, t1); tmax = Math.min(tmax, t2);
+    }} else if (y1 < top || y1 > bottom) return false;
+    return tmin <= tmax && tmax > 0.05 && tmin < 0.95;
+  }}
 
-    const isCycle = isCycleEdge(e);
-    const isBidi = edgeKeySet.has(b.id + '|' + a.id);
+  // Collect all obstacle rects (excluding source and target)
+  function getObstacles(a, b) {{
+    const blocks = (groupingState !== 'flat') ? visibleNodes : nodes;
+    const obs = [];
+    for (const n of blocks) {{
+      if (n === a || n === b) continue;
+      const box = nodeBox(n);
+      obs.push(box);
+    }}
+    return obs;
+  }}
 
-    // Opacity: highlighted edges bright, others very faint in all-mode
-    let alpha;
-    if (faded) alpha = 0.04;
-    else if (inHighlight) alpha = isCycle ? 0.95 : 0.85;
-    else alpha = isCycle ? 0.6 : 0.22; // all-mode, no selection
-    ctx.globalAlpha = alpha;
+  // Shift a border point along the edge it sits on, clamped to block bounds
+  function shiftAlongBorder(pt, box, offset) {{
+    const EPS = 2;
+    const hw = box.w / 2 - 8, hh = box.h / 2 - 8; // inset so arrows stay inside border
+    if (Math.abs(pt.y - (box.y - box.h / 2)) < EPS || Math.abs(pt.y - (box.y + box.h / 2)) < EPS) {{
+      // On top/bottom edge → shift horizontally, clamp to block width
+      const clampedOff = Math.max(-hw, Math.min(hw, offset));
+      return {{ x: box.x + Math.max(-hw, Math.min(hw, (pt.x - box.x) + clampedOff)), y: pt.y }};
+    }}
+    // On left/right edge → shift vertically, clamp to block height
+    const clampedOff = Math.max(-hh, Math.min(hh, offset));
+    return {{ x: pt.x, y: box.y + Math.max(-hh, Math.min(hh, (pt.y - box.y) + clampedOff)) }};
+  }}
 
-    const edgeColor = isCycle ? '#f85149' : '#6b7280';
-    const lw = (isCycle ? 2 : 1.5) / zoom;
-    const as = (isCycle ? 9 : 8) / zoom;
+  // Draw arrow from a→b, routing around any blocking nodes
+  // laneIdx = unique index for this edge, used to offset routing lanes
+  function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx) {{
+    const aBox = nodeBox(a), bBox = nodeBox(b);
+    const LANE_SPREAD = 18 / zoom;
+    const laneOffset = (laneIdx - (totalLanes - 1) / 2) * LANE_SPREAD;
+    const obstacles = getObstacles(a, b);
 
-    // In role cluster mode: route inter-band edges via left margin
-    if (clusterMode === 'role' && nodeClusterMap) {{
-      const aBox = nodeClusterMap.get(a.id);
-      const bBox = nodeClusterMap.get(b.id);
-      if (aBox && bBox && aBox !== bBox) {{
-        // Different cluster bands — route around them
-        drawRoutedEdge(a, b, edgeColor, lw, as);
-        continue;
+    // Check if straight line hits any obstacle
+    const blockers = [];
+    for (const ob of obstacles) {{
+      if (lineHitsRect(aBox.x, aBox.y, bBox.x, bBox.y, ob.x, ob.y, ob.w, ob.h, 12)) {{
+        blockers.push(ob);
       }}
     }}
 
-    const angle = Math.atan2(b.y - a.y, b.x - a.x);
-    if (isBidi) {{
-      const ox = Math.sin(angle) * 5 / zoom;
-      const oy = -Math.cos(angle) * 5 / zoom;
-      drawArrow(a.x + ox, a.y + oy, b.x + ox, b.y + oy, edgeColor, lw, as);
+    // Build waypoints
+    let waypoints;
+    if (blockers.length === 0) {{
+      // Straight: compute edge points on borders, then shift along the border
+      let sp = rectEdgePoint(bBox.x, bBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+      let ep = rectEdgePoint(aBox.x, aBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+      sp = shiftAlongBorder(sp, aBox, laneOffset);
+      ep = shiftAlongBorder(ep, bBox, laneOffset);
+      waypoints = [sp, ep];
     }} else {{
-      const ex = b.x - Math.cos(angle) * (b.w / 2 + 2);
-      const ey = b.y - Math.sin(angle) * (b.h / 2 + 2);
-      drawArrow(a.x, a.y, ex, ey, edgeColor, lw, as);
+      // Route around ALL blockers with per-edge lane offset
+      const routeOffset = laneIdx * LANE_SPREAD;
+      const margin = 24 / zoom;
+      const goRight = aBox.x <= bBox.x;
+      // Find the rightmost (or leftmost) edge of all blockers + source/target
+      let sideX;
+      if (goRight) {{
+        sideX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
+        for (const ob of blockers) sideX = Math.max(sideX, ob.x + ob.w / 2);
+        sideX += margin + routeOffset;
+      }} else {{
+        sideX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
+        for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
+        sideX -= margin + routeOffset;
+      }}
+      // Exit/entry from the side of source/target facing the detour
+      const sp = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+      const ep = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+      waypoints = [sp, {{ x: sideX, y: sp.y }}, {{ x: sideX, y: ep.y }}, ep];
+
+      // Validate the detour doesn't hit any obstacle (if it does, try the other side)
+      let detourBlocked = false;
+      for (const ob of obstacles) {{
+        for (let i = 0; i < waypoints.length - 1; i++) {{
+          if (lineHitsRect(waypoints[i].x, waypoints[i].y,
+              waypoints[i+1].x, waypoints[i+1].y, ob.x, ob.y, ob.w, ob.h, 4)) {{
+            detourBlocked = true;
+            break;
+          }}
+        }}
+        if (detourBlocked) break;
+      }}
+      if (detourBlocked) {{
+        // Try opposite side
+        const altSideX = goRight
+          ? Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2, ...blockers.map(o => o.x - o.w / 2)) - margin - routeOffset
+          : Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2, ...blockers.map(o => o.x + o.w / 2)) + margin + routeOffset;
+        const sp2 = rectEdgePoint(altSideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+        const ep2 = rectEdgePoint(altSideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+        waypoints = [sp2, {{ x: altSideX, y: sp2.y }}, {{ x: altSideX, y: ep2.y }}, ep2];
+      }}
     }}
+
+    // Shorten endpoints so the line stops at the arrowhead base (not the tip)
+    const tipLen = arrowSize * 0.7;
+    const lastPt = waypoints[waypoints.length - 1];
+    const prevPt = waypoints[waypoints.length - 2];
+    // Only shorten if the segment is long enough
+    const lastSegLen = Math.sqrt((lastPt.x - prevPt.x) ** 2 + (lastPt.y - prevPt.y) ** 2);
+    let shortenedEnd = lastPt;
+    if (lastSegLen > tipLen * 2) {{
+      const endAngle = Math.atan2(lastPt.y - prevPt.y, lastPt.x - prevPt.x);
+      shortenedEnd = {{
+        x: lastPt.x - Math.cos(endAngle) * tipLen,
+        y: lastPt.y - Math.sin(endAngle) * tipLen,
+      }};
+    }}
+    let shortenedStart = waypoints[0];
+    if (bidi && waypoints.length >= 2) {{
+      const firstPt = waypoints[0], secPt = waypoints[1];
+      const firstSegLen = Math.sqrt((firstPt.x - secPt.x) ** 2 + (firstPt.y - secPt.y) ** 2);
+      if (firstSegLen > tipLen * 2) {{
+        const startAngle = Math.atan2(firstPt.y - secPt.y, firstPt.x - secPt.x);
+        shortenedStart = {{
+          x: firstPt.x - Math.cos(startAngle) * tipLen,
+          y: firstPt.y - Math.sin(startAngle) * tipLen,
+        }};
+      }}
+    }}
+
+    // Draw path with rounded corners (using shortened endpoints)
+    const drawPts = [...waypoints];
+    drawPts[0] = shortenedStart;
+    drawPts[drawPts.length - 1] = shortenedEnd;
+
+    ctx.beginPath();
+    ctx.moveTo(drawPts[0].x, drawPts[0].y);
+    for (let i = 1; i < drawPts.length; i++) {{
+      if (i < drawPts.length - 1) {{
+        const p = drawPts[i - 1], c = drawPts[i], n = drawPts[i + 1];
+        const r = Math.min(16 / zoom,
+          (Math.abs(c.x - p.x) / 2) || 1e9,
+          (Math.abs(c.y - p.y) / 2) || 1e9,
+          (Math.abs(n.x - c.x) / 2) || 1e9,
+          (Math.abs(n.y - c.y) / 2) || 1e9);
+        if (r > 0.5) {{ ctx.arcTo(c.x, c.y, n.x, n.y, r); }}
+        else {{ ctx.lineTo(c.x, c.y); }}
+      }} else {{
+        ctx.lineTo(drawPts[i].x, drawPts[i].y);
+      }}
+    }}
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+
+    // Queue arrowheads to draw AFTER nodes (so they appear on top)
+    _deferredArrowheads.push({{ fx: prevPt.x, fy: prevPt.y, tx: lastPt.x, ty: lastPt.y, color, size: arrowSize, alpha: ctx.globalAlpha }});
+    if (bidi) {{
+      _deferredArrowheads.push({{ fx: waypoints[1].x, fy: waypoints[1].y, tx: waypoints[0].x, ty: waypoints[0].y, color, size: arrowSize, alpha: ctx.globalAlpha }});
+    }}
+
+    // Weight label
+    if (weight > 1) {{
+      const midIdx = Math.floor(waypoints.length / 2);
+      const lx = (waypoints[midIdx - 1].x + waypoints[midIdx].x) / 2;
+      const ly = (waypoints[midIdx - 1].y + waypoints[midIdx].y) / 2;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const lsx = lx * zoom + pan.x, lsy = ly * zoom + pan.y;
+      ctx.font = 'bold 14px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const text = '\u00d7' + weight;
+      const tw = ctx.measureText(text).width + 8;
+      ctx.fillStyle = '#0d1117cc';
+      ctx.beginPath();
+      ctx.roundRect(lsx - tw / 2, lsy - 10, tw, 20, 5);
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.fillText(text, lsx, lsy);
+      ctx.restore();
+    }}
+  }}
+
+  // Deferred arrowheads: drawn AFTER nodes so they're always visible on top
+  const _deferredArrowheads = [];
+
+  // Edges (use visibleEdges when grouping is active)
+  const drawEdges = (groupingState !== 'flat') ? visibleEdges : edges;
+  // Build bidi set + dedup tracker
+  const drawEdgeKeySet = new Set(drawEdges.map(e => (e._srcId || e.source.id || e.source) + '|' + (e._tgtId || e.target.id || e.target)));
+  const drawnBidiPairs = new Set();
+
+  // Pre-assign sequential lane indices to edges for non-overlapping routing.
+  // Each edge gets a unique laneIdx used to offset its vertical routing segment.
+  let _laneCounter = 0;
+  const edgeLaneMap = {{}};
+  for (const e of drawEdges) {{
+    const sId = e._srcId || e.source.id || e.source;
+    const tId = e._tgtId || e.target.id || e.target;
+    edgeLaneMap[sId + '|' + tId] = _laneCounter++;
+  }}
+  const totalLanes = _laneCounter || 1;
+
+  for (const e of drawEdges) {{
+    const a = e.source, b = e.target;
+    if (!isVisible(a) || !isVisible(b)) continue;
+
+    const srcId = e._srcId || a.id;
+    const tgtId = e._tgtId || b.id;
+
+    // Detect bidirectional
+    const bidi = drawEdgeKeySet.has(tgtId + '|' + srcId) || edgeKeySet.has(b.id + '|' + a.id);
+    // Skip reverse of a bidi pair (already drawn with double arrowheads)
+    if (bidi) {{
+      const pairKey = [srcId, tgtId].sort().join('|');
+      if (drawnBidiPairs.has(pairKey)) continue;
+      drawnBidiPairs.add(pairKey);
+    }}
+
+    const focalId = selectedNode ? selectedNode.id : (hoveredNode ? hoveredNode.id : null);
+    const isDirect = focalId && (a.id === focalId || b.id === focalId);
+    const faded = highlightSet && !isDirect && !(highlightSet.has(a.id) && highlightSet.has(b.id));
+
+    if (edgeMode === 'hover' && !isDirect) continue;
+
+    const isCycle = isCycleEdge(e);
+
+    let alpha;
+    if (faded) alpha = 0.06;
+    else if (isDirect) alpha = isCycle ? 0.95 : 0.9;
+    else alpha = isCycle ? 0.7 : 0.45;
+    ctx.globalAlpha = alpha;
+
+    const edgeColor = isCycle ? '#f85149' : edgeColorForSource(srcId);
+    // For bidi, combine weights from both directions
+    let weight = e.weight || 1;
+    if (bidi) {{
+      const reverse = drawEdges.find(re => (re._srcId || re.source.id) === tgtId && (re._tgtId || re.target.id) === srcId);
+      if (reverse) weight += (reverse.weight || 1);
+    }}
+    const baseLw = isCycle ? 5 : (4 + (weight > 1 ? Math.log2(weight) * 1.5 : 0));
+    const lw = baseLw / zoom;
+    const arrowSz = (isCycle ? 24 : 20) / zoom;
+
+    const laneIdx = edgeLaneMap[srcId + '|' + tgtId] || 0;
+    drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx);
   }}
 
   ctx.globalAlpha = 1;
 
-  // Nodes
-  for (const n of nodes) {{
+  // Nodes (use visibleNodes when grouping is active)
+  // Build draw list: closed groups first, then open groups + children on top
+  let drawNodes;
+  const openGroupChildSet = new Set();
+  if (groupingState !== 'flat') {{
+    const closedGroups = [];
+    const openGroups = [];
+    for (const g of visibleNodes) {{
+      if (g.isGroup && isGroupOpen(g)) {{
+        openGroups.push(g);
+        const layout = layoutOpenGroupChildren(g);
+        for (const item of layout.items) {{
+          openGroups.push(item.node);
+          openGroupChildSet.add(item.node.id);
+        }}
+      }} else {{
+        closedGroups.push(g);
+      }}
+    }}
+    drawNodes = [...closedGroups, ...openGroups];
+  }} else {{
+    drawNodes = nodes;
+  }}
+  for (const n of drawNodes) {{
     if (!isVisible(n)) continue;
     const faded = highlightSet && !highlightSet.has(n.id);
     ctx.globalAlpha = faded ? 0.15 : 1;
@@ -1101,13 +2472,120 @@ function draw() {{
     const inCycle = n.inCycle;
     const inBlast = blastRadiusSet.has(n.id);
 
+    // Groups handle their own card drawing (collapsed or expanded)
+    if (n.isGroup) {{
+      const open = isGroupOpen(n);
+      const pinned = pinnedGroupIds.has(n.id);
+
+      if (open) {{
+        // ── Expanded: draw container background, children drawn later ──
+        const layout = layoutOpenGroupChildren(n);
+        const gTop = n.y - n.h / 2;
+        const gLeft = n.x - layout.openW / 2;
+        // Position children in world coords (used by the node draw loop below)
+        for (const item of layout.items) {{
+          item.node.x = item.cx;
+          item.node.y = item.cy;
+        }}
+        // Container background with group color
+        const gc = groupColor(n.id);
+        ctx.fillStyle = '#0d1117';
+        ctx.strokeStyle = gc;
+        ctx.lineWidth = 2.5 / zoom;
+        roundRect(ctx, gLeft, gTop, layout.openW, layout.openH, 10);
+        ctx.fill(); ctx.stroke();
+        // Subtle colored inner glow
+        ctx.strokeStyle = gc + '18';
+        ctx.lineWidth = 6 / zoom;
+        roundRect(ctx, gLeft + 3, gTop + 3, layout.openW - 6, layout.openH - 6, 8);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        // Header in screen space
+        if (layout.openW * zoom >= 60) {{
+          ctx.save();
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const sx = n.x * zoom + pan.x;
+          const sy = gTop * zoom + pan.y;
+          const sw = layout.openW * zoom;
+          // Group label in group color
+          ctx.font = 'bold 17px -apple-system, sans-serif';
+          ctx.fillStyle = gc;
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          ctx.fillText(n.label, sx - sw/2 + 12, sy + 8);
+          // File count + pin
+          ctx.font = '14px -apple-system, sans-serif';
+          ctx.fillStyle = '#8b949e';
+          const meta = n.fileCount + (n.fileCount === 1 ? ' file' : ' files') + (pinned ? '  \u2022 pinned' : '');
+          ctx.fillText(meta, sx - sw/2 + 12, sy + 28);
+          // Group color dot
+          ctx.fillStyle = gc;
+          ctx.beginPath();
+          ctx.arc(sx + sw/2 - 16, sy + 18, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }}
+      }} else {{
+        // ── Collapsed: stacked-cards with group color ─────────────────
+        const gc = groupColor(n.id);
+        ctx.fillStyle = '#1a1f26';
+        ctx.strokeStyle = gc + '40';
+        ctx.lineWidth = 0.5 / zoom;
+        roundRect(ctx, x + 4, y + 4, nw, nh, NODE_R); ctx.fill(); ctx.stroke();
+        roundRect(ctx, x + 2, y + 2, nw, nh, NODE_R); ctx.fill(); ctx.stroke();
+        // Main card with colored border
+        ctx.fillStyle = isHovered ? '#21262d' : '#161b22';
+        ctx.strokeStyle = isHovered ? gc : gc + '80';
+        ctx.lineWidth = (isHovered ? 2 : 1.5) / zoom;
+        roundRect(ctx, x, y, nw, nh, NODE_R); ctx.fill(); ctx.stroke();
+        // Color bar on left
+        ctx.fillStyle = gc;
+        roundRect(ctx, x, y, 5, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }}); ctx.fill();
+        ctx.shadowBlur = 0;
+        // Text in screen space
+        if (nw * zoom >= 40) {{
+          ctx.save();
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const sx = n.x * zoom + pan.x, sy = n.y * zoom + pan.y;
+          const sw = nw * zoom, sh = nh * zoom;
+          ctx.beginPath();
+          ctx.rect(sx - sw/2, sy - sh/2, sw, sh);
+          ctx.clip();
+          ctx.font = 'bold 17px -apple-system, sans-serif';
+          ctx.fillStyle = gc;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          const groupTitleLines = wrapTextLines(ctx, n.label, sw - 22, 2);
+          let groupY = sy - sh / 2 + 8;
+          groupTitleLines.forEach(line => {{
+            ctx.fillText(line, sx, groupY);
+            groupY += 14;
+          }});
+          ctx.font = '14px -apple-system, sans-serif';
+          ctx.fillStyle = '#8b949e';
+          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx, groupY + 2);
+          if (n.description && sh > 60) {{
+            ctx.font = '13px -apple-system, sans-serif';
+            ctx.fillStyle = '#6e7681';
+            const descLines = wrapTextLines(ctx, n.description, sw - 20, 2);
+            let descY = groupY + 18;
+            descLines.forEach(line => {{
+              ctx.fillText(line, sx, descY);
+              descY += 11;
+            }});
+          }}
+          ctx.restore();
+        }}
+      }}
+      continue;
+    }}
+
+    // ── Regular file node card background ──────────────────────────────
     // Shadow for selected/hovered/blast
     if (isSelected || isHovered || inBlast) {{
       ctx.shadowColor = inBlast ? '#f59e0b' : color;
       ctx.shadowBlur = (isSelected ? 14 : inBlast ? 10 : 6) / zoom;
     }}
-
-    // Rounded rect — blast radius nodes get an amber tint
     ctx.fillStyle = isSelected ? color : (inBlast ? '#2d2008' : (isHovered ? '#21262d' : '#161b22'));
     ctx.strokeStyle = inCycle ? '#f85149' : (inBlast ? '#f59e0b' : (isSelected ? color : (isHovered ? color : '#30363d')));
     ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : inBlast ? 1.5 : 1) / zoom;
@@ -1115,14 +2593,12 @@ function draw() {{
     ctx.fill();
     ctx.stroke();
     ctx.shadowBlur = 0;
-
     // Language indicator (left bar)
     if (!isSelected) {{
       ctx.fillStyle = color;
       roundRect(ctx, x, y, 4, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }});
       ctx.fill();
     }}
-
     // Cycle indicator (right bar, red)
     if (inCycle && !isSelected) {{
       ctx.fillStyle = '#f85149';
@@ -1130,22 +2606,21 @@ function draw() {{
       ctx.fill();
     }}
 
-    // LOD: skip text if card is too small on screen (< 55px wide)
-    // This keeps the graph clean when zoomed out.
-    if (nw * zoom < 55) {{
-      // Draw just a tiny label for identification
-      if (nw * zoom >= 28) {{
+    // LOD: skip text if card is too small on screen
+    if (nw * zoom < 75 || nh * zoom < 36) {{
+      if (nw * zoom >= 36 && nh * zoom >= 22) {{
         ctx.save();
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.font = `bold 9px -apple-system, sans-serif`;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.font = 'bold 12px -apple-system, sans-serif';
         ctx.fillStyle = '#8b949e';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(n.label.replace(/\.(py|js|ts)$/, ''), n.x * zoom + pan.x, n.y * zoom + pan.y);
+        ctx.fillText(n.label.replace(JS_EXT_RE, ''), n.x * zoom + pan.x, n.y * zoom + pan.y);
         ctx.restore();
       }}
       continue;
     }}
+    const compactCard = nh * zoom < 90; // too short for description + footer
 
     // Clip ALL text drawing to the card rectangle — prevents overflow onto adjacent cards
     // Text is drawn in SCREEN SPACE (constant 12px size regardless of zoom).
@@ -1154,24 +2629,16 @@ function draw() {{
     const screenW = nw * zoom;
     const screenH = nh * zoom;
     ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset to screen coords
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // reset to screen coords (dpr-aware)
     ctx.beginPath();
     roundRect(ctx, screenX - screenW/2 + 1, screenY - screenH/2 + 1, screenW - 2, screenH - 2, NODE_R * zoom);
     ctx.clip();
 
-    // 4-section card layout:
-    //   Section 1: description (or label if no description) — primary text
-    //   Divider
-    //   Section 2: symbol list (function/class names, colored by kind)
-    //   Divider
-    //   Section 3: filename · role · size (footer, muted)
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     const textColor = isSelected ? nodeTextColor(n) : '#e6edf3';
     const mutedColor = isSelected ? 'rgba(255,255,255,0.7)' : '#8b949e';
-    const symFnColor  = isSelected ? 'rgba(255,255,255,0.9)' : '#c084fc';
-    const symClsColor = isSelected ? 'rgba(255,255,255,0.9)' : '#93c5fd';
     const divColor    = isSelected ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.08)';
 
     // All drawing is in screen space (setTransform reset above).
@@ -1179,65 +2646,60 @@ function draw() {{
     const padding = 8;
     const innerW = screenW - padding * 2;
 
-    // ── Section 1: description / title ───────────────────────────────────
+    // ── Section 1: title + short explanation ─────────────────────────────
     const titleText = nodeTitleText(n);
-    ctx.font = `bold 12px -apple-system, sans-serif`;
+    const summaryText = nodeSummaryText(n);
+    ctx.font = 'bold 16px -apple-system, sans-serif';
     const maxLineW = innerW - 4;
-    const words = titleText.split(' ');
-    let line1 = '', line2 = '';
-    for (const word of words) {{
-      const test = line1 ? line1 + ' ' + word : word;
-      if (ctx.measureText(test).width <= maxLineW) {{
-        line1 = test;
-      }} else if (!line2) {{
-        line2 = word;
-      }} else {{
-        const test2 = line2 + ' ' + word;
-        if (ctx.measureText(test2).width <= maxLineW) {{
-          line2 = test2;
-        }} else {{
-          while (line2 && ctx.measureText(line2 + '\u2026').width > maxLineW) {{
-            line2 = line2.slice(0, -1);
-          }}
-          line2 += '\u2026';
-          break;
-        }}
-      }}
-    }}
+    const titleLines = wrapTextLines(ctx, titleText, maxLineW, 2);
+    ctx.font = '13px -apple-system, sans-serif';
+    const summaryLines = wrapTextLines(ctx, summaryText, maxLineW, 2);
 
     // Top of text content in screen px (NODE_R * zoom = border radius in screen px)
     let curY = screenY - screenH / 2 + NODE_R * zoom + 6;
 
-    // Title line(s) — symbols are in the sidebar, not on the card
+    // Title line(s)
     ctx.fillStyle = textColor;
-    ctx.font = `bold 12px -apple-system, sans-serif`;
+    ctx.font = 'bold 16px -apple-system, sans-serif';
     ctx.textBaseline = 'top';
     ctx.textAlign = 'center';
-    ctx.fillText(line1, screenX, curY);
-    curY += 14;
-    if (line2) {{
-      ctx.fillText(line2, screenX, curY);
-      curY += 14;
-    }}
-    curY += 4;
+    titleLines.forEach(line => {{
+      ctx.fillText(line, screenX, curY);
+      curY += 18;
+    }});
+    curY += 6;
 
-    // ── Bottom divider + footer ──────────────────────────────────────────
-    ctx.strokeStyle = divColor;
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(screenX - screenW / 2 + padding, screenY + screenH / 2 - 18);
-    ctx.lineTo(screenX + screenW / 2 - padding, screenY + screenH / 2 - 18);
-    ctx.stroke();
+    if (!compactCard) {{
+      const dividerY = screenY + screenH / 2 - 22;
+      if (summaryLines.length > 0 && curY < dividerY - 10) {{
+        ctx.fillStyle = mutedColor;
+        ctx.font = '13px -apple-system, sans-serif';
+        summaryLines.forEach(line => {{
+          if (curY <= dividerY - 11) {{
+            ctx.fillText(line, screenX, curY);
+            curY += 15;
+          }}
+        }});
+      }}
 
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'bottom';
-    ctx.fillStyle = mutedColor;
-    ctx.font = `9px "SF Mono", monospace`;
-    const footer = nodeSubtitle(n);
-    if (footer) {{
-      const footerMaxW = Math.floor(innerW / 5.5);
-      const footerText = footer.length > footerMaxW ? footer.slice(0, footerMaxW - 1) + '\u2026' : footer;
-      ctx.fillText(footerText, screenX, screenY + screenH / 2 - 5);
+      // ── Bottom divider + footer ────────────────────────────────────────
+      ctx.strokeStyle = divColor;
+      ctx.lineWidth = 0.5;
+      ctx.beginPath();
+      ctx.moveTo(screenX - screenW / 2 + padding, dividerY);
+      ctx.lineTo(screenX + screenW / 2 - padding, dividerY);
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillStyle = mutedColor;
+      ctx.font = `12px "SF Mono", monospace`;
+      const footer = nodeSubtitle(n);
+      if (footer) {{
+        const footerMaxW = Math.floor(innerW / 5.5);
+        const footerText = footer.length > footerMaxW ? footer.slice(0, footerMaxW - 1) + '\u2026' : footer;
+        ctx.fillText(footerText, screenX, screenY + screenH / 2 - 6);
+      }}
     }}
     ctx.restore(); // end card clip
 
@@ -1253,8 +2715,16 @@ function draw() {{
     }}
   }}
 
+  // Draw deferred arrowheads ON TOP of everything
+  for (const ah of _deferredArrowheads) {{
+    ctx.globalAlpha = ah.alpha;
+    drawArrowHead(ah.fx, ah.fy, ah.tx, ah.ty, ah.color, ah.size);
+  }}
+
   ctx.globalAlpha = 1;
   ctx.restore();
+
+  window.__backButton = null;
 }}
 
 function roundRect(ctx, x, y, w, h, r) {{
@@ -1278,21 +2748,89 @@ function roundRect(ctx, x, y, w, h, r) {{
 
 let pan = {{ x: 0, y: 0 }}, zoom = 1;
 let dragging = false, dragStart = null, panStart = null, dragNode = null;
+let clickTimer = null, pendingClickNode = null;
+const DOUBLE_CLICK_DELAY = 220;
 
 function worldCoords(cx, cy) {{
   return {{ x: (cx - pan.x) / zoom, y: (cy - pan.y) / zoom }};
 }}
 
 function nodeAt(wx, wy) {{
-  for (let i = nodes.length - 1; i >= 0; i--) {{
-    const n = nodes[i];
+  const list = (groupingState !== 'flat') ? visibleNodes : nodes;
+  // For open groups: header area → group, children area → child node
+  if (groupingState !== 'flat') {{
+    for (const g of list) {{
+      if (!g.isGroup || !isGroupOpen(g)) continue;
+      const layout = layoutOpenGroupChildren(g);
+      const gTop = g.y - g.h / 2;
+      const gLeft = g.x - layout.openW / 2;
+      // Check if inside the expanded bounds
+      if (wx < gLeft || wx > gLeft + layout.openW) continue;
+      if (wy < gTop || wy > gTop + layout.openH) continue;
+      // Header area → return group (for pin/unpin)
+      if (wy < gTop + OPEN_GROUP_HEADER) return g;
+      // Children area → check individual children (full-size cards)
+      for (const item of layout.items) {{
+        const child = item.node;
+        if (Math.abs(wx - item.cx) <= child.w / 2 && Math.abs(wy - item.cy) <= child.h / 2) {{
+          return child;
+        }}
+      }}
+      // In the group box but not on a child → return group
+      return g;
+    }}
+  }}
+  // Then check closed groups/nodes
+  for (let i = list.length - 1; i >= 0; i--) {{
+    const n = list[i];
     if (!isVisible(n)) continue;
     if (Math.abs(wx - n.x) <= n.w / 2 && Math.abs(wy - n.y) <= n.h / 2) return n;
   }}
   return null;
 }}
 
+function runSingleNodeClick(node) {{
+  if (!node) return;
+  if (node.isGroup && groupingState !== 'flat') {{
+    toggleGroupPin(node.id);
+  }} else {{
+    selectNode(node);
+  }}
+}}
+
+function clearPendingNodeClick(commit) {{
+  if (!clickTimer) {{
+    pendingClickNode = null;
+    return;
+  }}
+  const pending = pendingClickNode;
+  window.clearTimeout(clickTimer);
+  clickTimer = null;
+  pendingClickNode = null;
+  if (commit && pending) runSingleNodeClick(pending);
+}}
+
+function queueNodeClick(node) {{
+  if (clickTimer && pendingClickNode) {{
+    if (pendingClickNode.id === node.id) {{
+      clearPendingNodeClick(false);
+      selectNode(node);
+      openFlowOverlay(node);
+      return;
+    }}
+    clearPendingNodeClick(true);
+  }}
+  pendingClickNode = node;
+  clickTimer = window.setTimeout(() => {{
+    const pending = pendingClickNode;
+    clickTimer = null;
+    pendingClickNode = null;
+    if (pending) runSingleNodeClick(pending);
+  }}, DOUBLE_CLICK_DELAY);
+}}
+
 canvas.addEventListener('mousedown', e => {{
+  document.getElementById('group-tooltip').style.display = 'none';
   const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
   const n = nodeAt(wx, wy);
   dragging = true;
@@ -1309,24 +2847,70 @@ canvas.addEventListener('mousedown', e => {{
 
 canvas.addEventListener('mousemove', e => {{
   const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
+  lastMouseWX = wx; lastMouseWY = wy;
   if (dragging && dragNode) {{
     // No node dragging — just update cursor
   }} else if (dragging && dragStart) {{
     pan.x = panStart.x + (e.offsetX - dragStart.x);
     pan.y = panStart.y + (e.offsetY - dragStart.y);
+    viewportWasManuallyMoved = true;
+    clampPan();
     draw();
   }} else {{
     const prev = hoveredNode;
     hoveredNode = nodeAt(wx, wy);
-    if (prev !== hoveredNode) draw();
+    if (prev !== hoveredNode) {{
+      draw();
+      // Group tooltip — only for closed (non-open) groups
+      const gtt = document.getElementById('group-tooltip');
+      if (hoveredNode && hoveredNode.isGroup && hoveredNode.description && !isGroupOpen(hoveredNode)) {{
+        gtt.innerHTML = `<div class="gt-detail">${{esc(hoveredNode.description)}}</div>`;
+        gtt.style.display = 'block';
+      }} else {{
+        gtt.style.display = 'none';
+      }}
+      // Sidebar preview on hover (only if nothing is selected and sidebar is enabled)
+      if (!selectedNode && sidebarEnabled) {{
+        if (hoveredNode && !hoveredNode.isGroup) {{
+          renderSidebar(hoveredNode);
+        }} else if (hoveredNode && hoveredNode.isGroup) {{
+          renderGroupSidebar(hoveredNode);
+        }} else {{
+          renderDefaultSidebar();
+        }}
+      }}
+    }}
+    // Position group tooltip near cursor
+    if (hoveredNode && hoveredNode.isGroup) {{
+      const gtt = document.getElementById('group-tooltip');
+      if (gtt.style.display === 'block') {{
+        const pad = 16;
+        let tx = e.clientX + pad;
+        let ty = e.clientY + pad;
+        const rect = gtt.getBoundingClientRect();
+        if (tx + rect.width > window.innerWidth - 8) tx = e.clientX - rect.width - pad;
+        if (ty + rect.height > window.innerHeight - 8) ty = e.clientY - rect.height - pad;
+        gtt.style.left = tx + 'px';
+        gtt.style.top = ty + 'px';
+      }}
+    }}
     canvas.style.cursor = hoveredNode ? 'pointer' : 'grab';
   }}
 }});
 
 canvas.addEventListener('mouseup', e => {{
+  // Back button click detection (check BEFORE drag logic)
+  if (window.__backButton) {{
+    const bb = window.__backButton;
+    if (e.offsetX >= bb.x && e.offsetX <= bb.x + bb.w && e.offsetY >= bb.y && e.offsetY <= bb.y + bb.h) {{
+      dragging = false; dragStart = null; panStart = null; dragNode = null;
+      canvas.classList.remove('dragging');
+      collapseGroups();
+      return;
+    }}
+  }}
   if (dragging && dragNode) {{
-    const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
-    selectNode(dragNode);
+    queueNodeClick(dragNode);
     dragNode = null;
   }}
   dragging = false;
@@ -1338,19 +2922,25 @@ canvas.addEventListener('mouseup', e => {{
 canvas.addEventListener('wheel', e => {{
   e.preventDefault();
   if (e.ctrlKey || e.metaKey) {{
-    // Pinch gesture (trackpad) or Ctrl+scroll → zoom
+    // Pinch gesture (trackpad) or Ctrl+scroll → real-time zoom
     const factor = e.deltaY < 0 ? 1.08 : 0.93;
     const wx = (e.offsetX - pan.x) / zoom;
     const wy = (e.offsetY - pan.y) / zoom;
-    zoom = Math.max(0.2, Math.min(2.5, zoom * factor));
+    const minZoom = Math.max(0.3, (fitZoomLevel || 0.5) * 0.8);
+    zoom = Math.max(minZoom, Math.min(3.0, zoom * factor));
     pan.x = e.offsetX - wx * zoom;
     pan.y = e.offsetY - wy * zoom;
+    viewportWasManuallyMoved = true;
+    clampPan();
+    draw();
   }} else {{
     // Two-finger scroll (trackpad) → pan
     pan.x -= e.deltaX * 1.2;
     pan.y -= e.deltaY * 1.2;
+    viewportWasManuallyMoved = true;
+    clampPan();
+    draw();
   }}
-  draw();
 }}, {{ passive: false }});
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -1360,48 +2950,45 @@ function selectNode(n) {{
   if (selectedNode) {{
     highlightSet = nhopNeighborhood(n.id, 1);
     blastRadiusSet = computeBlastRadius(n.id);
-    renderSidebar(n);
+    if (sidebarEnabled) renderSidebar(n);
   }} else {{
     highlightSet = null;
     blastRadiusSet = new Set();
-    renderDefaultSidebar();
+    if (sidebarEnabled) renderDefaultSidebar();
   }}
   draw();
   drawMinimap();
 }}
 
+function renderGroupSidebar(g) {{
+  sidebar.classList.remove('hidden');
+  const children = (g.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
+  const ranked = rankChildNodes(children);
+  const fileList = ranked.map(c => {{
+    const title = c.short_title || c.label.replace(JS_EXT_RE, '');
+    const desc = c.description ? ` \u2014 ${{compactText(c.description, 60)}}` : '';
+    return `<div class="neighbor" onclick="jumpTo('${{esc(c.id)}}')" style="flex-direction:column;align-items:flex-start;gap:2px">
+      <span style="font-weight:600">${{esc(title)}}</span>
+      <span style="color:#8b949e;font-size:11px">${{esc(c.id)}}${{desc}}</span>
+    </div>`;
+  }}).join('');
+
+  sidebar.innerHTML = `
+    <div>
+      <h2>${{esc(g.label)}}</h2>
+      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{g.fileCount}} file${{g.fileCount !== 1 ? 's' : ''}} \u00b7 ${{esc(g.language || '')}}</div>
+    </div>
+    ${{g.description ? `<p class="desc">${{esc(g.description)}}</p>` : ''}}
+    <div>
+      <p class="section-title">Files</p>
+      <div style="margin-top:4px">${{fileList}}</div>
+    </div>
+  `;
+}}
+
 function renderDefaultSidebar() {{
-  let html = '<p class="placeholder">Click a node to see details.</p>';
-
-  // Always show metrics overview
-  html += '<div class="metrics-panel">';
-  html += '<p class="section-title">Graph Metrics</p>';
-  html += metricRow('Files', METRICS.total_files);
-  html += metricRow('Edges', METRICS.total_edges);
-  html += metricRow('Components', METRICS.components);
-  html += metricRow('Cycles', METRICS.cycles, METRICS.cycles > 0 ? '#f85149' : '#22c55e');
-  html += '</div>';
-
-  if (METRICS.cycles > 0) {{
-    html += '<div class="cycle-warning"><strong>\u26a0 ' + METRICS.cycles + ' circular dep' + (METRICS.cycles > 1 ? 's' : '') + '</strong><br>';
-    METRICS.cycle_details.slice(0, 3).forEach(c => {{
-      html += '<div style="margin-top:4px;font-size:11px">' + c.files.join(' \u2192 ') + ' \u2192 ' + c.files[0] + '</div>';
-    }});
-    if (METRICS.cycle_details.length > 3) html += '<div style="margin-top:4px;font-size:11px;color:#8b949e">+' + (METRICS.cycle_details.length - 3) + ' more</div>';
-    html += '</div>';
-  }}
-
-  // Top hub files
-  if (METRICS.top_imported && METRICS.top_imported.length) {{
-    html += '<div class="metrics-panel">';
-    html += '<p class="section-title">Most Imported (Hub Files)</p>';
-    METRICS.top_imported.slice(0, 5).forEach(m => {{
-      if (m.indegree > 0) html += metricRow(m.id.split('/').pop(), m.indegree + ' imports');
-    }});
-    html += '</div>';
-  }}
-
-  sidebar.innerHTML = html;
+  sidebar.classList.add('hidden');
+  sidebar.innerHTML = '';
 }}
 
 function metricRow(label, value, color) {{
@@ -1417,11 +3004,18 @@ function renderSidebar(n) {{
 
   const roleHtml = n.role ? '<span class="role-tag" style="background:' + (ROLE_COLORS[n.role] || '#888') + '30;color:' + (ROLE_COLORS[n.role] || '#888') + '">' + n.role.replace('_', ' ') + '</span>' : '';
 
-  const symbolHtml = n.symbols.length
-    ? n.symbols.slice(0, 30).map(s => `<span class="symbol ${{s.kind === 'function' ? 'fn' : s.kind === 'class' ? 'cls' : 'var'}}">${{esc(s.name)}}</span>`).join('')
-    : '<span style="color:#6e7681;font-size:12px">none</span>';
+  // Top symbols: classes first, then functions, max 6
+  const sortedSymbols = [...n.symbols].sort((a, b) => {{
+    const kindOrder = {{ class: 0, function: 1 }};
+    return (kindOrder[a.kind] ?? 2) - (kindOrder[b.kind] ?? 2);
+  }});
+  const topSymbols = sortedSymbols.slice(0, 6);
+  const symbolHtml = topSymbols.length
+    ? topSymbols.map(s => `<span class="symbol ${{s.kind === 'function' ? 'fn' : s.kind === 'class' ? 'cls' : 'var'}}">${{esc(s.name)}}</span>`).join('')
+      + (n.symbols.length > 6 ? `<span style="color:#6e7681;font-size:11px;margin-left:4px">+${{n.symbols.length - 6}} more</span>` : '')
+    : '';
 
-  const neighborHtml = (list, arrow) => list.slice(0, 20).map(item => {{
+  const neighborHtml = (list, arrow) => list.slice(0, 8).map(item => {{
     // O(1) node lookup via nodeIndex instead of O(N) Array.find.
     const node = nodeIndex[item.id];
     const label = node ? node.label : item.id.split('/').pop();
@@ -1456,43 +3050,689 @@ function renderSidebar(n) {{
     `;
   }}
 
+  sidebar.classList.remove('hidden');
   sidebar.innerHTML = `
     <div>
-      <h2>${{esc(n.label)}}</h2>
+      <h2>${{esc(n.short_title || n.label)}}</h2>
       <span style="font-size:11px;color:#6e7681;word-break:break-all">${{esc(n.id)}}</span>
-      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{esc(n.language || '')}} &middot; ${{(n.size/1024).toFixed(1)}} KB${{rolePill}}</div>
+      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{esc(n.language || '')}} \u00b7 ${{(n.size/1024).toFixed(1)}} KB${{rolePill}}</div>
     </div>
     ${{inCycle ? '<div class="cycle-warning"><strong>\u26a0 In circular dependency</strong></div>' : ''}}
-    ${{n.description ? `<p class="desc">${{esc(n.description)}}</p>` : '<p class="desc" style="color:#6e7681">No description. Run without --no-descriptions to generate.</p>'}}
+    ${{n.description ? `<p class="desc">${{esc(n.description)}}</p>` : ''}}
     <div class="metrics-panel">
       ${{metricRow('Imported by', n.indegree + ' file' + (n.indegree !== 1 ? 's' : ''))}}
       ${{metricRow('Imports', n.outdegree + ' file' + (n.outdegree !== 1 ? 's' : ''))}}
-      ${{blastRadiusSet.size > 0 ? metricRow('Blast radius', blastRadiusSet.size + ' file' + (blastRadiusSet.size !== 1 ? 's' : '') + ' affected', '#f59e0b') : ''}}
+      ${{blastRadiusSet.size > 0 ? metricRow('Blast radius', blastRadiusSet.size + ' files affected', '#f59e0b') : ''}}
     </div>
-    <div>
-      <p class="section-title">Exports / Symbols</p>
-      <div style="margin-top:6px">${{symbolHtml}}</div>
-    </div>
-    <div>
-      <p class="section-title">Imports (${{imports.length}})</p>
-      <div style="margin-top:4px">${{neighborHtml(imports, '\u2192')}}</div>
-    </div>
-    <div>
-      <p class="section-title">Imported by (${{importedBy.length}})</p>
-      <div style="margin-top:4px">${{neighborHtml(importedBy, '\u2190')}}</div>
-    </div>
+    ${{symbolHtml ? `<div><p class="section-title">Key Symbols</p><div style="margin-top:6px">${{symbolHtml}}</div></div>` : ''}}
+    ${{imports.length ? `<div><p class="section-title">Imports (${{imports.length}})</p><div style="margin-top:4px">${{neighborHtml(imports, '\u2192')}}</div></div>` : ''}}
+    ${{importedBy.length ? `<div><p class="section-title">Imported by (${{importedBy.length}})</p><div style="margin-top:4px">${{neighborHtml(importedBy, '\u2190')}}</div></div>` : ''}}
     ${{codePanelHtml}}
   `;
+  // Resize canvas after sidebar appears
 }}
 
 function jumpTo(nodeId) {{
   const n = nodeIndex[nodeId];
   if (!n) return;
   selectNode(n);
-  pan.x = canvas.width / 2 - n.x * zoom;
-  pan.y = canvas.height / 2 - n.y * zoom;
+  pan.x = canvasW() / 2 - n.x * zoom;
+  pan.y = canvasH() / 2 - n.y * zoom;
+  viewportWasManuallyMoved = true;
 }}
 window.jumpTo = jumpTo;
+
+function compactText(text, maxLen) {{
+  const cleaned = (text || '').replace(WHITESPACE_RE, ' ').trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen - 1).replace(/[ ,;:.!?-]+$/g, '') + '\u2026';
+}}
+
+function displayNodeName(node) {{
+  return node.short_title || node.label.replace(JS_EXT_RE, '');
+}}
+
+function itemFromNode(node, meta, fallbackSummary) {{
+  return {{
+    title: displayNodeName(node),
+    meta: meta || '',
+    summary: compactText(node.description || fallbackSummary || '', 120),
+  }};
+}}
+
+function flowWords(text) {{
+  return String(text || '')
+    .replace(JS_EXT_RE, '')
+    .replace(/\\(\\)/g, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[._/:-]+/g, ' ')
+    .replace(WHITESPACE_RE, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+}}
+
+function titleCaseWords(words) {{
+  return words.map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}}
+
+const FLOW_PHRASE_RULES = [
+  {{ pattern: /(render|draw|paint|canvas|view|visual)/i, label: 'Render View' }},
+  {{ pattern: /(describe|explain|summary)/i, label: 'Explain Code' }},
+  {{ pattern: /(check|validate|rule|lint|enforce)/i, label: 'Check Rules' }},
+  {{ pattern: /(export|serialize|to dict|to_dict|json)/i, label: 'Export Data' }},
+  {{ pattern: /(from dict|from_dict|parse|decode|load)/i, label: 'Read Data' }},
+  {{ pattern: /(cycle|scc|tarjan)/i, label: 'Find Cycles' }},
+  {{ pattern: /(cluster|group|bucket)/i, label: 'Group Files' }},
+  {{ pattern: /(metric|centrality|pagerank|score|rank)/i, label: 'Score Graph' }},
+  {{ pattern: /(import|dependency|resolve)/i, label: 'Resolve Imports' }},
+  {{ pattern: /(schema|model|dataclass|type|class)/i, label: 'Define Types' }},
+  {{ pattern: /(query|search|find|get|lookup|neighbor)/i, label: 'Query Graph' }},
+  {{ pattern: /(graph)/i, label: 'Model Graph' }},
+  {{ pattern: /(test|assert|verify)/i, label: 'Run Checks' }},
+  {{ pattern: /(config|setting|env)/i, label: 'Load Settings' }},
+  {{ pattern: /(api|request|route|http)/i, label: 'Handle Request' }},
+  {{ pattern: /(analy|scan|inspect)/i, label: 'Analyze Code' }},
+];
+
+const GENERIC_FLOW_LABELS = new Set([
+  'symbol', 'node', 'edge', 'graph', 'data', 'file', 'main', 'run', 'init',
+  'helper', 'utils', 'core', 'module', 'item', 'value', 'result',
+]);
+
+function shortFlowLabel(text, fallback) {{
+  const primary = flowWords(text);
+  if (primary.length > 0) return titleCaseWords(primary.slice(0, 3));
+  const backup = flowWords(fallback || 'Main Flow');
+  return backup.length > 0 ? titleCaseWords(backup.slice(0, 3)) : 'Main Flow';
+}}
+
+function shortFlowHint(text, fallback) {{
+  const source = compactText(text || fallback || '', 42);
+  return source;
+}}
+
+function roleFlowPhrase(role, fallback) {{
+  if (role === 'entry_point') return 'Start App';
+  if (role === 'api_route') return 'Handle Request';
+  if (role === 'data_model') return 'Model Data';
+  if (role === 'utility') return 'Run Helper';
+  if (role === 'config') return 'Load Settings';
+  if (role === 'test') return 'Run Checks';
+  return fallback || 'Core Logic';
+}}
+
+function phraseFromText(text) {{
+  const value = String(text || '').replace(/[_-]+/g, ' ');
+  for (const rule of FLOW_PHRASE_RULES) {{
+    if (rule.pattern.test(value)) return rule.label;
+  }}
+  return '';
+}}
+
+function symbolFlowPhrase(symbol) {{
+  if (!symbol) return '';
+  const name = String(symbol.name || '');
+  const human = shortFlowLabel(name, '');
+  const lowerWords = flowWords(name).map(word => word.toLowerCase());
+  if (lowerWords.length === 1 && GENERIC_FLOW_LABELS.has(lowerWords[0])) {{
+    if (symbol.kind === 'class') return 'Define Types';
+    if (symbol.kind === 'function') return 'Run Logic';
+    return '';
+  }}
+  const mapped = phraseFromText(name);
+  if (mapped) return mapped;
+  if (symbol.kind === 'class' && lowerWords.length <= 2) return 'Define Types';
+  return human;
+}}
+
+function nodeFlowPhrase(node, fallback) {{
+  if (!node) return fallback || 'Core Logic';
+  const fromDescription = phraseFromText(node.description);
+  if (fromDescription) return fromDescription;
+  if (node.role) {{
+    const rolePhrase = roleFlowPhrase(node.role, '');
+    if (rolePhrase) return rolePhrase;
+  }}
+  return shortFlowLabel(node.short_title || node.label, fallback || 'Core Logic');
+}}
+
+function outcomeFlowPhrase(text, role, fallback) {{
+  const phrase = phraseFromText(text);
+  if (phrase === 'Export Data') return 'Return Data';
+  if (phrase === 'Render View') return 'Show Result';
+  if (phrase === 'Run Checks') return 'Report Status';
+  if (phrase === 'Define Types' || role === 'data_model') return 'Share Types';
+  if (phrase === 'Resolve Imports') return 'Link Files';
+  return fallback || 'Finish Here';
+}}
+
+function humanizeSymbolName(symbol) {{
+  if (!symbol || !symbol.name) return '';
+  const kind = symbol.kind || '';
+  const raw = symbol.name;
+  // Convert _snake_case or camelCase to readable words
+  const words = flowWords(raw).map(w => w.toLowerCase());
+  if (words.length === 0) return raw;
+  const readable = titleCaseWords(words);
+  // Add kind hint for clarity
+  if (kind === 'class') return readable + ' (class)';
+  if (kind === 'function') return readable + '()';
+  return readable;
+}}
+
+function symbolDetailLines(symbols, count) {{
+  return (symbols || [])
+    .filter(symbol => symbol.kind !== 'import')
+    .slice(0, count)
+    .map(symbol => humanizeSymbolName(symbol))
+    .filter(Boolean);
+}}
+
+function nodeDetailLines(node, count) {{
+  if (!node) return [];
+  const symbols = symbolDetailLines(node.symbols, count);
+  if (symbols.length > 0) return symbols;
+  return [displayNodeName(node)];
+}}
+
+function nodesDetailLines(nodeList, count) {{
+  const details = [];
+  for (const node of nodeList || []) {{
+    for (const name of symbolDetailLines(node.symbols, count)) {{
+      if (!details.includes(name)) details.push(name);
+      if (details.length >= count) return details;
+    }}
+  }}
+  if (details.length === 0) {{
+    for (const node of nodeList || []) {{
+      const label = displayNodeName(node);
+      if (!details.includes(label)) details.push(label);
+      if (details.length >= count) break;
+    }}
+  }}
+  return details;
+}}
+
+function renderFlowMeta(metaItems) {{
+  if (!metaItems || metaItems.length === 0) return '';
+  return `<div class="flow-meta">${{metaItems.map(item =>
+    `<div class="flow-pill"><span>${{esc(item.label)}}</span><strong>${{esc(String(item.value))}}</strong></div>`
+  ).join('')}}</div>`;
+}}
+
+function flowNode(id, shape, label, x, y, details, color, tooltip) {{
+  return {{ id, shape, label, x, y, details: details || [], color: color || '#58a6ff', tooltip: tooltip || '' }};
+}}
+
+function flowEdge(from, to, label) {{
+  return {{ from, to, label: label || '' }};
+}}
+
+// ── Auto-layout for AI-generated flowcharts ─────────────────────────────────
+
+const FLOW_TYPE_COLORS = {{
+  start: '#22c55e',
+  end: '#22c55e',
+  decision: '#58a6ff',
+  step: '#f59e0b',
+}};
+
+function layoutFlowchart(fc) {{
+  // Build adjacency
+  const adj = {{}};
+  const inDeg = {{}};
+  for (const n of fc.nodes) {{
+    adj[n.id] = [];
+    inDeg[n.id] = 0;
+  }}
+  for (const e of fc.edges) {{
+    if (adj[e.from]) adj[e.from].push(e.to);
+    inDeg[e.to] = (inDeg[e.to] || 0) + 1;
+  }}
+
+  // Assign layers via topological BFS
+  const layers = {{}};
+  const queue = [];
+  for (const n of fc.nodes) {{
+    if ((inDeg[n.id] || 0) === 0) {{
+      layers[n.id] = 0;
+      queue.push(n.id);
+    }}
+  }}
+  // If no root found (cycle), start from first node
+  if (queue.length === 0 && fc.nodes.length > 0) {{
+    layers[fc.nodes[0].id] = 0;
+    queue.push(fc.nodes[0].id);
+  }}
+  let qi = 0;
+  while (qi < queue.length) {{
+    const cur = queue[qi++];
+    for (const next of (adj[cur] || [])) {{
+      const newLayer = (layers[cur] || 0) + 1;
+      if (layers[next] === undefined || newLayer > layers[next]) {{
+        layers[next] = newLayer;
+        queue.push(next);
+      }}
+    }}
+  }}
+  // Assign any unvisited nodes
+  for (const n of fc.nodes) {{
+    if (layers[n.id] === undefined) layers[n.id] = 0;
+  }}
+
+  // Group nodes by layer
+  const layerGroups = {{}};
+  let maxLayer = 0;
+  for (const n of fc.nodes) {{
+    const l = layers[n.id];
+    if (!layerGroups[l]) layerGroups[l] = [];
+    layerGroups[l].push(n);
+    if (l > maxLayer) maxLayer = l;
+  }}
+
+  // Position nodes
+  const NODE_W = 200;
+  const NODE_H_STEP = 86;
+  const NODE_H_DECISION = 136;
+  const LAYER_GAP = 140;
+  const COL_GAP = 240;
+  const PAD_X = 60;
+  const PAD_Y = 80;
+
+  const positioned = [];
+  let maxX = 0;
+  for (let l = 0; l <= maxLayer; l++) {{
+    const group = layerGroups[l] || [];
+    const y = PAD_Y + l * LAYER_GAP;
+    const totalWidth = group.length * COL_GAP;
+    const startX = PAD_X + (860 - 2 * PAD_X) / 2 - totalWidth / 2 + COL_GAP / 2;
+    for (let i = 0; i < group.length; i++) {{
+      const n = group[i];
+      const x = startX + i * COL_GAP;
+      const shape = n.type || 'step';
+      const color = FLOW_TYPE_COLORS[shape] || '#f59e0b';
+      positioned.push(flowNode(n.id, shape, n.label, x, y, [], color, n.description || ''));
+      if (x > maxX) maxX = x;
+    }}
+  }}
+
+  const width = Math.max(860, maxX + PAD_X + NODE_W / 2);
+  const height = PAD_Y + (maxLayer + 1) * LAYER_GAP + 40;
+
+  const edges = fc.edges.map(e => flowEdge(e.from, e.to, e.label || ''));
+
+  return {{ width, height, nodes: positioned, edges }};
+}}
+
+// ── Fallback generic diagram (used when no AI flowchart available) ───────────
+
+function buildFlowDiagram(config) {{
+  return {{
+    width: 860,
+    height: 680,
+    nodes: [
+      flowNode('start', 'start', config.startLabel, 430, 74, config.startDetails, '#22c55e'),
+      flowNode('focus', 'decision', config.focusLabel, 430, 248, config.focusDetails, '#58a6ff'),
+      flowNode('left', 'step', config.leftLabel, 210, 440, config.leftDetails, '#f59e0b'),
+      flowNode('right', 'step', config.rightLabel, 650, 440, config.rightDetails, '#a78bfa'),
+      flowNode('end', 'end', config.endLabel, 430, 600, config.endDetails, '#22c55e'),
+    ],
+    edges: [
+      flowEdge('start', 'focus', config.startEdge || 'invoked'),
+      flowEdge('focus', 'left', config.leftEdge || 'yes'),
+      flowEdge('focus', 'right', config.rightEdge || 'no'),
+      flowEdge('left', 'end', config.leftEndEdge || 'done'),
+      flowEdge('right', 'end', config.rightEndEdge || 'done'),
+    ],
+  }};
+}}
+
+// ── SVG rendering ───────────────────────────────────────────────────────────
+
+function svgNodeShape(node) {{
+  if (node.shape === 'decision') {{
+    const dh = 68, dw = 118;
+    return `<polygon class="flow-node-shape" points="${{node.x}},${{node.y - dh}} ${{node.x + dw}},${{node.y}} ${{node.x}},${{node.y + dh}} ${{node.x - dw}},${{node.y}}" fill="${{node.color}}22" stroke="${{node.color}}" />`;
+  }}
+  const width = node.shape === 'step' ? 200 : 178;
+  const height = node.shape === 'end' ? 74 : 86;
+  const rx = node.shape === 'step' ? 12 : 26;
+  return `<rect class="flow-node-shape" x="${{node.x - width / 2}}" y="${{node.y - height / 2}}" width="${{width}}" height="${{height}}" rx="${{rx}}" fill="${{node.color}}20" stroke="${{node.color}}" />`;
+}}
+
+function svgLabelLines(label) {{
+  const words = String(label || '').split(/\\s+/).filter(Boolean);
+  if (words.length <= 3) return [words.join(' ')];
+  const mid = Math.ceil(words.length / 2);
+  return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+}}
+
+function svgNodeLabel(node) {{
+  const lines = svgLabelLines(node.label);
+  const detailLines = (node.details || []).filter(Boolean).slice(0, 3).map(line => compactText(line, 30));
+  const labelBlockHeight = lines.length * 20;
+  const detailBlockHeight = detailLines.length * 14;
+  const totalHeight = labelBlockHeight + (detailLines.length ? 10 : 0) + detailBlockHeight;
+  let currentY = node.y - totalHeight / 2 + 16;
+  const text = lines.map((line, index) =>
+    `<tspan x="${{node.x}}" y="${{currentY + index * 20}}">${{esc(line)}}</tspan>`
+  ).join('');
+  currentY += labelBlockHeight + 10;
+  const details = detailLines.length > 0
+    ? `<text class="flow-node-caption">${{detailLines.map((line, index) =>
+        `<tspan x="${{node.x}}" y="${{currentY + index * 14}}">${{esc(line)}}</tspan>`
+      ).join('')}}</text>`
+    : '';
+  return `<text class="flow-node-label">${{text}}</text>${{details}}`;
+}}
+
+function nodeAnchor(node, side) {{
+  if (node.shape === 'decision') {{
+    if (side === 'top') return {{ x: node.x, y: node.y - 68 }};
+    if (side === 'bottom') return {{ x: node.x, y: node.y + 68 }};
+    if (side === 'left') return {{ x: node.x - 118, y: node.y }};
+    return {{ x: node.x + 118, y: node.y }};
+  }}
+  const width = node.shape === 'step' ? 200 : 178;
+  const height = node.shape === 'end' ? 74 : 86;
+  if (side === 'top') return {{ x: node.x, y: node.y - height / 2 }};
+  if (side === 'bottom') return {{ x: node.x, y: node.y + height / 2 }};
+  if (side === 'left') return {{ x: node.x - width / 2, y: node.y }};
+  return {{ x: node.x + width / 2, y: node.y }};
+}}
+
+function renderFlowSvg(diagram) {{
+  const nodeMap = Object.fromEntries(diagram.nodes.map(node => [node.id, node]));
+  const defs = `
+    <defs>
+      <marker id="flow-arrowhead" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+        <path d="M 0 0 L 7 3.5 L 0 7 z" fill="#58a6ff"></path>
+      </marker>
+    </defs>
+  `;
+  const edges = diagram.edges.map(edge => {{
+    const from = nodeMap[edge.from];
+    const to = nodeMap[edge.to];
+    if (!from || !to) return '';
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    let startSide, endSide;
+    if (Math.abs(dy) > Math.abs(dx) * 0.3) {{
+      startSide = dy > 0 ? 'bottom' : 'top';
+      endSide = dy > 0 ? 'top' : 'bottom';
+    }} else {{
+      startSide = dx > 0 ? 'right' : 'left';
+      endSide = dx > 0 ? 'left' : 'right';
+    }}
+    const start = nodeAnchor(from, startSide);
+    const end = nodeAnchor(to, endSide);
+    const midX = (start.x + end.x) / 2;
+    const midY = (start.y + end.y) / 2;
+    const edgeLabel = edge.label
+      ? `<text class="flow-edge-label" x="${{midX}}" y="${{midY - 8}}">${{esc(edge.label)}}</text>`
+      : '';
+    return `<g><path class="flow-edge" d="M ${{start.x}} ${{start.y}} L ${{end.x}} ${{end.y}}" marker-end="url(#flow-arrowhead)"></path>${{edgeLabel}}</g>`;
+  }}).join('');
+  const nodes = diagram.nodes.map(node => {{
+    const attrs = node.tooltip
+      ? ` data-ft-tooltip="${{esc(node.tooltip).replace(/"/g, '&quot;')}}" `
+      : '';
+    return `<g class="flow-node-group"${{attrs}}>${{svgNodeShape(node)}}${{svgNodeLabel(node)}}</g>`;
+  }}).join('');
+  const legend = `
+    <g transform="translate(20, ${{diagram.height - 40}})">
+      <rect x="0" y="-12" width="16" height="16" rx="8" fill="none" stroke="#6e7681" stroke-width="1.5" />
+      <text x="22" y="0" fill="#6e7681" font-size="11">Start / End</text>
+      <polygon points="100,-4 112,4 100,12 88,4" fill="none" stroke="#6e7681" stroke-width="1.5" />
+      <text x="118" y="0" fill="#6e7681" font-size="11">Decision</text>
+      <rect x="196" y="-12" width="16" height="16" rx="3" fill="none" stroke="#6e7681" stroke-width="1.5" />
+      <text x="218" y="0" fill="#6e7681" font-size="11">Step</text>
+    </g>
+  `;
+  return `<div class="flow-graph-wrap"><svg class="flow-svg" viewBox="0 0 ${{diagram.width}} ${{diagram.height}}" role="img" aria-label="Workflow diagram">${{defs}}${{edges}}${{nodes}}${{legend}}</svg></div>`;
+}}
+
+function relatedNodeScore(node, weight) {{
+  return (weight * 10) + ((node.pagerank || 0) * 100) + (node.indegree || 0) + (node.outdegree || 0);
+}}
+
+function aggregateNeighborNodes(nodeIds, direction) {{
+  const counts = {{}};
+  const lists = direction === 'imports' ? importsByNode : importedByNode;
+  const internalIds = new Set(nodeIds);
+  for (const nodeId of nodeIds) {{
+    for (const item of (lists[nodeId] || [])) {{
+      if (internalIds.has(item.id)) continue;
+      counts[item.id] = (counts[item.id] || 0) + 1;
+    }}
+  }}
+  return Object.entries(counts)
+    .map(([id, count]) => {{
+      const node = nodeIndex[id];
+      return node ? {{ node, count }} : null;
+    }})
+    .filter(Boolean)
+    .sort((a, b) => relatedNodeScore(b.node, b.count) - relatedNodeScore(a.node, a.count));
+}}
+
+function internalConnectionCount(nodeId, internalIds, direction) {{
+  const list = direction === 'imports' ? (importsByNode[nodeId] || []) : (importedByNode[nodeId] || []);
+  let count = 0;
+  for (const item of list) if (internalIds.has(item.id)) count++;
+  return count;
+}}
+
+function buildGroupFlowModel(groupNode) {{
+  const childNodes = rankChildNodes(groupNode.childIds.map(id => nodeIndex[id]).filter(Boolean));
+  const internalIds = new Set(childNodes.map(node => node.id));
+  if (childNodes.length === 0) return null;
+
+  let leftLabel = 'Starts Here';
+  let leftNodes = childNodes.filter(node =>
+    node.role === 'entry_point'
+    || node.role === 'api_route'
+    || node.role === 'test'
+    || internalConnectionCount(node.id, internalIds, 'importedBy') === 0
+  ).slice(0, 3);
+
+  const externalCallers = aggregateNeighborNodes(groupNode.childIds, 'importedBy').slice(0, 3);
+  if (leftNodes.length === 0 && externalCallers.length > 0) {{
+    leftLabel = 'Used By';
+    leftNodes = externalCallers.map(item => item.node);
+  }}
+  if (leftNodes.length === 0) leftNodes = childNodes.slice(0, Math.min(3, childNodes.length));
+
+  const leftIds = new Set(leftNodes.map(node => node.id));
+  let centerNodes = childNodes.filter(node => !leftIds.has(node.id)).slice(0, 4);
+  if (centerNodes.length === 0) centerNodes = childNodes.slice(0, Math.min(4, childNodes.length));
+
+  let rightLabel = 'Depends On';
+  let rightItems = aggregateNeighborNodes(groupNode.childIds, 'imports')
+    .slice(0, 4)
+    .map(item => itemFromNode(item.node, item.count + ' file' + (item.count === 1 ? '' : 's') + ' rely on this link', 'Shared dependency outside this block.'));
+
+  if (rightItems.length === 0) {{
+    rightLabel = 'Finishes In';
+    const centerIds = new Set(centerNodes.map(node => node.id));
+    const terminalNodes = childNodes.filter(node =>
+      !leftIds.has(node.id)
+      && !centerIds.has(node.id)
+      && internalConnectionCount(node.id, internalIds, 'imports') === 0
+    ).slice(0, 3);
+    const fallbackTerminal = terminalNodes.length > 0 ? terminalNodes : childNodes.slice(-Math.min(3, childNodes.length));
+    rightItems = fallbackTerminal.map(node => itemFromNode(node, node.role ? humanizeLabel(node.role) : 'Internal step', 'This is where work tends to settle inside the block.'));
+  }}
+
+  const triggerNode = leftNodes[0] || childNodes[0];
+  const insideNode = centerNodes[0] || childNodes[0];
+  const branchNode = centerNodes[1] || childNodes[Math.min(1, childNodes.length - 1)] || triggerNode;
+  const dependencyNode = aggregateNeighborNodes(groupNode.childIds, 'imports')[0]?.node || null;
+  const rightNode = dependencyNode || branchNode || insideNode;
+
+  return {{
+    eyebrow: 'Block Workflow',
+    title: groupNode.label,
+    subtitle: compactText(groupNode.description || 'Autogenerated from the files, imports, and descriptions inside this block.', 180),
+    meta: [
+      {{ label: 'Files', value: groupNode.fileCount }},
+      {{ label: 'Incoming Links', value: groupNode.indegree }},
+      {{ label: 'Outgoing Links', value: groupNode.outdegree }},
+    ],
+    diagram: buildFlowDiagram({{
+      startLabel: 'Enter Block',
+      startDetails: nodesDetailLines(leftNodes, 2),
+      startEdge: 'called',
+      focusLabel: nodeFlowPhrase(groupNode, roleFlowPhrase(groupNode.role, 'Core Logic')),
+      focusDetails: nodesDetailLines(childNodes, 3),
+      leftEdge: 'internal path',
+      leftLabel: symbolFlowPhrase(insideNode.symbols?.[0]) || nodeFlowPhrase(insideNode, 'Main Step'),
+      leftDetails: nodeDetailLines(insideNode, 2),
+      rightEdge: dependencyNode ? 'external dep' : 'alt path',
+      rightLabel: dependencyNode
+        ? nodeFlowPhrase(dependencyNode, rightLabel === 'Depends On' ? 'Use Shared Code' : 'Second Step')
+        : (symbolFlowPhrase(branchNode.symbols?.[0]) || nodeFlowPhrase(branchNode, rightLabel === 'Depends On' ? 'Use Shared Code' : 'Second Step')),
+      rightDetails: dependencyNode
+        ? nodeDetailLines(dependencyNode, 2)
+        : nodeDetailLines(branchNode, 2),
+      leftEndEdge: 'returns',
+      rightEndEdge: 'returns',
+      endLabel: outcomeFlowPhrase(groupNode.description, groupNode.role, 'Exit Block'),
+      endDetails: [],
+    }}),
+  }};
+}}
+
+function buildFileFlowModel(fileNode) {{
+  const callers = (importedByNode[fileNode.id] || [])
+    .map(item => nodeIndex[item.id])
+    .filter(Boolean);
+  const dependencies = (importsByNode[fileNode.id] || [])
+    .map(item => nodeIndex[item.id])
+    .filter(Boolean);
+  const sortedSymbols = [...(fileNode.symbols || [])]
+    .filter(symbol => symbol.kind !== 'import')
+    .sort((a, b) => (a.line || 0) - (b.line || 0))
+    .slice(0, 6);
+
+  const leftItems = callers.length > 0
+    ? rankChildNodes(callers).slice(0, 3).map(node => itemFromNode(node, 'Caller', 'This file is reached from here.'))
+    : [{{ title: fileNode.role ? humanizeLabel(fileNode.role) : 'Standalone file', meta: 'Entry context', summary: 'No direct callers were found in the import graph.' }}];
+
+  const centerItems = sortedSymbols.length > 0
+    ? sortedSymbols.map(symbol => ({{
+        title: symbol.kind === 'function' ? symbol.name : symbol.name,
+        meta: humanizeLabel(symbol.kind) + (symbol.line ? ' · line ' + symbol.line : ''),
+        summary: '',
+      }}))
+    : [itemFromNode(fileNode, fileNode.role ? humanizeLabel(fileNode.role) : 'File', 'No named top-level symbols were extracted from this file.')];
+
+  const rightItems = dependencies.length > 0
+    ? rankChildNodes(dependencies).slice(0, 4).map(node => itemFromNode(node, 'Dependency', 'This file imports it directly.'))
+    : [{{ title: 'No direct imports', meta: 'Leaf file', summary: 'This file does not import another project file in the graph.' }}];
+
+  const triggerItem = leftItems[0];
+  const focusItem = centerItems[0] || itemFromNode(fileNode, 'File', 'Main file');
+  const branchItem = centerItems[1] || itemFromNode(fileNode, 'File step', 'Core work inside the file');
+  const dependencyNode = dependencies[0] || null;
+  const secondSymbol = sortedSymbols[1] || null;
+
+  // Use AI-generated flowchart if available, otherwise fall back to generic template
+  const aiFlowchart = fileNode.flowchart;
+  const diagram = aiFlowchart
+    ? layoutFlowchart(aiFlowchart)
+    : buildFlowDiagram({{
+      startLabel: 'Enter File',
+      startDetails: nodeDetailLines(fileNode, 2),
+      startEdge: 'imported',
+      focusLabel: nodeFlowPhrase(fileNode, roleFlowPhrase(fileNode.role, 'Core Logic')),
+      focusDetails: symbolDetailLines(sortedSymbols, 3),
+      leftEdge: 'main logic',
+      leftLabel: symbolFlowPhrase(sortedSymbols[0]) || nodeFlowPhrase(fileNode, 'Main Step'),
+      leftDetails: sortedSymbols[0] ? [humanizeSymbolName(sortedSymbols[0])] : [],
+      rightEdge: dependencyNode ? 'delegates to' : 'also runs',
+      rightLabel: dependencyNode
+        ? nodeFlowPhrase(dependencyNode, 'Use Helper')
+        : (symbolFlowPhrase(secondSymbol) || roleFlowPhrase(fileNode.role, 'Second Step')),
+      rightDetails: dependencyNode
+        ? nodeDetailLines(dependencyNode, 2)
+        : (secondSymbol ? [humanizeSymbolName(secondSymbol)] : []),
+      leftEndEdge: 'returns',
+      rightEndEdge: 'returns',
+      endLabel: outcomeFlowPhrase(fileNode.description, fileNode.role, 'Finish Here'),
+      endDetails: [],
+    }});
+
+  return {{
+    eyebrow: aiFlowchart ? 'File Workflow' : 'File Workflow (generic)',
+    title: fileNode.label,
+    subtitle: compactText(fileNode.description || 'Autogenerated from extracted functions, classes, and import relationships for this file.', 180),
+    meta: [
+      {{ label: 'Functions / Types', value: fileNode.symbols.length }},
+      {{ label: 'Imported By', value: fileNode.indegree }},
+      {{ label: 'Imports', value: fileNode.outdegree }},
+    ],
+    diagram,
+  }};
+}}
+
+function openFlowOverlay(targetNode) {{
+  const model = targetNode && targetNode.isGroup
+    ? buildGroupFlowModel(targetNode)
+    : buildFileFlowModel(targetNode);
+  if (!model) return;
+  flowEyebrow.textContent = model.eyebrow;
+  flowTitle.textContent = model.title;
+  flowSubtitle.textContent = model.subtitle || '';
+  flowBody.innerHTML =
+    renderFlowMeta(model.meta)
+    + renderFlowSvg(model.diagram);
+  flowOverlay.classList.add('open');
+}}
+
+function closeFlowOverlay() {{
+  flowOverlay.classList.remove('open');
+}}
+
+flowClose.addEventListener('click', closeFlowOverlay);
+flowOverlay.addEventListener('click', e => {{
+  if (e.target === flowOverlay) closeFlowOverlay();
+}});
+
+// ── Flow tooltip ────────────────────────────────────────────────────────────
+
+const flowTip = document.getElementById('flow-tooltip');
+
+flowBody.addEventListener('mouseover', e => {{
+  const g = e.target.closest('.flow-node-group[data-ft-tooltip]');
+  if (!g) return;
+  const desc = g.dataset.ftTooltip || '';
+  if (!desc) return;
+  flowTip.innerHTML = `<div class="ft-detail">${{esc(desc)}}</div>`;
+  flowTip.style.display = 'block';
+}});
+
+flowBody.addEventListener('mousemove', e => {{
+  if (flowTip.style.display !== 'block') return;
+  const pad = 16;
+  let x = e.clientX + pad;
+  let y = e.clientY + pad;
+  // Keep tooltip inside viewport
+  const rect = flowTip.getBoundingClientRect();
+  if (x + rect.width > window.innerWidth - 8) x = e.clientX - rect.width - pad;
+  if (y + rect.height > window.innerHeight - 8) y = e.clientY - rect.height - pad;
+  flowTip.style.left = x + 'px';
+  flowTip.style.top = y + 'px';
+}});
+
+flowBody.addEventListener('mouseout', e => {{
+  const g = e.target.closest('.flow-node-group[data-ft-tooltip]');
+  if (!g) return;
+  const related = e.relatedTarget;
+  if (related && g.contains(related)) return;
+  flowTip.style.display = 'none';
+}});
 
 // ── Search ───────────────────────────────────────────────────────────────────
 
@@ -1519,11 +3759,12 @@ function drawMinimap() {{
   mctx.fillStyle = '#0d1117';
   mctx.fillRect(0, 0, mw, mh);
 
-  if (nodes.length === 0) return;
+  const miniNodes = fitNodesForViewport().filter(n => isVisible(n));
+  if (miniNodes.length === 0) return;
 
   // Compute world bounds
   let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
-  for (const n of nodes) {{
+  for (const n of miniNodes) {{
     wx0 = Math.min(wx0, n.x - n.w / 2);
     wy0 = Math.min(wy0, n.y - n.h / 2);
     wx1 = Math.max(wx1, n.x + n.w / 2);
@@ -1537,7 +3778,7 @@ function drawMinimap() {{
   const offY = pad + (mh - pad * 2 - hspan * sc) / 2 - wy0 * sc;
 
   // Draw nodes
-  for (const n of nodes) {{
+  for (const n of miniNodes) {{
     const faded = highlightSet && !highlightSet.has(n.id);
     mctx.globalAlpha = faded ? 0.2 : 0.8;
     mctx.fillStyle = nodeColor(n);
@@ -1549,7 +3790,7 @@ function drawMinimap() {{
 
   // Viewport indicator
   const vx0 = (-pan.x) / zoom, vy0 = (-pan.y) / zoom;
-  const vx1 = (canvas.width - pan.x) / zoom, vy1 = (canvas.height - pan.y) / zoom;
+  const vx1 = (canvasW() - pan.x) / zoom, vy1 = (canvasH() - pan.y) / zoom;
   mctx.strokeStyle = 'rgba(88,166,255,0.6)';
   mctx.lineWidth = 1;
   mctx.strokeRect(
@@ -1560,11 +3801,14 @@ function drawMinimap() {{
 
 minimap.addEventListener('click', e => {{
   const mw = minimap.width, mh = minimap.height;
-  if (nodes.length === 0) return;
+  const miniNodes = fitNodesForViewport().filter(n => isVisible(n));
+  if (miniNodes.length === 0) return;
   let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
-  for (const n of nodes) {{
-    wx0 = Math.min(wx0, n.x); wy0 = Math.min(wy0, n.y);
-    wx1 = Math.max(wx1, n.x); wy1 = Math.max(wy1, n.y);
+  for (const n of miniNodes) {{
+    wx0 = Math.min(wx0, n.x - n.w / 2);
+    wy0 = Math.min(wy0, n.y - n.h / 2);
+    wx1 = Math.max(wx1, n.x + n.w / 2);
+    wy1 = Math.max(wy1, n.y + n.h / 2);
   }}
   const wspan = Math.max(wx1 - wx0, 1), hspan = Math.max(wy1 - wy0, 1);
   const pad = 8;
@@ -1573,8 +3817,9 @@ minimap.addEventListener('click', e => {{
   const offY = pad + (mh - pad * 2 - hspan * sc) / 2 - wy0 * sc;
   const worldX = (e.offsetX - offX) / sc;
   const worldY = (e.offsetY - offY) / sc;
-  pan.x = canvas.width / 2 - worldX * zoom;
-  pan.y = canvas.height / 2 - worldY * zoom;
+  pan.x = canvasW() / 2 - worldX * zoom;
+  pan.y = canvasH() / 2 - worldY * zoom;
+  viewportWasManuallyMoved = true;
   draw();
 }});
 
@@ -1596,6 +3841,17 @@ function nhopNeighborhood(nodeId, hops) {{
   return visited;
 }}
 
+// ── Double-click: expand/collapse groups ─────────────────────────────────────
+
+canvas.addEventListener('dblclick', e => {{
+  const {{ x: wx, y: wy }} = worldCoords(e.offsetX, e.offsetY);
+  const n = nodeAt(wx, wy);
+  if (!n && groupingState === 'grouped' && pinnedGroupIds.size > 0 && !flowOverlay.classList.contains('open')) {{
+    pinnedGroupIds.clear();
+    draw();
+  }}
+}});
+
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', e => {{
@@ -1609,7 +3865,14 @@ document.addEventListener('keydown', e => {{
       document.getElementById('search').focus();
       break;
     case 'Escape':
+      if (flowOverlay.classList.contains('open')) {{
+        closeFlowOverlay();
+        break;
+      }}
       selectedNode = null; highlightSet = null; blastRadiusSet = new Set(); renderDefaultSidebar(); draw();
+      break;
+    case 'b': case 'B':
+      if (pinnedGroupIds.size > 0) {{ pinnedGroupIds.clear(); draw(); }}
       break;
     case 'f': case 'F':
       zoomToFit();
@@ -1623,20 +3886,16 @@ document.addEventListener('keydown', e => {{
 // ── Zoom to fit ───────────────────────────────────────────────────────────────
 
 function zoomToFit() {{
-  if (nodes.length === 0) return;
-  let wx0 = Infinity, wy0 = Infinity, wx1 = -Infinity, wy1 = -Infinity;
-  for (const n of nodes) {{
-    wx0 = Math.min(wx0, n.x - n.w / 2);
-    wy0 = Math.min(wy0, n.y - n.h / 2);
-    wx1 = Math.max(wx1, n.x + n.w / 2);
-    wy1 = Math.max(wy1, n.y + n.h / 2);
-  }}
-  const pad = 40;
-  const zx = (canvas.width - pad * 2) / (wx1 - wx0);
-  const zy = (canvas.height - pad * 2) / (wy1 - wy0);
-  zoom = Math.min(zx, zy, 2);
-  pan.x = canvas.width / 2 - ((wx0 + wx1) / 2) * zoom;
-  pan.y = canvas.height / 2 - ((wy0 + wy1) / 2) * zoom;
+  const fitNodes = fitNodesForViewport();
+  if (fitNodes.length === 0) return;
+  const bounds = graphBounds(fitNodes);
+  if (!bounds) return;
+  fitZoomLevel = computeFitZoom(canvasW(), canvasH(), fitNodes);
+  zoom = fitZoomLevel;
+  userZoomScale = 1;
+  pan.x = canvasW() / 2 - ((bounds.wx0 + bounds.wx1) / 2) * zoom;
+  pan.y = canvasH() / 2 - ((bounds.wy0 + bounds.wy1) / 2) * zoom;
+  viewportWasManuallyMoved = false;
   draw();
 }}
 
@@ -1821,10 +4080,11 @@ renderSummary();
 minimap.width = 160;
 minimap.height = 100;
 
-// Start in layered layout — organises by abstraction level (high→low).
+// Start: build groups, then the architecture-block layout
 (function initLayout() {{
   layoutMode = 'layered';
-  layoutLayered();
+  buildGroups();
+  layoutBlocks(visibleNodes, visibleEdges);
   simRunning = false;
   draw();
   drawMinimap();
@@ -1959,6 +4219,8 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
     cycle_edges_json = _safe_json(cycle_edges_list)
     clusters_json = _safe_json(render_data.get("clusters", {}))
     clusters_by_role_json = _safe_json(render_data.get("clusters_by_role", {}))
+    clusters_by_group_json = _safe_json(render_data.get("clusters_by_group", {}))
+    group_descriptions_json = _safe_json(render_data.get("group_descriptions", {}))
     role_order_json = _safe_json(render_data.get("role_order", []))
     role_subtitles_json = _safe_json(render_data.get("role_subtitles", {}))
     metrics_json = _safe_json(render_data.get("metrics", {}))
@@ -1987,6 +4249,8 @@ def render(graph: Graph, output_path: Path | None = None) -> str:
         cycle_edges_json=cycle_edges_json,
         clusters_json=clusters_json,
         clusters_by_role_json=clusters_by_role_json,
+        clusters_by_group_json=clusters_by_group_json,
+        group_descriptions_json=group_descriptions_json,
         role_order_json=role_order_json,
         role_subtitles_json=role_subtitles_json,
         metrics_json=metrics_json,

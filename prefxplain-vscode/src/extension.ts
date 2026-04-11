@@ -76,6 +76,64 @@ function injectBaseTag(rawHtml: string, baseHref: string): string {
   return `<head>${baseTag}</head>${rawHtml}`;
 }
 
+function injectResizeBridge(rawHtml: string): string {
+  const bridgeScript = `<script>
+(() => {
+  const sync = () => {
+    const root = document.documentElement;
+    const rect = root.getBoundingClientRect();
+    const width = Math.max(
+      1,
+      Math.round(rect.width || root.clientWidth || window.innerWidth || 1)
+    );
+    const height = Math.max(
+      1,
+      Math.round(rect.height || root.clientHeight || window.innerHeight || 1)
+    );
+    window.__prefxplainHostWidth = width;
+    window.__prefxplainHostHeight = height;
+    root.style.setProperty('--prefxplain-host-width', width + 'px');
+    root.style.setProperty('--prefxplain-host-height', height + 'px');
+    window.dispatchEvent(
+      new CustomEvent('prefxplain-host-resize', { detail: { width, height } })
+    );
+  };
+
+  let lastSize = '';
+  const tick = () => {
+    const root = document.documentElement;
+    const next = [
+      window.innerWidth || 0,
+      window.innerHeight || 0,
+      root.clientWidth || 0,
+      root.clientHeight || 0,
+    ].join('x');
+    if (next !== lastSize) {
+      lastSize = next;
+      sync();
+    }
+    window.requestAnimationFrame(tick);
+  };
+
+  window.addEventListener('load', sync);
+  window.addEventListener('resize', sync);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', sync);
+  }
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(sync).observe(document.documentElement);
+  }
+  sync();
+  window.requestAnimationFrame(tick);
+})();
+</script>`;
+
+  if (/<\/body>/i.test(rawHtml)) {
+    return rawHtml.replace(/<\/body>/i, `${bridgeScript}</body>`);
+  }
+  return `${rawHtml}${bridgeScript}`;
+}
+
 function createPanel(htmlPath: string): vscode.WebviewPanel {
   const panel = vscode.window.createWebviewPanel(
     "prefxplain.preview",
@@ -103,7 +161,7 @@ function loadHtml(panel: vscode.WebviewPanel, htmlPath: string): void {
       .asWebviewUri(vscode.Uri.file(path.dirname(htmlPath)))
       .toString()}/`;
 
-    panel.webview.html = injectBaseTag(raw, baseHref);
+    panel.webview.html = injectResizeBridge(injectBaseTag(raw, baseHref));
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     panel.webview.html = renderStatusHtml(

@@ -57,6 +57,9 @@ prefxplain = "prefxplain.cli:entry_point"
 where = ["."]
 include = ["prefxplain*"]
 
+[tool.setuptools.package-data]
+prefxplain = ["commands/*.md"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py39"

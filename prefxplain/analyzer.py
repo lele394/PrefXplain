@@ -1,9 +1,11 @@
 """Static analysis: extract file nodes and IMPORTS edges from a codebase.
 
-Python: uses ast module (built-in, zero deps, exact).
-JS/TS:  uses regex for import/require statements (fast, good-enough for v0.1).
-
-No tree-sitter dependency at v0.1. Adds multi-language support in v0.2.
+Python:     uses ast module (built-in, zero deps, exact).
+JS/TS:      uses regex for import/require statements.
+C/C++:      uses regex for #include "..." (local headers only, not <system>).
+Go:         uses regex for import "..." and import (...) blocks.
+Rust:       uses regex for mod/use + pub fn/struct/enum/trait.
+Java/Kotlin: uses regex for import statements.
 """
 
 from __future__ import annotations
@@ -22,12 +24,20 @@ from .graph import Edge, Graph, Node, Symbol
 
 PYTHON_EXTS = {".py"}
 JS_EXTS = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
+C_CPP_EXTS = {".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".hh"}
+GO_EXTS = {".go"}
+RUST_EXTS = {".rs"}
+JAVA_EXTS = {".java"}
+KOTLIN_EXTS = {".kt", ".kts"}
+
+ALL_EXTS = PYTHON_EXTS | JS_EXTS | C_CPP_EXTS | GO_EXTS | RUST_EXTS | JAVA_EXTS | KOTLIN_EXTS
 
 SKIP_DIRS = {
     ".git", ".venv", "venv", "env", "__pycache__", "node_modules",
     ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
     ".next", ".nuxt", "coverage", ".coverage", "htmlcov",
     "site-packages", "eggs", ".eggs",
+    "out", "node_modules", "prefxplain-vscode",
 }
 
 # JS/TS import patterns
@@ -50,6 +60,16 @@ def _language(path: Path) -> str:
         return "typescript"
     if ext in {".js", ".jsx", ".mjs", ".cjs"}:
         return "javascript"
+    if ext in C_CPP_EXTS:
+        return "c++" if ext in {".cpp", ".cc", ".cxx", ".hpp", ".hxx", ".hh"} else "c"
+    if ext in GO_EXTS:
+        return "go"
+    if ext in RUST_EXTS:
+        return "rust"
+    if ext in JAVA_EXTS:
+        return "java"
+    if ext in KOTLIN_EXTS:
+        return "kotlin"
     return "other"
 
 
@@ -453,6 +473,322 @@ def _try_js_candidates(base: Path, root: Path) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# C/C++ analysis
+# ---------------------------------------------------------------------------
+
+# Matches #include "path" (local includes only — not <system>)
+_C_INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.MULTILINE)
+
+# Top-level symbols: functions, classes, structs, enums, typedefs
+_C_FUNC_RE = re.compile(
+    r"^(?:[\w:*&<>, ]+\s+)?(\w+)\s*\([^)]*\)\s*\{", re.MULTILINE
+)
+_C_CLASS_RE = re.compile(
+    r"^(?:class|struct|enum)\s+(\w+)", re.MULTILINE
+)
+
+
+def _analyze_c_cpp(path: Path) -> tuple[list[Symbol], list[str]]:
+    """Return (symbols, raw_include_paths) for a C/C++ file."""
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return [], []
+
+    raw_includes = [m.group(1) for m in _C_INCLUDE_RE.finditer(source)]
+
+    symbols: list[Symbol] = []
+    for m in _C_CLASS_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="class", line=source[:m.start()].count("\n") + 1))
+    for m in _C_FUNC_RE.finditer(source):
+        name = m.group(1)
+        # Skip keywords that look like functions
+        if name in ("if", "for", "while", "switch", "return", "sizeof", "catch", "else"):
+            continue
+        symbols.append(Symbol(name=name, kind="function", line=source[:m.start()].count("\n") + 1))
+
+    return symbols, raw_includes
+
+
+def _resolve_c_include(
+    raw: str, source_file: Path, root: Path,
+) -> str | None:
+    """Resolve a #include "path" to a file path relative to root."""
+    # Try relative to source file's directory first
+    candidate = source_file.parent / raw
+    if candidate.exists() and candidate.is_file():
+        try:
+            return str(candidate.resolve().relative_to(root.resolve()))
+        except ValueError:
+            return None
+
+    # Try from project root
+    candidate = root / raw
+    if candidate.exists() and candidate.is_file():
+        return str(candidate.relative_to(root))
+
+    # Try common include dirs
+    for inc_dir in ("include", "src", "lib"):
+        candidate = root / inc_dir / raw
+        if candidate.exists() and candidate.is_file():
+            try:
+                return str(candidate.resolve().relative_to(root.resolve()))
+            except ValueError:
+                return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Go analysis
+# ---------------------------------------------------------------------------
+
+# Single import: import "path"
+# Block import: import (\n  "path"\n  "path"\n)
+_GO_IMPORT_SINGLE_RE = re.compile(r'^\s*import\s+"([^"]+)"', re.MULTILINE)
+_GO_IMPORT_BLOCK_RE = re.compile(r'import\s*\((.*?)\)', re.DOTALL)
+_GO_IMPORT_LINE_RE = re.compile(r'"([^"]+)"')
+
+_GO_FUNC_RE = re.compile(r"^func\s+(?:\(\w+\s+\*?\w+\)\s+)?(\w+)\s*\(", re.MULTILINE)
+_GO_TYPE_RE = re.compile(r"^type\s+(\w+)\s+(?:struct|interface)", re.MULTILINE)
+
+
+def _analyze_go(path: Path) -> tuple[list[Symbol], list[str]]:
+    """Return (symbols, raw_import_paths) for a Go file."""
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return [], []
+
+    raw_imports: list[str] = []
+    for m in _GO_IMPORT_SINGLE_RE.finditer(source):
+        raw_imports.append(m.group(1))
+    for m in _GO_IMPORT_BLOCK_RE.finditer(source):
+        for line_m in _GO_IMPORT_LINE_RE.finditer(m.group(1)):
+            raw_imports.append(line_m.group(1))
+
+    symbols: list[Symbol] = []
+    for m in _GO_FUNC_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="function", line=source[:m.start()].count("\n") + 1))
+    for m in _GO_TYPE_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="class", line=source[:m.start()].count("\n") + 1))
+
+    return symbols, raw_imports
+
+
+def _resolve_go_import(
+    raw: str, source_file: Path, root: Path,
+) -> str | None:
+    """Resolve a Go import to a file path relative to root.
+
+    Go imports are package paths. We try to match the last segment(s) to
+    directories in the project. Only resolves project-internal imports.
+    """
+    # Check if the import path contains the module name (from go.mod)
+    go_mod = root / "go.mod"
+    module_path = ""
+    if go_mod.exists():
+        try:
+            for line in go_mod.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if line.startswith("module "):
+                    module_path = line.split(None, 1)[1].strip()
+                    break
+        except OSError:
+            pass
+
+    if module_path and raw.startswith(module_path):
+        # Internal import: strip module prefix
+        rel = raw[len(module_path):].lstrip("/")
+        candidate = root / rel
+        if candidate.is_dir():
+            # Find any .go file in the package dir to use as edge target
+            for go_file in sorted(candidate.glob("*.go")):
+                if go_file.name.endswith("_test.go"):
+                    continue
+                try:
+                    return str(go_file.relative_to(root))
+                except ValueError:
+                    continue
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Rust analysis
+# ---------------------------------------------------------------------------
+
+_RUST_MOD_RE = re.compile(r"^\s*(?:pub\s+)?mod\s+(\w+)\s*;", re.MULTILINE)
+_RUST_USE_RE = re.compile(r"^\s*(?:pub\s+)?use\s+(?:crate::)?(\w+)", re.MULTILINE)
+_RUST_FN_RE = re.compile(r"^\s*(?:pub(?:\(.*?\))?\s+)?(?:async\s+)?fn\s+(\w+)", re.MULTILINE)
+_RUST_TYPE_RE = re.compile(r"^\s*(?:pub(?:\(.*?\))?\s+)?(?:struct|enum|trait)\s+(\w+)", re.MULTILINE)
+
+
+def _analyze_rust(path: Path) -> tuple[list[Symbol], list[str]]:
+    """Return (symbols, raw_mod_names) for a Rust file."""
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return [], []
+
+    # Collect mod declarations and use statements as import targets
+    raw_imports: list[str] = []
+    for m in _RUST_MOD_RE.finditer(source):
+        raw_imports.append(m.group(1))
+    for m in _RUST_USE_RE.finditer(source):
+        name = m.group(1)
+        if name not in ("self", "super", "std") and name not in raw_imports:
+            raw_imports.append(name)
+
+    symbols: list[Symbol] = []
+    for m in _RUST_FN_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="function", line=source[:m.start()].count("\n") + 1))
+    for m in _RUST_TYPE_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="class", line=source[:m.start()].count("\n") + 1))
+
+    return symbols, raw_imports
+
+
+def _resolve_rust_import(
+    raw: str, source_file: Path, root: Path,
+) -> str | None:
+    """Resolve a Rust mod/use name to a file path relative to root.
+
+    Rust modules map to either sibling_name.rs or sibling_name/mod.rs.
+    """
+    parent = source_file.parent
+
+    # If source is lib.rs or main.rs, modules are in the same dir
+    # If source is foo.rs, modules are in foo/<name>.rs
+    stem = source_file.stem
+    if stem in ("lib", "main", "mod"):
+        base = parent
+    else:
+        base = parent / stem
+
+    # Try <base>/<name>.rs
+    candidate = base / f"{raw}.rs"
+    if candidate.exists():
+        try:
+            return str(candidate.resolve().relative_to(root.resolve()))
+        except ValueError:
+            return None
+
+    # Try <base>/<name>/mod.rs
+    candidate = base / raw / "mod.rs"
+    if candidate.exists():
+        try:
+            return str(candidate.resolve().relative_to(root.resolve()))
+        except ValueError:
+            return None
+
+    # Try from src/ root for crate-level use statements
+    src = root / "src"
+    if src.is_dir():
+        for cand in (src / f"{raw}.rs", src / raw / "mod.rs"):
+            if cand.exists():
+                try:
+                    return str(cand.resolve().relative_to(root.resolve()))
+                except ValueError:
+                    return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Java / Kotlin analysis
+# ---------------------------------------------------------------------------
+
+_JAVA_IMPORT_RE = re.compile(r"^\s*import\s+(?:static\s+)?([a-zA-Z_][\w.]*)", re.MULTILINE)
+_JAVA_CLASS_RE = re.compile(
+    r"^\s*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+|final\s+)?(?:class|interface|enum|record)\s+(\w+)",
+    re.MULTILINE,
+)
+_JAVA_METHOD_RE = re.compile(
+    r"^\s*(?:public|private|protected)\s+(?:static\s+)?(?:[\w<>,\[\] ]+\s+)(\w+)\s*\(",
+    re.MULTILINE,
+)
+
+_KOTLIN_IMPORT_RE = re.compile(r"^\s*import\s+([a-zA-Z_][\w.]*)", re.MULTILINE)
+_KOTLIN_CLASS_RE = re.compile(
+    r"^\s*(?:data\s+|sealed\s+|abstract\s+|open\s+|enum\s+)?class\s+(\w+)",
+    re.MULTILINE,
+)
+_KOTLIN_FUN_RE = re.compile(r"^\s*(?:(?:private|internal|public|override|suspend)\s+)*fun\s+(\w+)", re.MULTILINE)
+
+
+def _analyze_java(path: Path) -> tuple[list[Symbol], list[str]]:
+    """Return (symbols, raw_import_paths) for a Java file."""
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return [], []
+
+    raw_imports = [m.group(1) for m in _JAVA_IMPORT_RE.finditer(source)]
+
+    symbols: list[Symbol] = []
+    for m in _JAVA_CLASS_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="class", line=source[:m.start()].count("\n") + 1))
+    for m in _JAVA_METHOD_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="function", line=source[:m.start()].count("\n") + 1))
+
+    return symbols, raw_imports
+
+
+def _analyze_kotlin(path: Path) -> tuple[list[Symbol], list[str]]:
+    """Return (symbols, raw_import_paths) for a Kotlin file."""
+    try:
+        source = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return [], []
+
+    raw_imports = [m.group(1) for m in _KOTLIN_IMPORT_RE.finditer(source)]
+
+    symbols: list[Symbol] = []
+    for m in _KOTLIN_CLASS_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="class", line=source[:m.start()].count("\n") + 1))
+    for m in _KOTLIN_FUN_RE.finditer(source):
+        symbols.append(Symbol(name=m.group(1), kind="function", line=source[:m.start()].count("\n") + 1))
+
+    return symbols, raw_imports
+
+
+def _resolve_java_import(
+    raw: str, source_file: Path, root: Path,
+) -> str | None:
+    """Resolve a Java/Kotlin import to a file path relative to root.
+
+    Java imports are fully qualified class names (com.example.Foo).
+    We try to map them to a .java or .kt file in the project.
+    """
+    parts = raw.split(".")
+    # The last part is the class name, everything before is the package path
+    # Try: src/main/java/com/example/Foo.java (Maven/Gradle layout)
+    # Also try: src/com/example/Foo.java and just com/example/Foo.java
+    class_name = parts[-1]
+    package_path = Path(*parts[:-1]) if len(parts) > 1 else Path()
+
+    ext = source_file.suffix  # .java or .kt
+    search_roots = [
+        root / "src" / "main" / "java",
+        root / "src" / "main" / "kotlin",
+        root / "src",
+        root,
+    ]
+
+    for sr in search_roots:
+        if not sr.is_dir():
+            continue
+        for try_ext in (ext, ".java", ".kt"):
+            candidate = sr / package_path / f"{class_name}{try_ext}"
+            if candidate.exists() and candidate.is_file():
+                try:
+                    return str(candidate.resolve().relative_to(root.resolve()))
+                except ValueError:
+                    return None
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Main analysis entry point
 # ---------------------------------------------------------------------------
 
@@ -472,7 +808,7 @@ def _collect_files(root: Path, max_files: int) -> list[Path]:
             fpath = Path(dirpath) / fname
             if fpath.is_symlink():
                 continue
-            if fpath.suffix.lower() in PYTHON_EXTS | JS_EXTS:
+            if fpath.suffix.lower() in ALL_EXTS:
                 real = str(fpath.resolve())
                 if real in seen_real:
                     continue
@@ -515,6 +851,16 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
             symbols, raw_imports = _analyze_python(fpath, root)
         elif lang in ("javascript", "typescript"):
             symbols, raw_imports = _analyze_js(fpath, root)
+        elif lang in ("c", "c++"):
+            symbols, raw_imports = _analyze_c_cpp(fpath)
+        elif lang == "go":
+            symbols, raw_imports = _analyze_go(fpath)
+        elif lang == "rust":
+            symbols, raw_imports = _analyze_rust(fpath)
+        elif lang == "java":
+            symbols, raw_imports = _analyze_java(fpath)
+        elif lang == "kotlin":
+            symbols, raw_imports = _analyze_kotlin(fpath)
         else:
             symbols, raw_imports = [], []
 
@@ -552,6 +898,14 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
                 target = _resolve_python_import(raw, fpath, root)
             elif lang in ("javascript", "typescript"):
                 target = _resolve_js_import(raw, fpath, root, aliases=ts_aliases)
+            elif lang in ("c", "c++"):
+                target = _resolve_c_include(raw, fpath, root)
+            elif lang == "go":
+                target = _resolve_go_import(raw, fpath, root)
+            elif lang == "rust":
+                target = _resolve_rust_import(raw, fpath, root)
+            elif lang in ("java", "kotlin"):
+                target = _resolve_java_import(raw, fpath, root)
             else:
                 target = None
 

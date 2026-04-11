@@ -360,6 +360,115 @@ def mcp_cmd(
     serve(root, from_json)
 
 
+@app.command(name="setup")
+def setup_cmd(
+    tool: Optional[str] = typer.Argument(
+        None,
+        help="AI tool to set up: claude-code, cursor, codex. Auto-detects if omitted.",
+    ),
+    project: bool = typer.Option(
+        False,
+        "--project",
+        "-p",
+        help="Install to current project only (not global).",
+    ),
+) -> None:
+    """Install the /prefxplain slash command for your AI coding tool.
+
+    Auto-detects Claude Code, Cursor, and Codex. Use --project to install
+    for the current repo only instead of globally.
+    """
+    import importlib.resources
+
+    # Load the bundled command file
+    cmd_source = Path(__file__).parent / "commands" / "prefxplain.md"
+    if not cmd_source.exists():
+        console.print("[red]Command template not found in package. Reinstall prefxplain.[/red]")
+        raise typer.Exit(1)
+
+    cmd_content = cmd_source.read_text(encoding="utf-8")
+
+    # Detect available tools
+    detected: list[str] = []
+    home = Path.home()
+    if (home / ".claude").is_dir() or shutil.which("claude"):
+        detected.append("claude-code")
+    if (home / ".cursor").is_dir() or shutil.which("cursor"):
+        detected.append("cursor")
+    if shutil.which("codex"):
+        detected.append("codex")
+
+    targets = [tool] if tool else detected
+    if not targets:
+        console.print("[yellow]No AI coding tools detected.[/yellow]")
+        console.print("Supported: claude-code, cursor, codex")
+        console.print("Run: [bold]prefxplain setup claude-code[/bold] to install manually.")
+        raise typer.Exit(1)
+
+    installed: list[str] = []
+    for t in targets:
+        if t == "claude-code":
+            if project:
+                dest = Path.cwd() / ".claude" / "commands" / "prefxplain.md"
+            else:
+                dest = home / ".claude" / "commands" / "prefxplain.md"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(cmd_content, encoding="utf-8")
+            scope = "project" if project else "global"
+            installed.append(f"Claude Code ({scope}): {dest}")
+
+        elif t == "cursor":
+            # Cursor uses .cursor/rules/ for project-level instructions
+            if project:
+                dest = Path.cwd() / ".cursor" / "rules" / "prefxplain.mdc"
+            else:
+                dest = home / ".cursor" / "rules" / "prefxplain.mdc"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            # Cursor uses .mdc format — wrap the command as a rule
+            cursor_content = (
+                "---\n"
+                "description: Generate interactive dependency graph with /prefxplain\n"
+                "globs: \n"
+                "alwaysApply: false\n"
+                "---\n\n"
+                + cmd_content
+            )
+            dest.write_text(cursor_content, encoding="utf-8")
+            scope = "project" if project else "global"
+            installed.append(f"Cursor ({scope}): {dest}")
+
+        elif t == "codex":
+            # Codex uses AGENTS.md for project instructions
+            dest = Path.cwd() / "AGENTS.md"
+            section = (
+                "\n\n## /prefxplain\n\n"
+                "When the user asks to map, visualize, or explain the codebase architecture, "
+                "run `prefxplain .` to generate an interactive HTML dependency graph.\n"
+            )
+            if dest.exists():
+                existing = dest.read_text(encoding="utf-8")
+                if "prefxplain" not in existing:
+                    dest.write_text(existing + section, encoding="utf-8")
+                    installed.append(f"Codex (appended to {dest})")
+                else:
+                    installed.append(f"Codex: already configured in {dest}")
+            else:
+                dest.write_text(f"# Agent Instructions{section}", encoding="utf-8")
+                installed.append(f"Codex: created {dest}")
+
+        else:
+            console.print(f"[yellow]Unknown tool: {t}. Skipping.[/yellow]")
+
+    if installed:
+        console.print("[bold green]Setup complete![/bold green]")
+        for item in installed:
+            console.print(f"  [green]\u2713[/green] {item}")
+        console.print()
+        console.print("Now type [bold]/prefxplain[/bold] in your AI tool to generate a codebase map.")
+    else:
+        console.print("[yellow]Nothing to install.[/yellow]")
+
+
 def _run(
     root: Path,
     output: Optional[Path],
@@ -530,7 +639,7 @@ def entry_point() -> None:
     `prefxplain create .`.
     """
     args = sys.argv[1:]
-    subcommands = {"create", "update", "check", "context", "mcp", "--help", "-h", "--version", "-v"}
+    subcommands = {"create", "update", "check", "context", "mcp", "setup", "--help", "-h", "--version", "-v"}
     if args and args[0] not in subcommands:
         sys.argv.insert(1, "create")
     app()

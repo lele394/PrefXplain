@@ -46,7 +46,9 @@ class Node:
     language: str = ""
     size: int = 0    # file size in bytes
     role: str = ""   # architectural role: entry_point, utility, data_model, etc.
+    group: str = ""  # AI-assigned architectural group, e.g. "Analysis Pipeline"
     preview: str = ""  # first ~50 lines of the file content (for sidebar code panel)
+    flowchart: dict | None = None  # AI-generated flowchart: {nodes: [...], edges: [...]}
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -60,8 +62,12 @@ class Node:
         }
         if self.role:
             d["role"] = self.role
+        if self.group:
+            d["group"] = self.group
         if self.preview:
             d["preview"] = self.preview
+        if self.flowchart:
+            d["flowchart"] = self.flowchart
         return d
 
     @classmethod
@@ -75,7 +81,9 @@ class Node:
             language=d.get("language", ""),
             size=d.get("size", 0),
             role=d.get("role", ""),
+            group=d.get("group", ""),
             preview=d.get("preview", ""),
+            flowchart=d.get("flowchart"),
         )
 
 
@@ -114,6 +122,7 @@ class GraphMetadata:
     summary: str = ""       # LLM-generated plain-English overview of the codebase
     health_score: int = 0   # 1-10 architecture health rating
     health_notes: str = ""  # plain-English health interpretation
+    groups: dict[str, str] = field(default_factory=dict)  # AI group name → description
 
     def to_dict(self) -> dict:
         d = {
@@ -129,6 +138,8 @@ class GraphMetadata:
             d["health_score"] = self.health_score
         if self.health_notes:
             d["health_notes"] = self.health_notes
+        if self.groups:
+            d["groups"] = self.groups
         return d
 
     @classmethod
@@ -142,6 +153,7 @@ class GraphMetadata:
             summary=d.get("summary", ""),
             health_score=d.get("health_score", 0),
             health_notes=d.get("health_notes", ""),
+            groups=d.get("groups", {}),
         )
 
 
@@ -537,6 +549,14 @@ class Graph:
             clusters[parent].append(node.id)
         return dict(clusters)
 
+    def cluster_by_group(self) -> dict[str, list[str]]:
+        """Group node ids by AI-assigned architectural group."""
+        clusters: dict[str, list[str]] = defaultdict(list)
+        for node in self.nodes:
+            if node.group:
+                clusters[node.group].append(node.id)
+        return dict(clusters) if clusters else {}
+
     def cluster_by_role(self) -> dict[str, list[str]]:
         """Group node ids by architectural role, keyed by human-readable label."""
         clusters: dict[str, list[str]] = defaultdict(list)
@@ -696,9 +716,13 @@ class Graph:
             lang_counts[lang] += n.size if n.size > 0 else 1
             lang_file_counts[lang] += 1
 
+        clusters_by_group = self.cluster_by_group()
+
         base.update({
             "clusters": clusters,
             "clusters_by_role": clusters_by_role,
+            "clusters_by_group": clusters_by_group,
+            "group_descriptions": self.metadata.groups,
             "role_order": ROLE_ORDER,
             "role_subtitles": ROLE_SUBTITLES,
             "cycle_edges": cycle_edges_list,

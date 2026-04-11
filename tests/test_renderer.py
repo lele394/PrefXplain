@@ -112,3 +112,85 @@ class TestRenderer:
             text=True,
         )
         assert result.returncode == 0, f"embedded JS syntax error:\n{result.stderr}"
+
+    def test_layout_supports_vertical_shrink(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert ":root { --viewport-height: 100vh; }" in html
+        assert "body { font-family:" in html
+        assert "display: flex; min-height: 0; max-height: var(--viewport-height);" in html
+        assert "#left-panel { width: 240px; height: var(--viewport-height); min-height: 0; max-height: var(--viewport-height);" in html
+        assert "#center { flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height);" in html
+        assert "#graph-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height);" in html
+        assert "#sidebar { width: 320px; height: var(--viewport-height); min-width: 0; min-height: 0; max-height: var(--viewport-height);" in html
+        assert "#sidebar > * { flex-shrink: 0; }" in html
+        assert "max-height: min(360px, 34vh);" in html
+
+    def test_resize_tracks_graph_container(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert "const rootEl = document.documentElement;" in html
+        assert "const bodyEl = document.body;" in html
+        assert "const leftPanel = document.getElementById('left-panel');" in html
+        assert "const centerPane = document.getElementById('center');" in html
+        assert "const graphArea = document.getElementById('graph-area');" in html
+        assert "function applyViewportHeight() {" in html
+        assert "const hostWidth = window.__prefxplainHostWidth;" in html
+        assert "const hostHeight = window.__prefxplainHostHeight;" in html
+        assert "rootEl.style.setProperty('--viewport-height'" in html
+        assert "leftPanel.style.height = `${vp.height}px`;" in html
+        assert "centerPane.style.height = `${vp.height}px`;" in html
+        assert "graphArea.style.height = `${vp.height}px`;" in html
+        assert "sidebar.style.height = `${vp.height}px`;" in html
+        assert "const rect = graphArea.getBoundingClientRect();" in html
+        assert "function syncViewport() {" in html
+        assert "let fitZoomLevel = 1;" in html
+        assert "let userZoomScale = 1;" in html
+        assert "function computeFitZoom(width, height, nodeList) {" in html
+        assert "function syncZoomScale(width, height) {" in html
+        assert "function setViewportForWorldCenter(centerWorld, nextZoom, width, height) {" in html
+        assert "fitZoomLevel * userZoomScale" in html
+        assert "viewportWasManuallyMoved = false;" in html
+        assert "setViewportForWorldCenter(" in html
+        assert "clampPan();" in html
+        assert "window.addEventListener('prefxplain-host-resize'" in html
+        assert "new ResizeObserver(() => { syncViewport(); }).observe(graphArea);" in html
+        assert "window.visualViewport.addEventListener('resize'" in html
+        assert "function watchViewport() {" in html
+        assert "window.requestAnimationFrame(watchViewport);" in html
+
+    def test_default_view_uses_architecture_blocks(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert "function layoutBlocks(nodeList, edgeList) {" in html
+        assert "function layoutGroupedBlocks(nodeList, edgeList) {" in html
+        assert "function layoutExpandedBlock(nodeList) {" in html
+        assert 'placeholder="Search files or blocks..."' in html
+        assert "Click a block to open it, or double-click a block or file for its workflow diagram." in html
+        assert "Click a block to open it, or double-click it for a workflow diagram." in html
+        assert "Click a file to inspect it, or double-click a file or block for its workflow diagram." in html
+        assert "Click</span><span>Open a block or inspect a file</span>" in html
+        assert "Double-click</span><span>Open the workflow diagram</span>" in html
+        assert "Starting points" not in html
+        assert "Shared building blocks" not in html
+        assert "Feature logic" not in html
+        assert "Shared workflows" not in html
+        assert "Core utilities" not in html
+
+    def test_group_interactions_search_inside_child_files(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert "n.childIds.some(childId => {" in html
+        assert "const miniNodes = fitNodesForViewport().filter(n => isVisible(n));" in html
+
+    def test_double_click_opens_workflow_overlay(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert 'id="flow-overlay"' in html
+        assert 'id="flow-panel"' in html
+        assert "function buildGroupFlowModel(groupNode) {" in html
+        assert "function buildFileFlowModel(fileNode) {" in html
+        assert "function buildFlowDiagram(config) {" in html
+        assert "function renderFlowSvg(diagram) {" in html
+        assert 'class="flow-svg"' in html
+        assert "function openFlowOverlay(targetNode) {" in html
+        assert "function closeFlowOverlay() {" in html
+        assert "const DOUBLE_CLICK_DELAY = 220;" in html
+        assert "function queueNodeClick(node) {" in html
+        assert "if (pendingClickNode.id === node.id) {" in html
+        assert "openFlowOverlay(node);" in html

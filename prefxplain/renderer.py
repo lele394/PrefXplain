@@ -53,41 +53,31 @@ _HTML_TEMPLATE = """\
   :root {{ --viewport-height: 100vh; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   html, body {{ height: var(--viewport-height); min-height: var(--viewport-height); max-height: var(--viewport-height); width: 100%; overflow: hidden; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; display: flex; min-height: 0; max-height: var(--viewport-height); }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height); }}
 
-  /* ── Left panel (collapsible) ──────────────────────────────────────── */
-  #left-panel {{ width: 240px; height: var(--viewport-height); min-height: 0; max-height: var(--viewport-height); background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; transition: width .2s, padding .2s; }}
-  #left-panel.collapsed {{ width: 0; padding: 0; overflow: hidden; border-right: none; }}
-  #left-panel .lp-section {{ padding: 12px 16px; border-bottom: 1px solid #21262d; flex-shrink: 0; }}
-  #left-panel .lp-brand {{ font-size: 11px; font-weight: 600; color: #58a6ff; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 2px; }}
-  #left-panel h1 {{ font-size: 14px; font-weight: 700; color: #e6edf3; line-height: 1.3; }}
-  #left-panel .lp-stats {{ font-size: 11px; color: #6e7681; margin-top: 4px; line-height: 1.6; }}
-  #left-panel .lp-stats span {{ color: #e6edf3; font-weight: 600; }}
-  #left-panel .lp-summary {{ font-size: 12px; color: #8b949e; line-height: 1.6; }}
-  #left-panel .lp-health {{ display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }}
-  #left-panel .lp-health-bar {{ width: 60px; height: 5px; background: #21262d; border-radius: 3px; overflow: hidden; flex-shrink: 0; }}
-  #left-panel .lp-health-fill {{ height: 100%; border-radius: 3px; }}
-  #left-panel .lp-health-notes {{ font-size: 11px; color: #6e7681; margin-top: 6px; line-height: 1.5; }}
-  #left-panel .lp-langbar {{ display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: #21262d; margin-top: 8px; }}
-  #left-panel .lp-langbar .lang-segment {{ height: 100%; min-width: 2px; }}
-  #left-panel .lp-lang-labels {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }}
-  #left-panel .lp-lang-label {{ display: flex; align-items: center; gap: 4px; font-size: 10px; color: #8b949e; }}
-  #left-panel .lp-lang-dot {{ width: 6px; height: 6px; border-radius: 50%; }}
-  #left-panel .lp-search {{ width: 100%; padding: 6px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 12px; outline: none; }}
-  #left-panel .lp-search:focus {{ border-color: #58a6ff; }}
-  #left-panel .lp-toolbar {{ display: flex; gap: 6px; margin-top: 8px; }}
-  #left-panel .lp-toolbar button {{ flex: 1; padding: 4px 0; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #c9d1d9; font-size: 11px; cursor: pointer; }}
-  #left-panel .lp-toolbar button:hover {{ background: #30363d; }}
-  #left-panel .lp-toolbar button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
+  /* ── Top panel (collapsible, vertical content, full width) ──────────── */
+  #left-panel {{ width: 100%; height: 240px; background: #161b22; border-bottom: 1px solid #30363d; display: flex; flex-direction: column; flex-shrink: 0; overflow: hidden; transition: height .2s ease; }}
+  #left-panel.collapsed {{ height: 0; border-bottom: none; }}
+  /* Compact header bar: brand, stats, search, buttons — single strip */
+  #panel-header {{ display: flex; align-items: center; gap: 8px; padding: 5px 12px; border-bottom: 1px solid #21262d; flex-shrink: 0; flex-wrap: nowrap; overflow: hidden; }}
+  #panel-header .ph-brand {{ font-size: 11px; font-weight: 700; color: #58a6ff; white-space: nowrap; }}
+  #panel-header .ph-sep {{ width: 1px; height: 16px; background: #30363d; flex-shrink: 0; }}
+  #panel-header .ph-stat {{ font-size: 11px; color: #8b949e; white-space: nowrap; }}
+  #panel-header .ph-stat b {{ color: #e6edf3; font-weight: 600; }}
+  #panel-header .ph-search {{ width: 130px; min-width: 80px; padding: 3px 8px; background: #0d1117; border: 1px solid #30363d; border-radius: 5px; color: #c9d1d9; font-size: 11px; outline: none; flex-shrink: 1; }}
+  #panel-header .ph-search:focus {{ border-color: #58a6ff; }}
+  #panel-header .ph-spacer {{ flex: 1; }}
+  #panel-header button {{ padding: 2px 7px; background: #21262d; border: 1px solid #30363d; border-radius: 5px; color: #c9d1d9; font-size: 10px; cursor: pointer; white-space: nowrap; }}
+  #panel-header button:hover {{ background: #30363d; }}
+  #panel-header button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
 
-  /* ── Toggle button ─────────────────────────────────────────────────── */
-  #panel-toggle {{ position: absolute; top: 8px; left: 8px; z-index: 15; width: 28px; height: 28px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; color: #8b949e; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: left .2s; }}
+  /* ── Toggle button (horizontal bar below top panel) ──────────────── */
+  #panel-toggle {{ position: relative; z-index: 15; width: 44px; height: 16px; margin: 0 auto; background: #21262d; border: 1px solid #30363d; border-top: none; border-radius: 0 0 6px 6px; color: #8b949e; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
   #panel-toggle:hover {{ background: #30363d; color: #e6edf3; }}
-  body:not(.panel-collapsed) #panel-toggle {{ left: 248px; }}
 
   /* ── Center (graph) ────────────────────────────────────────────────── */
-  #center {{ flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height); overflow: hidden; }}
-  #graph-area {{ flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: var(--viewport-height); max-height: var(--viewport-height); overflow: hidden; }}
+  #center {{ flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: 0; overflow: hidden; }}
+  #graph-area {{ flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }}
   #canvas {{ flex: 1; min-width: 0; cursor: grab; display: block; }}
   #canvas.dragging {{ cursor: grabbing; }}
   #minimap {{ position: absolute; bottom: 12px; right: 12px; width: 140px; height: 90px; background: #161b22cc; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; z-index: 10; }}
@@ -126,9 +116,9 @@ _HTML_TEMPLATE = """\
     .flow-svg {{ min-width: 560px; }}
   }}
 
-  /* ── Right sidebar (click details) ─────────────────────────────────── */
-  #sidebar {{ position: absolute; right: 0; top: 0; width: 320px; height: var(--viewport-height); max-height: var(--viewport-height); background: #161b22ee; border-left: 1px solid #30363d; padding: 16px; overflow-y: auto; font-size: 13px; display: flex; flex-direction: column; gap: 12px; z-index: 10; transition: transform 0.15s ease, opacity 0.15s ease; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }}
-  #sidebar.hidden {{ transform: translateX(100%); opacity: 0; pointer-events: none; }}
+  /* ── Detail section (fills remaining height in top panel, scrollable) */
+  #sidebar {{ flex: 1; min-height: 0; overflow-y: auto; padding: 6px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }}
+  #sidebar.hidden {{ display: none; }}
   #sidebar > * {{ flex-shrink: 0; }}
   #sidebar h2 {{ font-size: 13px; font-weight: 600; color: #e6edf3; word-break: break-all; }}
   #sidebar .desc {{ color: #8b949e; line-height: 1.5; }}
@@ -159,32 +149,28 @@ _HTML_TEMPLATE = """\
 </style>
 </head>
 <body>
-<!-- Left panel (project info, collapsible) -->
+<!-- Top panel: compact header bar + detail section -->
 <div id="left-panel">
-  <div class="lp-section">
-    <div class="lp-brand">PrefXplain</div>
-    <h1>{repo}</h1>
-    <div class="lp-stats">
-      <span>{total_files}</span> files &middot; <span>{total_edges}</span> edges<br>
-      {languages} {cycle_badge_html}
-    </div>
+  <div id="panel-header">
+    <span class="ph-brand">{repo}</span>
+    <span class="ph-sep"></span>
+    <span class="ph-stat"><b>{total_files}</b> files</span>
+    <span class="ph-stat"><b>{total_edges}</b> edges</span>
+    <span class="ph-stat">{languages}</span>
+    <span id="tb-health"></span>
+    <span class="ph-sep"></span>
+    <input type="text" id="search" class="ph-search" placeholder="Search... (/)" autocomplete="off">
+    <span class="ph-spacer"></span>
+    <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
+    <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
+    <button id="btnSidebar" onclick="toggleSidebarEnabled()">Details: On</button>
+    <button onclick="zoomToFit()">Fit</button>
+    <button onclick="toggleHelp()">?</button>
   </div>
-  <div class="lp-section" id="lp-summary"></div>
-  <div class="lp-section" id="lp-langs"></div>
-  <div class="lp-section">
-    <input type="text" id="search" class="lp-search" placeholder="Search files or blocks..." autocomplete="off">
-    <div class="lp-toolbar">
-      <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
-      <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
-      <button id="btnSidebar" onclick="toggleSidebarEnabled()">Panel: On</button>
-      <button onclick="zoomToFit()">Fit</button>
-      <button onclick="toggleHelp()">?</button>
-    </div>
-  </div>
-  <div class="lp-section" id="lp-statsbar"></div>
+  <div id="sidebar"></div>
 </div>
 
-<button id="panel-toggle" onclick="toggleLeftPanel()" title="Toggle panel">&lsaquo;</button>
+<button id="panel-toggle" onclick="toggleLeftPanel()" title="Toggle panel">&#x25B2;</button>
 
 <!-- Center: graph + sidebar side by side -->
 <div id="center">
@@ -216,7 +202,6 @@ _HTML_TEMPLATE = """\
     <div id="flow-tooltip"></div>
     <div id="group-tooltip"></div>
   </div>
-  <div id="sidebar" class="hidden"></div>
 </div>
 
 <script>
@@ -267,7 +252,7 @@ function toggleLeftPanel() {{
   const btn = document.getElementById('panel-toggle');
   lp.classList.toggle('collapsed');
   document.body.classList.toggle('panel-collapsed');
-  btn.innerHTML = lp.classList.contains('collapsed') ? '&rsaquo;' : '&lsaquo;';
+  btn.innerHTML = lp.classList.contains('collapsed') ? '&#x25BC;' : '&#x25B2;';
   // Resize canvas and refit after transition
   setTimeout(() => {{ resize(); zoomToFit(); draw(); drawMinimap(); }}, 250);
 }}
@@ -293,6 +278,7 @@ const groupMap = {{}};       // groupId -> group object
 const nodeToGroup = {{}};    // nodeId -> groupId
 let visibleNodes = [];
 let visibleEdges = [];
+let intraGroupEdges = {{}}; // groupId → [{{source, target, type}}]
 let groupSourceKind = 'directory';
 
 const TEST_SEGMENTS = new Set(['test', 'tests', 'spec', 'specs', '__tests__']);
@@ -519,6 +505,14 @@ function buildGroups() {{
       symbols: [], role, preview: '', inCycle: false,
     }};
 
+    // Single-child group: promote the child as a standalone node
+    if (childNodes.length === 1) {{
+      const child = childNodes[0];
+      child._soloGroupLabel = label;
+      child._soloGroupDesc = desc;
+      continue;
+    }}
+
     groupMap[group.id] = group;
     for (const id of ids) nodeToGroup[id] = group.id;
   }}
@@ -538,15 +532,20 @@ function computeVisibleState() {{
   if (groupingState === 'flat') {{
     visibleNodes = nodes;
     visibleEdges = edges;
+    intraGroupEdges = {{}};
     return;
   }}
 
-  // Always show all groups as nodes (children drawn inline when open)
+  // Show groups as nodes, plus any ungrouped nodes (solo-group promoted nodes)
   const vNodes = [];
   for (const g of Object.values(groupMap)) vNodes.push(g);
+  for (const n of nodes) {{
+    if (!nodeToGroup[n.id]) vNodes.push(n);
+  }}
   visibleNodes = vNodes;
 
   // Aggregate edges at group level
+  intraGroupEdges = {{}};
   const aggMap = {{}};
   for (const e of edges) {{
     const srcId = e._srcId || e.source.id || e.source;
@@ -555,7 +554,16 @@ function computeVisibleState() {{
     const srcVisible = nodeToGroup[srcId] || srcId;
     const tgtVisible = nodeToGroup[tgtId] || tgtId;
 
-    if (srcVisible === tgtVisible) continue; // internal
+    if (srcVisible === tgtVisible) {{
+      // Collect intra-group edges for display inside open groups
+      const gid = srcVisible;
+      if (!intraGroupEdges[gid]) intraGroupEdges[gid] = [];
+      const srcNode = nodeIndex[srcId], tgtNode = nodeIndex[tgtId];
+      if (srcNode && tgtNode) {{
+        intraGroupEdges[gid].push({{ source: srcNode, target: tgtNode, _srcId: srcId, _tgtId: tgtId, type: 'imports' }});
+      }}
+      continue;
+    }}
 
     const key = srcVisible + '|' + tgtVisible;
     if (aggMap[key]) {{
@@ -604,7 +612,7 @@ function toggleGroupPin(groupId) {{
   blastRadiusSet = new Set();
   resolveGroupOverlaps();
   renderDefaultSidebar();
-  draw();
+  zoomToFit();
 }}
 
 // Resolve overlaps between ALL groups using their actual dimensions
@@ -678,32 +686,66 @@ function collapseGroups() {{
 
 // Position children inside an open group as a grid of full-size cards.
 // Returns {{ items: [{{ node, cx, cy }}], openW, openH, cols, rows }}.
-const OPEN_GROUP_HEADER = 50;
-const OPEN_GROUP_PAD = 14;
-const OPEN_GROUP_GAP = 16;
+const OPEN_GROUP_HEADER = 56;
+const OPEN_GROUP_PAD = 28;
+const OPEN_GROUP_GAP = 40;
 
 function layoutOpenGroupChildren(group) {{
   const children = (group.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
-  if (children.length === 0) return {{ items: [], openW: group.w, openH: group.h, cols: 0, rows: 0 }};
-  const ranked = rankChildNodes(children);
-  const n = ranked.length;
+  if (children.length === 0) return {{ items: [], openW: group.w, openH: group.h, cols: 0, rows: 0, internalEdges: [] }};
+
+  // Topological sort using intra-group edges (Kahn's algorithm)
+  const gEdges = intraGroupEdges[group.id] || [];
+  const childSet = new Set(children.map(c => c.id));
+  const inDeg = {{}};
+  const adj = {{}};
+  for (const c of children) {{ inDeg[c.id] = 0; adj[c.id] = []; }}
+  for (const e of gEdges) {{
+    const sid = e._srcId || e.source.id, tid = e._tgtId || e.target.id;
+    if (childSet.has(sid) && childSet.has(tid)) {{
+      adj[sid].push(tid);
+      inDeg[tid] = (inDeg[tid] || 0) + 1;
+    }}
+  }}
+  const queue = children.filter(c => inDeg[c.id] === 0)
+    .sort((a, b) => (b.pagerank || 0) - (a.pagerank || 0));
+  const sorted = [];
+  const visited = new Set();
+  for (let i = 0; i < queue.length; i++) {{
+    const node = queue[i];
+    if (visited.has(node.id)) continue;
+    visited.add(node.id);
+    sorted.push(node);
+    for (const nid of (adj[node.id] || [])) {{
+      inDeg[nid]--;
+      if (inDeg[nid] === 0) {{
+        const nNode = nodeIndex[nid];
+        if (nNode && !visited.has(nid)) queue.push(nNode);
+      }}
+    }}
+  }}
+  for (const c of rankChildNodes(children)) {{
+    if (!visited.has(c.id)) sorted.push(c);
+  }}
+
+  const n = sorted.length;
   const cols = n <= 2 ? 1 : (n <= 6 ? 2 : 3);
   const rows = Math.ceil(n / cols);
   const cellW = NODE_W;
-  const cellH = Math.max(...ranked.map(c => c.h || NODE_H_BASE));
+  const cellH = Math.max(...sorted.map(c => c.h || NODE_H_BASE));
   const openW = cols * cellW + (cols - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD * 2;
   const openH = OPEN_GROUP_HEADER + rows * cellH + (rows - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD;
-  const topY = group.y - group.h / 2; // anchor to original top
+  const topY = group.y - group.h / 2;
   const leftX = group.x - openW / 2;
 
-  const items = ranked.map((node, i) => {{
+  const items = sorted.map((node, i) => {{
     const col = i % cols;
     const row = Math.floor(i / cols);
     const cx = leftX + OPEN_GROUP_PAD + col * (cellW + OPEN_GROUP_GAP) + cellW / 2;
     const cy = topY + OPEN_GROUP_HEADER + row * (cellH + OPEN_GROUP_GAP) + cellH / 2;
     return {{ node, cx, cy }};
   }});
-  return {{ items, openW, openH, cols, rows }};
+  return {{ items, openW, openH, cols, rows, internalEdges: gEdges }};
 }}
 
 function openGroupVisualHeight(group) {{
@@ -749,16 +791,19 @@ let sidebarEnabled = true;
 function toggleSidebarEnabled() {{
   sidebarEnabled = !sidebarEnabled;
   const btn = document.getElementById('btnSidebar');
-  if (btn) btn.textContent = sidebarEnabled ? 'Panel: On' : 'Panel: Off';
+  if (btn) btn.textContent = sidebarEnabled ? 'Details: On' : 'Details: Off';
   if (!sidebarEnabled) {{
     sidebar.classList.add('hidden');
     sidebar.innerHTML = '';
-    }} else if (selectedNode) {{
-    renderSidebar(selectedNode);
-  }} else if (hoveredNode && !hoveredNode.isGroup) {{
-    renderSidebar(hoveredNode);
-  }} else if (hoveredNode && hoveredNode.isGroup) {{
-    renderGroupSidebar(hoveredNode);
+  }} else {{
+    sidebar.classList.remove('hidden');
+    if (selectedNode) {{
+      renderSidebar(selectedNode);
+    }} else if (hoveredNode) {{
+      hoveredNode.isGroup ? renderGroupSidebar(hoveredNode) : renderSidebar(hoveredNode);
+    }} else {{
+      sidebar.innerHTML = '<div class="placeholder">Hover or click a block to see details.</div>';
+    }}
   }}
 }}
 
@@ -1530,8 +1575,9 @@ function nodeSubtitle(n) {{
   return parts.join(' \u00b7 ');
 }}
 
-// Primary title text — short_title if set, otherwise filename
+// Primary title text — use group label for solo-group nodes in grouped mode
 function nodeTitleText(n) {{
+  if (groupingState !== 'flat' && n._soloGroupLabel) return n._soloGroupLabel;
   return n.short_title || n.label;
 }}
 
@@ -2207,16 +2253,14 @@ function draw() {{
 
   // Shift a border point along the edge it sits on, clamped to block bounds
   function shiftAlongBorder(pt, box, offset) {{
-    const EPS = 2;
-    const hw = box.w / 2 - 8, hh = box.h / 2 - 8; // inset so arrows stay inside border
-    if (Math.abs(pt.y - (box.y - box.h / 2)) < EPS || Math.abs(pt.y - (box.y + box.h / 2)) < EPS) {{
-      // On top/bottom edge → shift horizontally, clamp to block width
-      const clampedOff = Math.max(-hw, Math.min(hw, offset));
-      return {{ x: box.x + Math.max(-hw, Math.min(hw, (pt.x - box.x) + clampedOff)), y: pt.y }};
+    const hw = box.w / 2 - 8, hh = box.h / 2 - 8;
+    const dx = Math.abs(pt.x - box.x), dy = Math.abs(pt.y - box.y);
+    if (dx * box.h <= dy * box.w) {{
+      // Closer to top/bottom edge → shift horizontally
+      return {{ x: box.x + Math.max(-hw, Math.min(hw, (pt.x - box.x) + offset)), y: pt.y }};
     }}
-    // On left/right edge → shift vertically, clamp to block height
-    const clampedOff = Math.max(-hh, Math.min(hh, offset));
-    return {{ x: pt.x, y: box.y + Math.max(-hh, Math.min(hh, (pt.y - box.y) + clampedOff)) }};
+    // Closer to left/right edge → shift vertically
+    return {{ x: pt.x, y: box.y + Math.max(-hh, Math.min(hh, (pt.y - box.y) + offset)) }};
   }}
 
   // Draw arrow from a→b, routing around any blocking nodes
@@ -2406,7 +2450,9 @@ function draw() {{
     }}
 
     const focalId = selectedNode ? selectedNode.id : (hoveredNode ? hoveredNode.id : null);
-    const isDirect = focalId && (a.id === focalId || b.id === focalId);
+    const focalGroupId = focalId ? (nodeToGroup[focalId] || null) : null;
+    const isDirect = focalId && (a.id === focalId || b.id === focalId
+      || (focalGroupId && (a.id === focalGroupId || b.id === focalGroupId)));
     const faded = highlightSet && !isDirect && !(highlightSet.has(a.id) && highlightSet.has(b.id));
 
     if (edgeMode === 'hover' && !isDirect) continue;
@@ -2715,6 +2761,40 @@ function draw() {{
     }}
   }}
 
+  // ── Draw intra-group edges inside open groups ──────────────────────
+  if (groupingState !== 'flat') {{
+    for (const g of visibleNodes) {{
+      if (!g.isGroup || !isGroupOpen(g)) continue;
+      const layout = layoutOpenGroupChildren(g);
+      const iEdges = layout.internalEdges;
+      if (!iEdges || iEdges.length === 0) continue;
+      const gc = groupColor(g.id);
+      const posMap = {{}};
+      for (const item of layout.items) posMap[item.node.id] = item;
+
+      // Check if a child in this group is selected
+      const childIds = new Set((g.childIds || []).filter(id => posMap[id]));
+      const focusChild = selectedNode && childIds.has(selectedNode.id) ? selectedNode.id : null;
+
+      for (const e of iEdges) {{
+        const sid = e._srcId || e.source.id, tid = e._tgtId || e.target.id;
+        const sp = posMap[sid], ep = posMap[tid];
+        if (!sp || !ep) continue;
+        const sHw = NODE_W / 2 + 2, sHh = (sp.node.h || NODE_H_BASE) / 2 + 2;
+        const tHw = NODE_W / 2 + 2, tHh = (ep.node.h || NODE_H_BASE) / 2 + 2;
+        const start = rectEdgePoint(ep.cx, ep.cy, sp.cx, sp.cy, sHw, sHh);
+        const end = rectEdgePoint(sp.cx, sp.cy, ep.cx, ep.cy, tHw, tHh);
+        const touches = focusChild && (sid === focusChild || tid === focusChild);
+        const alpha = focusChild ? (touches ? 0.95 : 0.1) : 0.7;
+        const lw = (touches ? 2.5 : 1.5) / zoom;
+        const aSize = (touches ? 13 : 10) / zoom;
+        ctx.globalAlpha = alpha;
+        drawArrow(start.x, start.y, end.x, end.y, gc, lw, aSize);
+      }}
+    }}
+    ctx.globalAlpha = 1;
+  }}
+
   // Draw deferred arrowheads ON TOP of everything
   for (const ah of _deferredArrowheads) {{
     ctx.globalAlpha = ah.alpha;
@@ -2949,6 +3029,20 @@ function selectNode(n) {{
   selectedNode = selectedNode === n ? null : n;
   if (selectedNode) {{
     highlightSet = nhopNeighborhood(n.id, 1);
+    // Add parent group IDs so group-level nodes + edges light up
+    for (const id of [...highlightSet]) {{
+      const gid = nodeToGroup[id];
+      if (gid) highlightSet.add(gid);
+    }}
+    // Add groups connected to the focal group via inter-group edges
+    const myGroup = nodeToGroup[n.id];
+    if (myGroup) {{
+      for (const ve of visibleEdges) {{
+        const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
+        if (sid === myGroup) highlightSet.add(tid);
+        if (tid === myGroup) highlightSet.add(sid);
+      }}
+    }}
     blastRadiusSet = computeBlastRadius(n.id);
     if (sidebarEnabled) renderSidebar(n);
   }} else {{
@@ -2961,7 +3055,6 @@ function selectNode(n) {{
 }}
 
 function renderGroupSidebar(g) {{
-  sidebar.classList.remove('hidden');
   const children = (g.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
   const ranked = rankChildNodes(children);
   const fileList = ranked.map(c => {{
@@ -2987,8 +3080,13 @@ function renderGroupSidebar(g) {{
 }}
 
 function renderDefaultSidebar() {{
-  sidebar.classList.add('hidden');
-  sidebar.innerHTML = '';
+  if (sidebarEnabled) {{
+    sidebar.classList.remove('hidden');
+    sidebar.innerHTML = '<div class="placeholder">Hover or click a block to see details.</div>';
+  }} else {{
+    sidebar.classList.add('hidden');
+    sidebar.innerHTML = '';
+  }}
 }}
 
 function metricRow(label, value, color) {{
@@ -3050,10 +3148,9 @@ function renderSidebar(n) {{
     `;
   }}
 
-  sidebar.classList.remove('hidden');
   sidebar.innerHTML = `
     <div>
-      <h2>${{esc(n.short_title || n.label)}}</h2>
+      <h2>${{esc(nodeTitleText(n))}}</h2>
       <span style="font-size:11px;color:#6e7681;word-break:break-all">${{esc(n.id)}}</span>
       <div style="margin-top:4px;font-size:11px;color:#6e7681">${{esc(n.language || '')}} \u00b7 ${{(n.size/1024).toFixed(1)}} KB${{rolePill}}</div>
     </div>
@@ -3997,27 +4094,13 @@ function renderLangBar() {{
 // ── Summary + Health panel ───────────────────────────────────────────────────
 
 function renderSummary() {{
-  const panel = document.getElementById('lp-summary');
-  if (!panel) return;
-  if (!SUMMARY && !HEALTH_SCORE) {{ panel.style.display = 'none'; return; }}
-  let html = '';
-  if (SUMMARY) {{
-    html += `<div class="lp-summary">${{esc(SUMMARY)}}</div>`;
-  }}
-  if (HEALTH_SCORE) {{
-    const score = Math.max(1, Math.min(10, HEALTH_SCORE));
-    const pct = score * 10;
-    const color = score >= 8 ? '#22c55e' : score >= 5 ? '#f59e0b' : '#ef4444';
-    html += `<div class="lp-health">`;
-    html += `<span style="color:#6e7681">Health</span>`;
-    html += `<div class="lp-health-bar"><div class="lp-health-fill" style="width:${{pct}}%;background:${{color}}"></div></div>`;
-    html += `<span style="color:${{color}};font-weight:600;font-size:13px">${{score}}/10</span>`;
-    html += `</div>`;
-  }}
-  if (HEALTH_NOTES) {{
-    html += `<div class="lp-health-notes">${{esc(HEALTH_NOTES)}}</div>`;
-  }}
-  panel.innerHTML = html;
+  if (!HEALTH_SCORE) return;
+  const el = document.getElementById('tb-health');
+  if (!el) return;
+  const score = Math.max(1, Math.min(10, HEALTH_SCORE));
+  const color = score >= 8 ? '#22c55e' : score >= 5 ? '#f59e0b' : '#ef4444';
+  el.style.cssText = `font-size:11px;color:${{color}};font-weight:600;white-space:nowrap`;
+  el.textContent = score + '/10';
 }}
 
 // ── Blast radius ────────────────────────────────────────────────────────────

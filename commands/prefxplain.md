@@ -135,12 +135,21 @@ These become the top-level blocks in the diagram.
 Rules:
 - Groups should reflect logical architecture, NOT directory structure.
   BAD: "prefxplain/", "tests/" (that's just folders)
-  GOOD: "Analysis Pipeline", "Visualization Engine", "CI & Tooling"
+  GOOD: "Analysis Pipeline", "Visualization Engine", "CLI & Exports"
+- Group names MUST be self-explanatory. A reader who has never seen the codebase
+  should understand what kind of files are inside just from the group name alone.
+  BAD: "Integration & Tooling" (tooling for what? integration with what?)
+  BAD: "Utilities", "Helpers", "Core", "Miscellaneous" (says nothing)
+  GOOD: "CLI & Exports" (clear: the command-line interface and format exporters)
+  GOOD: "Code Analysis" (clear: the part that analyzes code)
+  GOOD: "Graph Visualization" (clear: the part that draws the graph)
+  If you can't name a group clearly, it probably contains files that belong in
+  different groups — split it up.
 - Each group needs a short description (1 sentence) that appears on hover.
 - Test files go in a "Tests" group — it will be visually de-emphasized.
 - Every file must belong to exactly one group.
 - Think: if you were drawing this on a whiteboard for a new teammate, what
-  would the 2-4 big boxes be?
+  would the 2-4 big boxes be? Would the labels make sense without explanation?
 
 Patch the groups into the JSON:
 

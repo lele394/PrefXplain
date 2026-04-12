@@ -1876,6 +1876,19 @@ function nodeSummaryText(n) {{
   return '';
 }}
 
+function truncateToFit(ctx, text, maxWidth) {{
+  if (!text) return '';
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  const ell = '\u2026';
+  let lo = 0, hi = text.length;
+  while (lo < hi) {{
+    const mid = (lo + hi + 1) >> 1;
+    if (ctx.measureText(text.slice(0, mid) + ell).width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }}
+  return lo > 0 ? text.slice(0, lo).trimEnd() + ell : ell;
+}}
+
 function wrapTextLines(ctx, text, maxWidth, maxLines) {{
   if (!text) return [];
   const words = text.split(WHITESPACE_RE).filter(Boolean);
@@ -3176,7 +3189,11 @@ function draw() {{
         ctx.fillStyle = '#8b949e';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(nodeTitleText(n), n.x * zoom + pan.x, n.y * zoom + pan.y);
+        // Truncate to the card's screen width so long titles don't bleed
+        // into adjacent cards. Leave ~12px total horizontal padding.
+        const lodMaxW = Math.max(16, nw * zoom - 12);
+        const lodText = truncateToFit(ctx, nodeTitleText(n), lodMaxW);
+        ctx.fillText(lodText, n.x * zoom + pan.x, n.y * zoom + pan.y);
         ctx.restore();
       }}
       continue;
@@ -3226,12 +3243,20 @@ function draw() {{
       ctx.textAlign = 'center';
       ctx.fillText(kindLabel, screenX, screenY - screenH / 2 + 5);
 
-      // Title: vertically centered in the card
+      // Re-measure title wrap at the actual draw font (14px) so truncation
+      // matches what gets rendered. The outer titleLines above were computed
+      // at 16px, which mis-sizes the wrap for child cards.
       ctx.font = 'bold 14px -apple-system, sans-serif';
+      // Tighten the usable width: shape clip (hexagon/diamond/parallelogram)
+      // and card border chrome both eat a few px on each side. Without this
+      // buffer the text visually butts the card border or bleeds.
+      const childLineW = Math.max(20, innerW - 14);
+      const childTitleLines = wrapTextLines(ctx, titleText, childLineW, 2)
+        .map(line => truncateToFit(ctx, line, childLineW));
       ctx.fillStyle = textColor;
       ctx.textBaseline = 'middle';
-      const titleY = screenY + (titleLines.length > 1 ? -8 : 0);
-      titleLines.forEach((line, i) => {{
+      const titleY = screenY + (childTitleLines.length > 1 ? -8 : 0);
+      childTitleLines.forEach((line, i) => {{
         ctx.fillText(line, screenX, titleY + i * 17);
       }});
       ctx.restore();

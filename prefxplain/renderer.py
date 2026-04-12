@@ -72,11 +72,13 @@ _HTML_TEMPLATE = """\
   #panel-header button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
 
   /* ── Toggle button (horizontal bar below top panel) ──────────────── */
-  #panel-resizer {{ position: relative; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 0 12px; height: 18px; flex-shrink: 0; cursor: ns-resize; user-select: none; }}
+  #panel-resizer {{ position: relative; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 0 12px; height: 24px; flex-shrink: 0; cursor: ns-resize; user-select: none; background: transparent; transition: background .15s ease; }}
+  #panel-resizer:hover {{ background: rgba(88, 166, 255, 0.06); }}
   #panel-resizer .pr-line {{ flex: 1; height: 1px; background: #30363d; transition: background .15s ease; }}
   #panel-resizer:hover .pr-line, body.panel-resizing #panel-resizer .pr-line {{ background: #58a6ff; }}
-  #panel-toggle {{ position: relative; z-index: 16; width: 44px; height: 16px; margin: 0; background: #21262d; border: 1px solid #30363d; border-top: none; border-radius: 0 0 6px 6px; color: #8b949e; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
-  #panel-toggle:hover {{ background: #30363d; color: #e6edf3; }}
+  #panel-toggle {{ position: relative; z-index: 16; width: 56px; height: 20px; margin: 0; background: #21262d; border: 1px solid #30363d; border-top: none; border-radius: 0 0 8px 8px; color: #8b949e; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background .15s ease, color .15s ease, border-color .15s ease; }}
+  #panel-toggle:hover {{ background: #30363d; color: #e6edf3; border-color: #58a6ff; }}
+  #panel-resizer:hover #panel-toggle {{ color: #e6edf3; border-color: #58a6ff; }}
 
   /* ── Center (graph) ────────────────────────────────────────────────── */
   #center {{ flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: 0; overflow: hidden; }}

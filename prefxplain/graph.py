@@ -611,6 +611,12 @@ class Graph:
             elif self.outdegree(node.id) >= 3 and self.indegree(node.id) == 0:
                 node.role = "entry_point"
 
+    def infer_groups(self) -> None:
+        """Assign architectural groups when no curated grouping exists yet."""
+        from .diagram import apply_inferred_groups
+
+        apply_inferred_groups(self)
+
     # ------------------------------------------------------------------
     # Health score
     # ------------------------------------------------------------------
@@ -686,6 +692,14 @@ class Graph:
         The renderer consumes this payload directly — all graph algorithms
         run in Python so the JS side only handles layout and interaction.
         """
+        from .diagram import build_node_semantics, build_semantic_diagram
+
+        # Render paths can be reached from prefxplain.json loads that do not
+        # carry inferred roles. Recompute them here so the diagram model always
+        # has a stable semantic base.
+        self.infer_roles()
+        self.infer_groups()
+
         base = self.to_dict()
 
         clusters = self.cluster_by_directory()
@@ -694,6 +708,8 @@ class Graph:
         cycle_node_set = self.cycle_node_ids()
         metrics = self.metrics()
         health = self.health_score()
+        semantic_diagram = build_semantic_diagram(self)
+        node_semantics = build_node_semantics(self)
 
         # Per-node metrics dict: indegree, outdegree, pagerank, role, in_cycle
         pr = self.pagerank()
@@ -723,6 +739,8 @@ class Graph:
             "clusters_by_role": clusters_by_role,
             "clusters_by_group": clusters_by_group,
             "group_descriptions": self.metadata.groups,
+            "semantic_diagram": semantic_diagram.to_dict(),
+            "node_semantics": node_semantics,
             "role_order": ROLE_ORDER,
             "role_subtitles": ROLE_SUBTITLES,
             "cycle_edges": cycle_edges_list,

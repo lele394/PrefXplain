@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 
+from .diagram import build_semantic_diagram
 from .graph import Graph
 
 
@@ -29,6 +30,32 @@ def _escape_dot_str(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _semantic_mermaid_decl(node: dict) -> str:
+    label = _escape_mermaid_label(node["label"])
+    shape = node.get("shape", "process")
+    node_id = node["id"]
+    if shape == "decision":
+        return f'    {node_id}{{"{label}"}}'
+    if shape == "data":
+        return f'    {node_id}[/"{label}"/]'
+    if shape == "analysis":
+        return f'    {node_id}[["{label}"]]'
+    if shape in {"entry", "test"}:
+        return f'    {node_id}(["{label}"])'
+    return f'    {node_id}["{label}"]'
+
+
+def _semantic_dot_shape(shape: str) -> str:
+    return {
+        "decision": "diamond",
+        "analysis": "hexagon",
+        "data": "parallelogram",
+        "entry": "oval",
+        "test": "box",
+        "external": "box",
+    }.get(shape, "box")
+
+
 def export_mermaid(graph: Graph) -> str:
     """Export graph as a Mermaid flowchart string.
 
@@ -38,6 +65,23 @@ def export_mermaid(graph: Graph) -> str:
             main_py["main.py"] --> utils_py["utils.py"]
         ```
     """
+    semantic = build_semantic_diagram(graph).to_dict()
+    if len(semantic.get("nodes", [])) >= 2:
+        lines = ["graph LR"]
+        seen: dict[str, int] = {}
+        id_map = {
+            node["id"]: _sanitize_mermaid_id(node["id"], seen)
+            for node in semantic["nodes"]
+        }
+        for node in semantic["nodes"]:
+            node = {**node, "id": id_map[node["id"]]}
+            lines.append(_semantic_mermaid_decl(node))
+        lines.append("")
+        for edge in semantic["edges"]:
+            edge_label = f'|{_escape_mermaid_label(edge.get("label", ""))}|' if edge.get("label") else ""
+            lines.append(f'    {id_map[edge["source"]]} -->{edge_label} {id_map[edge["target"]]}')
+        return "\n".join(lines) + "\n"
+
     lines = ["graph LR"]
 
     cycle_nodes = graph.cycle_node_ids()
@@ -78,6 +122,30 @@ def export_mermaid(graph: Graph) -> str:
 
 def export_dot(graph: Graph) -> str:
     """Export graph as a Graphviz DOT string."""
+    semantic = build_semantic_diagram(graph).to_dict()
+    if len(semantic.get("nodes", [])) >= 2:
+        lines = ["digraph PrefXplain {"]
+        lines.append('    rankdir=LR;')
+        lines.append('    node [style="rounded,filled", fontname="Helvetica", fontsize=10];')
+        lines.append('    edge [color="#666666", arrowsize=0.7, fontname="Helvetica", fontsize=9];')
+        lines.append("")
+        for node in semantic["nodes"]:
+            safe_id = f'"{_escape_dot_str(node["id"])}"'
+            safe_label = _escape_dot_str(node["label"])
+            shape = _semantic_dot_shape(node.get("shape", "process"))
+            lines.append(
+                f'    {safe_id} [label="{safe_label}", shape="{shape}", fillcolor="#161b2240", color="#58a6ff"];'
+            )
+        lines.append("")
+        for edge in semantic["edges"]:
+            src = f'"{_escape_dot_str(edge["source"])}"'
+            tgt = f'"{_escape_dot_str(edge["target"])}"'
+            label = _escape_dot_str(edge.get("label", ""))
+            label_part = f' [label="{label}"]' if label else ""
+            lines.append(f"    {src} -> {tgt}{label_part};")
+        lines.append("}")
+        return "\n".join(lines) + "\n"
+
     lines = ["digraph PrefXplain {"]
     lines.append('    rankdir=LR;')
     lines.append('    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10];')

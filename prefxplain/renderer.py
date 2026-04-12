@@ -2903,14 +2903,51 @@ function draw() {{
   const drawEdgeKeySet = new Set(drawEdges.map(e => (e._srcId || e.source.id || e.source) + '|' + (e._tgtId || e.target.id || e.target)));
   const drawnBidiPairs = new Set();
 
-  // Pre-assign sequential lane indices to edges for non-overlapping routing.
-  // Each edge gets a unique laneIdx used to offset its routing corridor.
-  let _laneCounter = 0;
+  // Pre-assign lane indices so parallel edges don't cross each other.
+  //
+  // Rule: when several edges share a routing corridor (e.g. all detour under
+  // the same row of nodes), the edge with the SHORTEST run turns off the
+  // corridor first. It must sit on the INNERMOST lane (laneIdx 0 = closest
+  // to nodes) so its vertical leg has nothing to cross. Longer-running edges
+  // sit on outer lanes.
+  //
+  // Implementation: group edges by source, then sort each group by the
+  // distance the edge travels along the flow axis (target-minus-source on
+  // the primary axis). Shortest distance → smallest laneIdx. Edges from
+  // different sources are kept in their original relative order so bundles
+  // from the same block stay contiguous.
+  const _flowDir = resolvedFlowDirection();
+  const _edgeDistance = (e) => {{
+    const a = e.source, b = e.target;
+    if (!a || !b || typeof a.x !== 'number' || typeof b.x !== 'number') return 0;
+    return _flowDir === 'horizontal'
+      ? Math.abs(b.x - a.x)
+      : Math.abs(b.y - a.y);
+  }};
+  const _bySource = new Map();
+  const _sourceOrder = [];
+  drawEdges.forEach((e, i) => {{
+    const sId = e._srcId || (e.source && e.source.id) || e.source;
+    if (!_bySource.has(sId)) {{
+      _bySource.set(sId, []);
+      _sourceOrder.push(sId);
+    }}
+    _bySource.get(sId).push({{ edge: e, origIdx: i }});
+  }});
   const edgeLaneMap = {{}};
-  for (const e of drawEdges) {{
-    const sId = e._srcId || e.source.id || e.source;
-    const tId = e._tgtId || e.target.id || e.target;
-    edgeLaneMap[sId + '|' + tId] = _laneCounter++;
+  let _laneCounter = 0;
+  for (const sId of _sourceOrder) {{
+    const bucket = _bySource.get(sId);
+    // Stable sort: shortest run first (innermost lane), ties keep original order.
+    bucket.sort((p, q) => {{
+      const d = _edgeDistance(p.edge) - _edgeDistance(q.edge);
+      return d !== 0 ? d : p.origIdx - q.origIdx;
+    }});
+    for (const {{ edge }} of bucket) {{
+      const s = edge._srcId || (edge.source && edge.source.id) || edge.source;
+      const t = edge._tgtId || (edge.target && edge.target.id) || edge.target;
+      edgeLaneMap[s + '|' + t] = _laneCounter++;
+    }}
   }}
   const totalLanes = _laneCounter || 1;
 

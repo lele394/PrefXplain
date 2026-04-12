@@ -48,4 +48,7 @@ prefxplain-vscode/out/
 *.vsix
 
 # Claude Code local state
-.claude/settings.local.json
+.claude/
+
+# Local design audit artifacts (screenshots, reports) — not diagram code
+design-audit/

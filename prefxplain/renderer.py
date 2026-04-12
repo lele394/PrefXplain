@@ -2703,7 +2703,12 @@ function draw() {{
   // laneIdx = unique index for this edge, used to offset routing lanes
   function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx, labelText) {{
     const aBox = nodeBox(a), bBox = nodeBox(b);
-    const LANE_SPREAD = 18 / zoom;
+    // Lane spacing MUST be zoom-invariant in world units. Previously this
+    // was `18 / zoom` to keep screen spacing constant, but that made corridor
+    // world positions shift with zoom — close enough at high zoom that
+    // lineHitsRect (fixed 4-unit pad) would flag the route as blocked and
+    // flip to the alt side. Result: edges visibly jumped as the user zoomed.
+    const LANE_SPREAD = 18;
     const laneOffset = (laneIdx - (totalLanes - 1) / 2) * LANE_SPREAD;
     const obstacles = getObstacles(a, b);
 
@@ -2730,7 +2735,9 @@ function draw() {{
       //   vertical flow   → corridor is a vertical line (constant X, vary Y)
       //   horizontal flow → corridor is a horizontal line (constant Y, vary X)
       const routeOffset = laneIdx * LANE_SPREAD;
-      const margin = 24 / zoom;
+      // Zoom-invariant corridor margin (world units). See LANE_SPREAD note
+      // above — any /zoom here makes routing non-deterministic.
+      const margin = 24;
       const dir = resolvedFlowDirection(); // 'horizontal' | 'vertical'
 
       if (dir === 'horizontal') {{

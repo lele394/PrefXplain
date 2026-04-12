@@ -1,18 +1,18 @@
 #!/bin/bash
-# Open a URL in the current IDE's Simple Browser via the prefxplain.browser extension.
-# Usage: ./open-in-ide.sh <url>
-# Detects VS Code, Cursor, Windsurf, VS Code Insiders automatically.
+# Open a local prefxplain.html file in the IDE webview via the prefxplain-vscode extension.
+# Usage: ./open-in-ide.sh /absolute/path/to/prefxplain.html
 
-URL="$1"
-if [ -z "$URL" ]; then
-  echo "Usage: open-in-ide.sh <url>" >&2
+HTML_PATH="$1"
+if [ -z "$HTML_PATH" ]; then
+  echo "Usage: ./open-in-ide.sh /absolute/path/to/prefxplain.html" >&2
   exit 1
 fi
 
-# URL-encode the target URL for the query string
-ENCODED_URL=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$URL', safe=''))")
+if [ ! -f "$HTML_PATH" ]; then
+  echo "File not found: $HTML_PATH" >&2
+  exit 1
+fi
 
-# Detect which IDE is running from environment
 BUNDLE="${__CFBundleIdentifier:-}"
 TERM="${TERM_PROGRAM:-}"
 
@@ -22,11 +22,19 @@ elif [[ "$BUNDLE" == *"Windsurf"* ]] || [[ "$TERM" == "windsurf" ]]; then
   SCHEME="windsurf"
 elif [[ "$BUNDLE" == *"VSCodeInsiders"* ]] || [[ "$TERM" == "vscode-insiders" ]]; then
   SCHEME="vscode-insiders"
-elif [[ "$BUNDLE" == *"VSCode"* ]] || [[ "$TERM" == "vscode" ]]; then
-  SCHEME="vscode"
 else
-  # Fallback: try vscode, then open in browser
   SCHEME="vscode"
 fi
 
-open "${SCHEME}://prefxplain.browser/open?url=${ENCODED_URL}"
+PREVIEW_URI="$(
+  HTML_PATH="$HTML_PATH" SCHEME="$SCHEME" python3 - <<'PY'
+import os
+import urllib.parse
+
+scheme = os.environ["SCHEME"]
+html_path = os.environ["HTML_PATH"]
+print(f"{scheme}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(html_path)}")
+PY
+)"
+
+open "$PREVIEW_URI"

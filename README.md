@@ -27,15 +27,13 @@ No API key needed. Claude generates all descriptions directly in your session.
 
 ```bash
 pip install prefxplain
-make install               # installs Claude Code skills + VS Code extension
+make install               # installs the /prefxplain command + VS Code extension
 ```
 
 Then in Claude Code:
 
 ```
-/prefxplain-create         # analyze, describe, render, open in IDE
-/prefxplain-show           # reopen the diagram without regenerating
-/prefxplain-update         # update after code changes (preserves existing descriptions)
+/prefxplain                # analyze or refresh the map and open it in the IDE preview
 ```
 
 The diagram opens automatically in a VS Code / Cursor / Windsurf tab.
@@ -74,7 +72,7 @@ make install
 ```
 
 This does two things:
-1. Symlinks the Claude Code skills (`/prefxplain-create`, `/prefxplain-show`, `/prefxplain-update`) into `~/.claude/commands/`
+1. Installs the Claude Code `/prefxplain` command into `~/.claude/commands/`
 2. Builds and installs a tiny VS Code extension (3KB) that enables automatic diagram preview in an IDE tab
 
 Works with any VS Code fork: VS Code, Cursor, Windsurf, VS Code Insiders.
@@ -125,9 +123,7 @@ The skills are the recommended way to use PrefXplain. Claude reads each file and
 
 | Skill | What it does |
 |-------|-------------|
-| `/prefxplain-create` | Full pipeline: analyze, describe every file, generate summary + health score, render HTML, open in IDE |
-| `/prefxplain-update` | Re-analyze after code changes. Preserves descriptions for unchanged files, generates new ones for added/modified files. |
-| `/prefxplain-show` | Reopen the diagram in the IDE without regenerating anything. Reuses or starts the local preview server. |
+| `/prefxplain` | Analyze or refresh the codebase map, render `prefxplain.html`, and open it in the IDE preview by default. |
 
 ### What the skill generates
 
@@ -154,7 +150,7 @@ For the project:
 | `--model` | `gpt-4o-mini` | LLM model name |
 | `--max-files` | 500 | Maximum files to analyze |
 | `--force`, `-f` | false | Regenerate all descriptions |
-| `--open/--no-open` | true (create) | Open result in browser or IDE |
+| `--open/--no-open` | true (create) | Open result in the IDE preview when available, otherwise browser |
 | `--filter` | - | Only include files matching glob (e.g. `src/**/*.py`) |
 | `--focus` | - | Focus file for depth-limited view |
 | `--depth` | - | Hops around `--focus` file |
@@ -223,11 +219,9 @@ prefxplain/
   cli.py         # Typer CLI: create, update, check, context, mcp
 
 commands/
-  prefxplain-create.md   # Claude Code skill: full pipeline
-  prefxplain-update.md   # Claude Code skill: incremental update
-  prefxplain-show.md     # Claude Code skill: open preview
+  prefxplain.md          # Claude Code command: analyze + open IDE preview
 
-vscode-extension/
+prefxplain-vscode/
   src/extension.ts       # URI handler for auto-opening in IDE
   package.json           # Extension manifest
 

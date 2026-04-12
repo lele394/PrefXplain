@@ -38,20 +38,21 @@ If that also fails, stop and say what went wrong.
 PREFXPLAIN_ROOT="$(python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null)"
 IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null || echo "")"
 if [ -n "$IDE_CLI" ]; then
-  $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.browser" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
+  $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
 else
   echo "NO_IDE_CLI"
 fi
 ```
 
-If EXTENSION_MISSING and `$PREFXPLAIN_ROOT/vscode-extension/` exists, install it
+If EXTENSION_MISSING and `$PREFXPLAIN_ROOT/prefxplain-vscode/` exists, install it
 silently (no need to ask, it's a 3KB extension with zero overhead):
 
 ```bash
 cd "$PREFXPLAIN_ROOT" && make install-extension
 ```
 
-If NO_IDE_CLI, skip silently. Preview will fall back to the browser.
+If NO_IDE_CLI, skip silently. Keep the HTML on disk; do not start a localhost
+server unless the user explicitly asks for browser preview.
 
 ## Division of labor
 
@@ -452,47 +453,26 @@ If `--output` was passed in `$ARGUMENTS`, use that path instead of the default.
 
 ### 6. Preview in IDE
 
-Launch a background HTTP server and let VS Code detect it for Simple Browser preview:
+Open the generated HTML in the installed PrefXplain IDE preview:
 
 ```bash
-cd "$REPO"
-# Kill any previous prefxplain server
-[ -f /tmp/prefxplain.pid ] && kill $(cat /tmp/prefxplain.pid) 2>/dev/null; rm -f /tmp/prefxplain.pid /tmp/prefxplain.port
-
-# Find a free port in 8765-8775
-PORT=$(python3 -c "
-import socket
-for p in range(8765, 8776):
-    s = socket.socket()
-    try:
-        s.bind(('127.0.0.1', p))
-        s.close()
-        print(p)
-        break
-    except OSError:
-        continue
-")
-
-nohup python3 -m http.server $PORT --directory . > /tmp/prefxplain-server.log 2>&1 &
-echo $! > /tmp/prefxplain.pid
-echo $PORT > /tmp/prefxplain.port
-sleep 0.5
+HTML_PATH="$(cd "$REPO" && python3 -c "from pathlib import Path; print(Path('${OUTPUT:-prefxplain.html}').resolve())")"
+IDE_SCHEME="$(python3 -c "import os; term=(os.environ.get('TERM_PROGRAM') or '').lower(); print('cursor' if term=='cursor' else 'windsurf' if term=='windsurf' else 'vscode-insiders' if term=='vscode-insiders' else 'vscode')")"
+PREVIEW_URI="$(HTML_PATH="$HTML_PATH" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_PATH'])}\")")"
+open "$PREVIEW_URI" 2>/dev/null || true
 ```
 
-Then display the URL clearly:
+Then report the path clearly:
 
 ```bash
-PORT=$(cat /tmp/prefxplain.port)
 echo ""
-echo "prefxplain.html available at: http://localhost:$PORT/prefxplain.html"
+echo "prefxplain preview target: $HTML_PATH"
 echo ""
-echo "VS Code should show a 'Port $PORT detected' notification -- click 'Preview in Editor' to open in Simple Browser."
-echo "Otherwise: Cmd+Shift+P > 'Simple Browser: Show' > paste the URL."
-echo ""
-echo "Server PID: $(cat /tmp/prefxplain.pid) -- kill with: kill \$(cat /tmp/prefxplain.pid)"
+echo "The PrefXplain Preview webview should open in your IDE. If it does not, run:"
+echo "  Cmd+Shift+P > PrefXplain: Preview diagram"
 ```
 
-Do NOT block on the server. It runs in background. Move on to the report.
+Do not start a localhost server by default. The plugin webview is the primary preview path.
 
 ### 7. Report to the user
 
@@ -504,7 +484,7 @@ Keep this tight. Pull structural insights from the JSON:
 - **Entry points** (in-degree 0, excluding tests) -- where to start reading
 - **Orphans** (no imports in or out) -- if >3, give the count, offer to list
 - **Cycles** if detected -- flag as architectural debt
-- **URL to prefxplain.html** (the localhost URL from step 6)
+- **Preview target** (`prefxplain.html` path and that it was opened in the IDE webview)
 
 Close with: "Happy to walk through any specific file or cluster."
 Don't preempt -- wait for the user to ask.
@@ -517,5 +497,5 @@ Don't preempt -- wait for the user to ask.
   new or changed files — previous descriptions are preserved automatically
 - The HTML renderer already surfaces entry points, core files, orphans, and cycles
   visually -- the text report is a summary for people reading along in chat
-- A background HTTP server runs after the command for IDE preview. It consumes zero
-  CPU at rest but holds a port open. Kill it with `kill $(cat /tmp/prefxplain.pid)`.
+- The IDE extension preview is the default viewing path. Use a localhost server only
+  if the user explicitly asks for browser preview.

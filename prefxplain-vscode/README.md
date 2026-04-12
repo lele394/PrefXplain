@@ -1,7 +1,7 @@
 # PrefXplain Preview (VS Code Extension)
 
 Opens `prefxplain.html` in a clean webview tab: no toolbar, no URL bar, just the diagram.
-Auto-refreshes when the file changes (e.g., after `/prefxplain-create`).
+Auto-refreshes when the file changes (e.g., after `/prefxplain`).
 
 ## Install
 
@@ -20,7 +20,7 @@ For Windsurf: `windsurf --install-extension prefxplain-vscode-0.1.0.vsix`
 
 ### From Claude Code skills
 
-`/prefxplain-create` and `/prefxplain-show` trigger the extension automatically.
+`/prefxplain` triggers the extension automatically.
 
 ### From the command palette
 
@@ -38,7 +38,7 @@ open "vscode://prefxplain.prefxplain-vscode/preview?path=/absolute/path/to/prefx
 
 - **No chrome**: pure webview, the diagram fills the entire tab
 - **Reuse**: calling the command again reveals the existing tab instead of opening a new one
-- **Auto-refresh**: a file watcher reloads the webview when prefxplain.html changes on disk
+- **Auto-refresh**: the preview reloads when `prefxplain.html` changes on disk, and also re-checks on focus/visibility so external slash-command runs stay in sync
 - **Cleanup**: the watcher is disposed when the tab is closed
 
 ## Compatibility

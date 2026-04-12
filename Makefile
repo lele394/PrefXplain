@@ -4,10 +4,8 @@ install: install-skill install-extension
 
 install-skill:
 	mkdir -p ~/.claude/commands
-	ln -sf $(CURDIR)/commands/prefxplain-create.md ~/.claude/commands/prefxplain-create.md
-	ln -sf $(CURDIR)/commands/prefxplain-update.md ~/.claude/commands/prefxplain-update.md
-	ln -sf $(CURDIR)/commands/prefxplain-show.md ~/.claude/commands/prefxplain-show.md
-	@echo "Installed 3 skills: prefxplain-create, prefxplain-update, prefxplain-show"
+	ln -sf $(CURDIR)/commands/prefxplain.md ~/.claude/commands/prefxplain.md
+	@echo "Installed Claude Code command: /prefxplain"
 
 install-extension:
 	@cd $(CURDIR)/prefxplain-vscode && npm install --silent 2>/dev/null && npm run compile 2>/dev/null && npx @vscode/vsce package --allow-missing-repository 2>/dev/null

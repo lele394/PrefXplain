@@ -41,3 +41,11 @@ prefxplain.json
 *.tar.gz
 *.zip
 .gstack/
+
+# VS Code extension
+prefxplain-vscode/node_modules/
+prefxplain-vscode/out/
+*.vsix
+
+# Claude Code local state
+.claude/settings.local.json

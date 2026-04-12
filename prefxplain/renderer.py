@@ -2740,81 +2740,71 @@ function draw() {{
       const margin = 24;
       const dir = resolvedFlowDirection(); // 'horizontal' | 'vertical'
 
-      if (dir === 'horizontal') {{
-        // Horizontal flow: route via a horizontal corridor (fixed sideY)
-        const goDown = aBox.y <= bBox.y;
-        let sideY;
-        if (goDown) {{
-          sideY = Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2);
-          for (const ob of blockers) sideY = Math.max(sideY, ob.y + ob.h / 2);
-          sideY += margin + routeOffset;
-        }} else {{
-          sideY = Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2);
-          for (const ob of blockers) sideY = Math.min(sideY, ob.y - ob.h / 2);
-          sideY -= margin + routeOffset;
-        }}
-        // Exit/entry from top or bottom of source/target
-        const sp = rectEdgePoint(aBox.x, sideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-        const ep = rectEdgePoint(bBox.x, sideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-        waypoints = [sp, {{ x: sp.x, y: sideY }}, {{ x: ep.x, y: sideY }}, ep];
+      // Rule: arrows must never pass through blocks. Build candidate
+      // waypoints for the chosen side, validate against every obstacle,
+      // and if blocked try the opposite side. If both sides are blocked
+      // at the base offset, push both sides outward one lane width at a
+      // time until one becomes clear (bounded by MAX_PUSHES).
+      const MAX_PUSHES = 16;
 
-        // Validate; try opposite side if blocked
-        let detourBlocked = false;
-        for (const ob of obstacles) {{
-          for (let i = 0; i < waypoints.length - 1; i++) {{
-            if (lineHitsRect(waypoints[i].x, waypoints[i].y,
-                waypoints[i+1].x, waypoints[i+1].y, ob.x, ob.y, ob.w, ob.h, 4)) {{
-              detourBlocked = true; break;
-            }}
+      const routeWaypoints = (primarySide, extraPush) => {{
+        const off = margin + routeOffset + extraPush;
+        if (dir === 'horizontal') {{
+          const goDown = aBox.y <= bBox.y;
+          const pickSide = primarySide === 'primary' ? goDown : !goDown;
+          let sideY;
+          if (pickSide) {{
+            sideY = Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2);
+            for (const ob of blockers) sideY = Math.max(sideY, ob.y + ob.h / 2);
+            sideY += off;
+          }} else {{
+            sideY = Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2);
+            for (const ob of blockers) sideY = Math.min(sideY, ob.y - ob.h / 2);
+            sideY -= off;
           }}
-          if (detourBlocked) break;
-        }}
-        if (detourBlocked) {{
-          const altSideY = goDown
-            ? Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2, ...blockers.map(o => o.y - o.h / 2)) - margin - routeOffset
-            : Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2, ...blockers.map(o => o.y + o.h / 2)) + margin + routeOffset;
-          const sp2 = rectEdgePoint(aBox.x, altSideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-          const ep2 = rectEdgePoint(bBox.x, altSideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-          waypoints = [sp2, {{ x: sp2.x, y: altSideY }}, {{ x: ep2.x, y: altSideY }}, ep2];
-        }}
-      }} else {{
-        // Vertical flow: route via a vertical corridor (fixed sideX)
-        const goRight = aBox.x <= bBox.x;
-        let sideX;
-        if (goRight) {{
-          sideX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
-          for (const ob of blockers) sideX = Math.max(sideX, ob.x + ob.w / 2);
-          sideX += margin + routeOffset;
+          const sp = rectEdgePoint(aBox.x, sideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+          const ep = rectEdgePoint(bBox.x, sideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+          return [sp, {{ x: sp.x, y: sideY }}, {{ x: ep.x, y: sideY }}, ep];
         }} else {{
-          sideX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
-          for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
-          sideX -= margin + routeOffset;
-        }}
-        // Exit/entry from the side of source/target facing the detour
-        const sp = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-        const ep = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-        waypoints = [sp, {{ x: sideX, y: sp.y }}, {{ x: sideX, y: ep.y }}, ep];
-
-        // Validate; try opposite side if blocked
-        let detourBlocked = false;
-        for (const ob of obstacles) {{
-          for (let i = 0; i < waypoints.length - 1; i++) {{
-            if (lineHitsRect(waypoints[i].x, waypoints[i].y,
-                waypoints[i+1].x, waypoints[i+1].y, ob.x, ob.y, ob.w, ob.h, 4)) {{
-              detourBlocked = true; break;
-            }}
+          const goRight = aBox.x <= bBox.x;
+          const pickSide = primarySide === 'primary' ? goRight : !goRight;
+          let sideX;
+          if (pickSide) {{
+            sideX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
+            for (const ob of blockers) sideX = Math.max(sideX, ob.x + ob.w / 2);
+            sideX += off;
+          }} else {{
+            sideX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
+            for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
+            sideX -= off;
           }}
-          if (detourBlocked) break;
+          const sp = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+          const ep = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+          return [sp, {{ x: sideX, y: sp.y }}, {{ x: sideX, y: ep.y }}, ep];
         }}
-        if (detourBlocked) {{
-          const altSideX = goRight
-            ? Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2, ...blockers.map(o => o.x - o.w / 2)) - margin - routeOffset
-            : Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2, ...blockers.map(o => o.x + o.w / 2)) + margin + routeOffset;
-          const sp2 = rectEdgePoint(altSideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-          const ep2 = rectEdgePoint(altSideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-          waypoints = [sp2, {{ x: altSideX, y: sp2.y }}, {{ x: altSideX, y: ep2.y }}, ep2];
+      }};
+
+      const waypointsHit = (wps) => {{
+        for (const ob of obstacles) {{
+          for (let i = 0; i < wps.length - 1; i++) {{
+            if (lineHitsRect(wps[i].x, wps[i].y, wps[i+1].x, wps[i+1].y,
+                ob.x, ob.y, ob.w, ob.h, 4)) return true;
+          }}
         }}
+        return false;
+      }};
+
+      let chosen = null;
+      for (let push = 0; push < MAX_PUSHES && !chosen; push++) {{
+        const extra = push * LANE_SPREAD;
+        const primary = routeWaypoints('primary', extra);
+        if (!waypointsHit(primary)) {{ chosen = primary; break; }}
+        const alt = routeWaypoints('alt', extra);
+        if (!waypointsHit(alt)) {{ chosen = alt; break; }}
       }}
+      // Fall back to the furthest-pushed primary if nothing was clear,
+      // so we still render a route instead of a broken edge.
+      waypoints = chosen || routeWaypoints('primary', MAX_PUSHES * LANE_SPREAD);
     }}
 
     // Shorten endpoints so the line stops at the arrowhead base (not the tip)
@@ -3044,8 +3034,14 @@ function draw() {{
     const inCycle = n.inCycle;
     const inBlast = blastRadiusSet.has(n.id);
 
+    // Singleton groups render as if they were a regular file node:
+    // the group label is the title, the child's shape is the block shape,
+    // and the group-specific chrome (kind chip + file count + stacked
+    // cards) is skipped. Drop through to the standard node render below.
+    const isSingletonGroup = n.isGroup && (n.childIds || []).length === 1;
+
     // Groups handle their own card drawing (collapsed or expanded)
-    if (n.isGroup) {{
+    if (n.isGroup && !isSingletonGroup) {{
       const open = isGroupOpen(n);
       const pinned = pinnedGroupIds.has(n.id);
 
@@ -4883,7 +4879,29 @@ if (minimap) {{ minimap.width = 160; minimap.height = 100; }}
     // placer actually sees how much room each group will take up. Keep the
     // closed-state dimensions in sync so overlap resolution and hit-testing
     // use the same numbers we laid out with.
+    //
+    // Singleton groups (exactly 1 child) are a special case: wrapping one
+    // block inside a group container adds nothing — the group and the child
+    // carry the same information. Collapse them to a single-block visual
+    // by unpinning (so the draw loop takes the closed-group path) and
+    // shrinking them to standard node dimensions. We also inherit the
+    // child's semantic shape so the rendered block reads correctly.
     for (const g of Object.values(groupMap)) {{
+      const childIds = g.childIds || [];
+      if (childIds.length === 1) {{
+        pinnedGroupIds.delete(g.id);
+        const child = nodeIndex[childIds[0]];
+        // Singleton renders through the regular file-node path (see the
+        // isSingletonGroup branch in draw()), so use standard node
+        // dimensions. We still inherit the child's shape so the block
+        // looks semantically the same as the file it wraps.
+        g.w = NODE_W;
+        g.h = NODE_H_BASE;
+        g._closedW = g.w;
+        g._closedH = g.h;
+        if (child) g.shape = child.shape || child.kind || g.shape;
+        continue;
+      }}
       const layout = layoutOpenGroupChildren(g);
       g.w = layout.openW;
       g.h = layout.openH;

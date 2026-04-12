@@ -189,6 +189,11 @@ def _make_prompt_detail(node: Node, root: Path) -> str:
     )
 
 
+# Backward-compatible alias used by tests and older callers.
+def _make_prompt(node: Node, root: Path) -> str:
+    return _make_prompt_v2(node, root)
+
+
 def _get_cached_v2(conn: sqlite3.Connection, file_path: str, content_hash: str) -> dict | None:
     row = conn.execute(
         "SELECT data FROM descriptions_v2 WHERE file_path = ? AND content_hash = ?",
@@ -285,7 +290,7 @@ def _validate_flowchart(fc: dict | None) -> dict | None:
         return None
     if len(nodes) < 2 or len(nodes) > 12:
         return None
-    valid_types = {"start", "end", "decision", "step"}
+    valid_types = {"start", "end", "decision", "step", "entry", "process", "analysis", "data", "external", "test"}
     node_ids: set[str] = set()
     clean_nodes = []
     for n in nodes:
@@ -294,12 +299,19 @@ def _validate_flowchart(fc: dict | None) -> dict | None:
         nid = str(n.get("id", ""))
         label = str(n.get("label", ""))
         ntype = str(n.get("type", "step"))
+        shape = str(n.get("shape", ntype or "step"))
+        description = str(n.get("description", ""))
         if not nid or not label:
             continue
         if ntype not in valid_types:
             ntype = "step"
+        if shape not in valid_types:
+            shape = ntype
         node_ids.add(nid)
-        clean_nodes.append({"id": nid, "label": label, "type": ntype})
+        clean_node = {"id": nid, "label": label, "type": ntype, "shape": shape}
+        if description:
+            clean_node["description"] = description
+        clean_nodes.append(clean_node)
     clean_edges = []
     for e in edges:
         if not isinstance(e, dict):
@@ -372,6 +384,14 @@ def _describe_with_conn(
                     cached_data = _get_cached_v2(conn, cache_key, content_hash)
                     if cached_data:
                         _apply_v2_data(node, cached_data)
+                        progress.advance(task)
+                        if progress_callback:
+                            progress_callback(i + 1, total)
+                        continue
+                    # Backward compatibility: accept legacy plain-text cache entries.
+                    cached_text = _get_cached(conn, cache_key, content_hash)
+                    if cached_text:
+                        node.description = cached_text
                         progress.advance(task)
                         if progress_callback:
                             progress_callback(i + 1, total)

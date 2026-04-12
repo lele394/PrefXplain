@@ -1,7 +1,7 @@
 """PrefXplain CLI — analyze and visualize your codebase.
 
 Usage:
-    prefxplain .                        # analyze current dir, open in browser
+    prefxplain .                        # analyze current dir, open in IDE preview
     prefxplain /path/to/repo            # analyze a specific repo
     prefxplain . --output graph.html    # write to custom path
     prefxplain . --no-descriptions      # skip LLM step (fast, offline)
@@ -22,6 +22,7 @@ import sys
 import webbrowser
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 
 import typer
 from rich.console import Console
@@ -52,13 +53,53 @@ def _in_ide() -> bool:
     )
 
 
+def _ide_uri_scheme() -> str:
+    """Best-effort URI scheme for the active IDE."""
+    term_program = (os.environ.get("TERM_PROGRAM") or "").lower()
+    if term_program == "cursor":
+        return "cursor"
+    if term_program == "windsurf":
+        return "windsurf"
+    if term_program == "vscode-insiders":
+        return "vscode-insiders"
+    return "vscode"
+
+
+def _open_uri(uri: str) -> bool:
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        if os.name == "nt":
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", uri],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        opener = shutil.which("xdg-open")
+        if opener:
+            subprocess.Popen([opener, uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def _open_ide_preview(path: Path) -> bool:
+    uri = (
+        f"{_ide_uri_scheme()}://prefxplain.prefxplain-vscode/preview"
+        f"?path={quote(str(path.resolve()))}"
+    )
+    return _open_uri(uri)
+
+
 def _open_output(path: Path) -> None:
-    """Open the output file in the IDE tab if possible, otherwise in the browser."""
+    """Open the output in the IDE preview when possible, otherwise in the browser."""
     resolved = str(path.resolve())
-    if _in_ide() and shutil.which("code"):
-        subprocess.Popen(["code", resolved], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    else:
-        webbrowser.open(f"file://{resolved}")
+    if _in_ide() and _open_ide_preview(path):
+        return
+    webbrowser.open(f"file://{resolved}")
 
 
 def _version_callback(value: bool) -> None:
@@ -127,7 +168,7 @@ def create(
     open_browser: bool = typer.Option(
         True,
         "--open/--no-open",
-        help="Open the generated HTML in your browser.",
+        help="Open the generated output in the IDE preview when available, otherwise in the browser.",
     ),
     force: bool = typer.Option(
         False,
@@ -228,7 +269,7 @@ def update(
     open_browser: bool = typer.Option(
         False,
         "--open/--no-open",
-        help="Open the generated HTML in your browser after update.",
+        help="Open the generated output in the IDE preview when available, otherwise in the browser.",
     ),
 ) -> None:
     """Re-analyze the codebase. Same as `create` but defaults to not opening the browser.
@@ -529,6 +570,7 @@ def _run(
 
     # Infer architectural roles
     graph.infer_roles()
+    graph.infer_groups()
 
     console.print(
         f"    [green]\u2713[/green] Found {len(graph.nodes)} files, {len(graph.edges)} import edges"
@@ -554,6 +596,7 @@ def _run(
     if prior_json_path.exists():
         try:
             from .graph import Graph as _Graph
+            from .diagram import is_generated_group_label
 
             prior_graph = _Graph.load(prior_json_path)
             prior_descs = {n.id: n for n in prior_graph.nodes if n.description}
@@ -567,6 +610,8 @@ def _run(
                     for sym in node.symbols:
                         if sym.name in old_sym:
                             sym.description = old_sym[sym.name]
+                    if prior.group and not is_generated_group_label(prior.group):
+                        node.group = prior.group
                     preserved += 1
             if preserved:
                 console.print(

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from prefxplain import cli as cli_mod
 from prefxplain.cli import app
 
 runner = CliRunner()
@@ -106,3 +107,29 @@ class TestEdgeCases:
         assert "<style>" in html
         # No external CDN references
         assert "cdn." not in html.lower()
+
+    def test_open_output_prefers_ide_preview_uri(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        html_path = tmp_path / "prefxplain.html"
+        html_path.write_text("<html></html>")
+
+        launched: list[list[str]] = []
+        browser_urls: list[str] = []
+
+        class _DummyProcess:
+            pass
+
+        def fake_popen(cmd: list[str], **_: object) -> _DummyProcess:
+            launched.append(cmd)
+            return _DummyProcess()
+
+        monkeypatch.setenv("TERM_PROGRAM", "vscode")
+        monkeypatch.setattr(cli_mod.sys, "platform", "darwin", raising=False)
+        monkeypatch.setattr(cli_mod.subprocess, "Popen", fake_popen)
+        monkeypatch.setattr(cli_mod.webbrowser, "open", browser_urls.append)
+
+        cli_mod._open_output(html_path)
+
+        assert launched
+        assert launched[0][0] == "open"
+        assert launched[0][1].startswith("vscode://prefxplain.prefxplain-vscode/preview?path=")
+        assert not browser_urls

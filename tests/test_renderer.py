@@ -119,10 +119,12 @@ class TestRenderer:
         assert "body { font-family:" in html
         assert "display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height);" in html
         assert "#left-panel { width: 100%; height: calc(var(--top-panel-header-height) + var(--top-details-height)); max-height: calc(var(--top-panel-header-height) + var(--top-details-height));" in html
+        assert "#panel-resizer { position: relative; z-index: 15; display: flex; align-items: center;" in html
         assert "#center { flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: 0; overflow: hidden; }" in html
         assert "#graph-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }" in html
         assert "#sidebar { flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height);" in html
         assert "#sidebar > * { flex-shrink: 0; }" in html
+        assert "body.panel-resizing { cursor: ns-resize; }" in html
         assert "max-height: min(360px, 34vh);" in html
 
     def test_resize_tracks_graph_container(self, simple_graph: Graph) -> None:
@@ -131,20 +133,27 @@ class TestRenderer:
         assert "const bodyEl = document.body;" in html
         assert "const leftPanel = document.getElementById('left-panel');" in html
         assert "const panelHeader = document.getElementById('panel-header');" in html
+        assert "const panelResizer = document.getElementById('panel-resizer');" in html
+        assert "const panelToggle = document.getElementById('panel-toggle');" in html
         assert "const centerPane = document.getElementById('center');" in html
         assert "const graphArea = document.getElementById('graph-area');" in html
+        assert "const DEFAULT_TOP_DETAILS_HEIGHT = 100;" in html
         assert "function applyViewportHeight() {" in html
         assert "const hostWidth = window.__prefxplainHostWidth;" in html
         assert "const hostHeight = window.__prefxplainHostHeight;" in html
+        assert "function clampTopDetailsHeight(nextHeight, vp = viewportSize()) {" in html
         assert "const headerHeight = Math.max(0, Math.ceil(panelHeader ? panelHeader.getBoundingClientRect().height : 0));" in html
-        assert "const detailsHeight = Math.max(0, Math.min(200, vp.height - headerHeight));" in html
+        assert "const maxDetailsHeight = Math.max(MIN_TOP_DETAILS_HEIGHT, Math.min(MAX_TOP_DETAILS_HEIGHT, vp.height - headerHeight - 120));" in html
+        assert "const { headerHeight, detailsHeight } = clampTopDetailsHeight(topDetailsHeight, vp);" in html
         assert "rootEl.style.setProperty('--viewport-height'" in html
         assert "rootEl.style.setProperty('--top-panel-header-height', `${headerHeight}px`);" in html
         assert "rootEl.style.setProperty('--top-details-height', `${detailsHeight}px`);" in html
-        assert "centerPane.style.height = `${vp.height}px`;" in html
-        assert "graphArea.style.height = `${vp.height}px`;" in html
+        # centerPane and graphArea use flexbox to fill remaining space,
+        # no explicit height override needed (would cause canvas overflow).
+        assert "centerPane and graphArea use flexbox" in html
         assert "const rect = graphArea.getBoundingClientRect();" in html
         assert "function syncViewport() {" in html
+        assert "!panelResizeActive &&" in html
         assert "let fitZoomLevel = 1;" in html
         assert "let userZoomScale = 1;" in html
         assert "function computeFitZoom(width, height, nodeList) {" in html
@@ -159,6 +168,23 @@ class TestRenderer:
         assert "window.visualViewport.addEventListener('resize'" in html
         assert "function watchViewport() {" in html
         assert "window.requestAnimationFrame(watchViewport);" in html
+
+    def test_top_panel_resizer_supports_dragging(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert '<div id="panel-resizer" title="Drag to resize the top panel">' in html
+        assert '<button id="panel-toggle" type="button" onclick="toggleLeftPanel()"' in html
+        assert "let topDetailsHeight = DEFAULT_TOP_DETAILS_HEIGHT;" in html
+        assert "let panelResizeActive = false;" in html
+        assert "function startPanelResize(clientY) {" in html
+        assert "function updatePanelResize(clientY) {" in html
+        assert "function stopPanelResize() {" in html
+        assert "panelResizer.addEventListener('mousedown', e => {" in html
+        assert "if (e.target && e.target.closest && e.target.closest('#panel-toggle')) return;" in html
+        assert "startPanelResize(e.clientY);" in html
+        assert "window.addEventListener('mousemove', e => {" in html
+        assert "updatePanelResize(e.clientY);" in html
+        assert "window.addEventListener('mouseup', () => { stopPanelResize(); });" in html
+        assert "window.addEventListener('blur', () => { stopPanelResize(); });" in html
 
     def test_default_view_uses_architecture_blocks(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
@@ -179,6 +205,25 @@ class TestRenderer:
         assert "n.childIds.some(childId => {" in html
         assert "const miniNodes = fitNodesForViewport().filter(n => isVisible(n));" in html
 
+    def test_renderer_prefers_semantic_diagram_payload(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert "const SEMANTIC_DIAGRAM = GRAPH.semantic_diagram || null;" in html
+        assert "const FILE_SEMANTICS = GRAPH.node_semantics || {};" in html
+        assert "semanticGroupingActive = Boolean(SEMANTIC_DIAGRAM && SEMANTIC_DIAGRAM.nodes && SEMANTIC_DIAGRAM.nodes.length >= 2);" in html
+        assert "detailDiagram: semanticNode.detail || null," in html
+        assert "const edgeLabel = typeof e.label === 'string' ? e.label : '';" in html
+        assert "humanizeSemanticKind" in html
+        assert "if (node.isGroup && groupingState !== 'flat') {" in html
+        assert "if (sidebarEnabled) renderGroupSidebar(node);" in html
+        assert "const target = (groupingState !== 'flat' && parentGroupId && groupMap[parentGroupId])" in html
+
+    def test_renderer_uses_semantic_titles_and_shapes_for_file_cards(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        assert "return n.short_title || derivedNodeTitle(n);" in html
+        assert "const nodeShape = semantic.shape || n.shape || n.kind || 'process';" in html
+        assert "traceBlockShape(ctx, x, y, nw, nh, nodeShape, NODE_R);" in html
+        assert "ctx.fillText(nodeTitleText(n), n.x * zoom + pan.x, n.y * zoom + pan.y);" in html
+
     def test_double_click_opens_workflow_overlay(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
         assert 'id="flow-overlay"' in html
@@ -194,3 +239,46 @@ class TestRenderer:
         assert "function queueNodeClick(node) {" in html
         assert "if (pendingClickNode.id === node.id) {" in html
         assert "openFlowOverlay(node);" in html
+
+    def test_grouped_layout_uses_semantic_levels(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        # Groups in semantic mode should be laid out using the level field
+        # coming from apply_topological_levels, not re-derived from scratch
+        # when the level is already available.
+        assert "const hasSemanticLevels = blocks.some(b => typeof b.level === 'number' && b.level > 0);" in html
+        assert "level: semanticNode.level || 0," in html
+
+    def test_grouped_layout_populates_layer_bands(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        # The grouped layout should describe each lane so the canvas can draw
+        # a topological backdrop (Entry / Core / Data / Tests) instead of the
+        # bands only existing in flat mode.
+        assert "function describeBandForBlocks(blocks, laneIndex, laneCount) {" in html
+        assert "function computeBlockLayerBands(nonEmptyLanes, direction) {" in html
+        assert "computeBlockLayerBands(nonEmptyLanes, dir);" in html
+        # The draw loop consumes bands only in flat mode (grouped mode uses
+        # semantic group containers as the visual hierarchy instead).
+        assert "if (groupingState === 'flat' && window.__layerBands && window.__layerBands.length) {" in html
+        # Both orientations supported so bands work for vertical and horizontal flow.
+        assert "orientation === 'vertical'" in html
+
+    def test_semantic_edge_labels_reach_main_canvas(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        # Group→group edges carry a semantic label (reads / validates / tests …)
+        # and drawEdgeArrow surfaces it as a pill on the main canvas.
+        assert "label: edge.label || ''," in html
+        assert "const edgeLabel = typeof e.label === 'string' ? e.label : '';" in html
+        assert "drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx, edgeLabel);" in html
+
+    def test_collapsed_groups_show_sub_block_hints(self, simple_graph: Graph) -> None:
+        html = render(simple_graph)
+        # Collapsed groups should visibly contain their pieces: either real
+        # mini children (≤4 files) or distinct-kind chips with counts.
+        assert "function drawGroupSubBlocks(ctx, group, sx, sy, sw, sh, topY, groupColorStr) {" in html
+        assert "drawGroupSubBlocks(ctx, n, sx, sy, sw, sh, subRowBottom, gc);" in html
+        # Small groups → one chip per child. Larger groups → distinct kinds.
+        assert "if (children.length <= 4) {" in html
+        assert ".slice(0, 5)" in html
+        # Groups get bumped container dimensions so there's room for the row.
+        assert "group.w = 308;" in html
+        assert "group.h = 168;" in html

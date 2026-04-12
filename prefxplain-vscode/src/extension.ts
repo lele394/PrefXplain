@@ -5,11 +5,25 @@ import * as vscode from "vscode";
 let currentPanel: vscode.WebviewPanel | undefined;
 let currentWatcher: vscode.FileSystemWatcher | undefined;
 let currentHtmlPath: string | undefined;
+let currentRefreshTimer: NodeJS.Timeout | undefined;
+let currentPollTimer: NodeJS.Timeout | undefined;
+let currentHtmlVersion: string | undefined;
 
 function disposeWatcher(): void {
   if (currentWatcher) {
     currentWatcher.dispose();
     currentWatcher = undefined;
+  }
+}
+
+function disposeRefreshLoop(): void {
+  if (currentRefreshTimer) {
+    clearTimeout(currentRefreshTimer);
+    currentRefreshTimer = undefined;
+  }
+  if (currentPollTimer) {
+    clearInterval(currentPollTimer);
+    currentPollTimer = undefined;
   }
 }
 
@@ -148,7 +162,14 @@ function createPanel(htmlPath: string): vscode.WebviewPanel {
   panel.onDidDispose(() => {
     currentPanel = undefined;
     currentHtmlPath = undefined;
+    currentHtmlVersion = undefined;
     disposeWatcher();
+    disposeRefreshLoop();
+  });
+
+  panel.onDidChangeViewState((event) => {
+    if (!event.webviewPanel.visible || !currentHtmlPath) return;
+    refreshPreview(currentHtmlPath);
   });
 
   return panel;
@@ -178,6 +199,50 @@ function showDeletedState(panel: vscode.WebviewPanel, htmlPath: string): void {
   );
 }
 
+function getFileVersion(htmlPath: string): string | undefined {
+  try {
+    const stat = fs.statSync(htmlPath);
+    return `${stat.mtimeMs}:${stat.size}`;
+  } catch {
+    return undefined;
+  }
+}
+
+function refreshPreview(htmlPath: string, force = false): void {
+  if (!currentPanel) return;
+  if (!fs.existsSync(htmlPath)) {
+    currentHtmlVersion = undefined;
+    showDeletedState(currentPanel, htmlPath);
+    return;
+  }
+
+  const nextVersion = getFileVersion(htmlPath);
+  if (!force && nextVersion && currentHtmlVersion === nextVersion) {
+    return;
+  }
+
+  loadHtml(currentPanel, htmlPath);
+  currentHtmlVersion = nextVersion;
+}
+
+function scheduleRefresh(htmlPath: string, force = false): void {
+  if (currentRefreshTimer) {
+    clearTimeout(currentRefreshTimer);
+  }
+  currentRefreshTimer = setTimeout(() => {
+    currentRefreshTimer = undefined;
+    refreshPreview(htmlPath, force);
+  }, 80);
+}
+
+function startRefreshLoop(htmlPath: string): void {
+  disposeRefreshLoop();
+  currentPollTimer = setInterval(() => {
+    if (!currentPanel || currentHtmlPath !== htmlPath) return;
+    refreshPreview(htmlPath);
+  }, 750);
+}
+
 function setupWatcher(htmlPath: string): void {
   disposeWatcher();
 
@@ -190,18 +255,19 @@ function setupWatcher(htmlPath: string): void {
 
   const reload = (): void => {
     if (!currentPanel) return;
-    if (!fs.existsSync(htmlPath)) {
-      showDeletedState(currentPanel, htmlPath);
-      return;
-    }
-    loadHtml(currentPanel, htmlPath);
+    scheduleRefresh(htmlPath, true);
   };
 
   currentWatcher.onDidChange(reload);
   currentWatcher.onDidCreate(reload);
   currentWatcher.onDidDelete(() => {
-    if (currentPanel) showDeletedState(currentPanel, htmlPath);
+    if (currentPanel) {
+      currentHtmlVersion = undefined;
+      showDeletedState(currentPanel, htmlPath);
+    }
   });
+
+  startRefreshLoop(htmlPath);
 }
 
 function openPreview(htmlPath: string): void {
@@ -228,6 +294,7 @@ function openPreview(htmlPath: string): void {
   }
 
   currentHtmlPath = normalizedPath;
+  currentHtmlVersion = getFileVersion(normalizedPath);
   loadHtml(currentPanel, normalizedPath);
   setupWatcher(normalizedPath);
 }
@@ -242,9 +309,17 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push({
     dispose: () => {
       disposeWatcher();
+      disposeRefreshLoop();
       if (currentPanel) currentPanel.dispose();
     },
   });
+
+  context.subscriptions.push(
+    vscode.window.onDidChangeWindowState((state) => {
+      if (!state.focused || !currentHtmlPath) return;
+      refreshPreview(currentHtmlPath);
+    })
+  );
 
   // Command: prefxplain.preview
   context.subscriptions.push(

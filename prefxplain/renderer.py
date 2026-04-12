@@ -72,7 +72,10 @@ _HTML_TEMPLATE = """\
   #panel-header button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
 
   /* ── Toggle button (horizontal bar below top panel) ──────────────── */
-  #panel-toggle {{ position: relative; z-index: 15; width: 44px; height: 16px; margin: 0 auto; background: #21262d; border: 1px solid #30363d; border-top: none; border-radius: 0 0 6px 6px; color: #8b949e; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
+  #panel-resizer {{ position: relative; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 0 12px; height: 18px; flex-shrink: 0; cursor: ns-resize; user-select: none; }}
+  #panel-resizer .pr-line {{ flex: 1; height: 1px; background: #30363d; transition: background .15s ease; }}
+  #panel-resizer:hover .pr-line, body.panel-resizing #panel-resizer .pr-line {{ background: #58a6ff; }}
+  #panel-toggle {{ position: relative; z-index: 16; width: 44px; height: 16px; margin: 0; background: #21262d; border: 1px solid #30363d; border-top: none; border-radius: 0 0 6px 6px; color: #8b949e; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }}
   #panel-toggle:hover {{ background: #30363d; color: #e6edf3; }}
 
   /* ── Center (graph) ────────────────────────────────────────────────── */
@@ -146,6 +149,7 @@ _HTML_TEMPLATE = """\
   }}
   .code-preview code {{ display: block; padding: 0 12px; }}
   .code-preview .ln {{ display: inline-block; width: 32px; margin-right: 12px; color: #484f58; text-align: right; user-select: none; }}
+  body.panel-resizing {{ cursor: ns-resize; }}
 </style>
 </head>
 <body>
@@ -170,7 +174,11 @@ _HTML_TEMPLATE = """\
   <div id="sidebar"></div>
 </div>
 
-<button id="panel-toggle" onclick="toggleLeftPanel()" title="Toggle panel">&#x25B2;</button>
+<div id="panel-resizer" title="Drag to resize the top panel">
+  <span class="pr-line"></span>
+  <button id="panel-toggle" type="button" onclick="toggleLeftPanel()" title="Toggle panel">&#x25B2;</button>
+  <span class="pr-line"></span>
+</div>
 
 <!-- Center: graph + sidebar side by side -->
 <div id="center">
@@ -206,6 +214,8 @@ _HTML_TEMPLATE = """\
 
 <script>
 const GRAPH = {graph_json};
+const SEMANTIC_DIAGRAM = GRAPH.semantic_diagram || null;
+const FILE_SEMANTICS = GRAPH.node_semantics || {{}};
 const COLORS = {colors_json};
 const TEXT_COLORS = {text_colors_json};
 
@@ -236,6 +246,8 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const leftPanel = document.getElementById('left-panel');
 const panelHeader = document.getElementById('panel-header');
+const panelResizer = document.getElementById('panel-resizer');
+const panelToggle = document.getElementById('panel-toggle');
 const centerPane = document.getElementById('center');
 const graphArea = document.getElementById('graph-area');
 const sidebar = document.getElementById('sidebar');
@@ -247,13 +259,16 @@ const flowSubtitle = document.getElementById('flow-subtitle');
 const flowBody = document.getElementById('flow-body');
 const flowClose = document.getElementById('flow-close');
 
+const DEFAULT_TOP_DETAILS_HEIGHT = 100;
+const MIN_TOP_DETAILS_HEIGHT = 72;
+const MAX_TOP_DETAILS_HEIGHT = 420;
+
 // ── Left panel toggle ────────────────────────────────────────────────────────
 function toggleLeftPanel() {{
   const lp = document.getElementById('left-panel');
-  const btn = document.getElementById('panel-toggle');
   lp.classList.toggle('collapsed');
   document.body.classList.toggle('panel-collapsed');
-  btn.innerHTML = lp.classList.contains('collapsed') ? '&#x25BC;' : '&#x25B2;';
+  panelToggle.innerHTML = lp.classList.contains('collapsed') ? '&#x25BC;' : '&#x25B2;';
   // Resize canvas and refit after transition
   setTimeout(() => {{ resize(); zoomToFit(); draw(); drawMinimap(); }}, 250);
 }}
@@ -270,6 +285,12 @@ let viewportWasManuallyMoved = false;
 let fitZoomLevel = 1;
 let userZoomScale = 1;
 let spreadFactor = 1.0; // controls spacing between blocks (scroll wheel)
+let topDetailsHeight = DEFAULT_TOP_DETAILS_HEIGHT;
+let panelResizeActive = false;
+let panelResizeStartY = 0;
+let panelResizeStartHeight = DEFAULT_TOP_DETAILS_HEIGHT;
+const semanticNodeById = {{}};
+const semanticEdgeByPair = {{}};
 
 function showClusters() {{ return clusterMode !== 'off'; }}
 
@@ -281,6 +302,7 @@ let visibleNodes = [];
 let visibleEdges = [];
 let intraGroupEdges = {{}}; // groupId → [{{source, target, type}}]
 let groupSourceKind = 'directory';
+let semanticGroupingActive = false;
 
 const TEST_SEGMENTS = new Set(['test', 'tests', 'spec', 'specs', '__tests__']);
 const GENERIC_DIR_SEGMENTS = new Set([
@@ -292,6 +314,10 @@ function humanizeLabel(value) {{
   return value
     .replace(/[_-]+/g, ' ')
     .replace(/\\b\\w/g, c => c.toUpperCase());
+}}
+
+function humanizeSemanticKind(kind) {{
+  return humanizeLabel(String(kind || 'process')).replace(/\\bApi\\b/g, 'API');
 }}
 
 function mergeOverflowClusters(clusterMap, maxGroups) {{
@@ -463,6 +489,70 @@ function summarizeGroup(groupKey, label, childNodes) {{
 function buildGroups() {{
   for (const key of Object.keys(groupMap)) delete groupMap[key];
   for (const key of Object.keys(nodeToGroup)) delete nodeToGroup[key];
+  for (const key of Object.keys(semanticNodeById)) delete semanticNodeById[key];
+  for (const key of Object.keys(semanticEdgeByPair)) delete semanticEdgeByPair[key];
+
+  semanticGroupingActive = Boolean(SEMANTIC_DIAGRAM && SEMANTIC_DIAGRAM.nodes && SEMANTIC_DIAGRAM.nodes.length >= 2);
+  if (semanticGroupingActive) {{
+    groupSourceKind = 'semantic';
+    groupingState = 'grouped';
+
+    for (const semanticNode of (SEMANTIC_DIAGRAM.nodes || [])) {{
+      semanticNodeById[semanticNode.id] = semanticNode;
+      const ids = (semanticNode.members || []).filter(Boolean);
+      const childNodes = ids.map(id => nodeIndex[id]).filter(Boolean);
+      if (childNodes.length === 0) continue;
+
+      const langCounts = {{}};
+      for (const n of childNodes) {{
+        langCounts[n.language] = (langCounts[n.language] || 0) + 1;
+      }}
+      const lang = Object.entries(langCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+      const totalSize = childNodes.reduce((sum, n) => sum + (n.size || 0), 0);
+      const role = semanticNode.role || dominantRole(childNodes);
+
+      const group = {{
+        id: semanticNode.id,
+        label: semanticNode.label,
+        fullPath: semanticNode.id,
+        description: semanticNode.summary || summarizeGroup(semanticNode.id, semanticNode.label, childNodes),
+        short_title: semanticNode.label,
+        childIds: ids,
+        isGroup: true,
+        language: lang,
+        size: totalSize,
+        fileCount: childNodes.length,
+        x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0, pinned: false,
+        w: NODE_W + 56, h: NODE_H_BASE + 28,
+        indegree: 0, outdegree: 0, pagerank: 0,
+        symbols: [], role, preview: '', inCycle: false,
+        kind: semanticNode.kind || 'process',
+        shape: semanticNode.shape || semanticNode.kind || 'process',
+        level: semanticNode.level || 0,
+        detailDiagram: semanticNode.detail || null,
+      }};
+
+      // Groups in semantic mode read as architecture blocks, not as fat file
+      // cards. Size them so there's room for title + description + a row of
+      // child sub-block hints rendered inside.
+      group.w = 308;
+      group.h = 168;
+
+      groupMap[group.id] = group;
+      for (const id of ids) nodeToGroup[id] = group.id;
+    }}
+
+    for (const semanticEdge of (SEMANTIC_DIAGRAM.edges || [])) {{
+      semanticEdgeByPair[semanticEdge.source + '|' + semanticEdge.target] = semanticEdge;
+    }}
+
+    for (const g of Object.values(groupMap)) {{
+      g._closedW = g.w;
+      g._closedH = g.h;
+    }}
+    computeVisibleState();
+    return;
+  }}
 
   const source = selectGroupSource();
   groupSourceKind = source.kind;
@@ -506,14 +596,6 @@ function buildGroups() {{
       symbols: [], role, preview: '', inCycle: false,
     }};
 
-    // Single-child group: promote the child as a standalone node
-    if (childNodes.length === 1) {{
-      const child = childNodes[0];
-      child._soloGroupLabel = label;
-      child._soloGroupDesc = desc;
-      continue;
-    }}
-
     groupMap[group.id] = group;
     for (const id of ids) nodeToGroup[id] = group.id;
   }}
@@ -537,13 +619,63 @@ function computeVisibleState() {{
     return;
   }}
 
-  // Show groups as nodes, plus any ungrouped nodes (solo-group promoted nodes)
+  // Show all groups as nodes (children drawn inline when open)
   const vNodes = [];
   for (const g of Object.values(groupMap)) vNodes.push(g);
-  for (const n of nodes) {{
-    if (!nodeToGroup[n.id]) vNodes.push(n);
-  }}
   visibleNodes = vNodes;
+
+  if (semanticGroupingActive) {{
+    intraGroupEdges = {{}};
+    for (const e of edges) {{
+      const srcId = e._srcId || e.source.id || e.source;
+      const tgtId = e._tgtId || e.target.id || e.target;
+      const srcVisible = nodeToGroup[srcId] || srcId;
+      const tgtVisible = nodeToGroup[tgtId] || tgtId;
+      if (srcVisible !== tgtVisible) continue;
+      if (!intraGroupEdges[srcVisible]) intraGroupEdges[srcVisible] = [];
+      const srcNode = nodeIndex[srcId];
+      const tgtNode = nodeIndex[tgtId];
+      if (srcNode && tgtNode) {{
+        intraGroupEdges[srcVisible].push({{
+          source: srcNode,
+          target: tgtNode,
+          _srcId: srcId,
+          _tgtId: tgtId,
+          type: e.type || 'imports',
+        }});
+      }}
+    }}
+
+    visibleEdges = (SEMANTIC_DIAGRAM.edges || [])
+      .map(edge => {{
+        const source = groupMap[edge.source];
+        const target = groupMap[edge.target];
+        if (!source || !target) return null;
+        return {{
+          source,
+          target,
+          _srcId: edge.source,
+          _tgtId: edge.target,
+          type: edge.kind || 'depends_on',
+          kind: edge.kind || 'depends_on',
+          label: edge.label || '',
+          weight: edge.weight || 1,
+        }};
+      }})
+      .filter(Boolean);
+
+    for (const g of Object.values(groupMap)) {{
+      g.indegree = 0;
+      g.outdegree = 0;
+    }}
+    for (const e of visibleEdges) {{
+      const src = e.source;
+      const tgt = e.target;
+      if (src && src.isGroup) src.outdegree++;
+      if (tgt && tgt.isGroup) tgt.indegree++;
+    }}
+    return;
+  }}
 
   // Aggregate edges at group level
   intraGroupEdges = {{}};
@@ -595,9 +727,6 @@ function computeVisibleState() {{
 function isGroupOpen(g) {{
   if (!g || !g.isGroup) return false;
   if (pinnedGroupIds.has(g.id)) return true;
-  if (hoveredNode === g) return true;
-  // Also open if hovering a child inside this group
-  if (hoveredNode && !hoveredNode.isGroup && nodeToGroup[hoveredNode.id] === g.id) return true;
   return false;
 }}
 
@@ -730,7 +859,9 @@ function layoutOpenGroupChildren(group) {{
   }}
 
   const n = sorted.length;
-  const cols = n <= 2 ? 1 : (n <= 6 ? 2 : 3);
+  // Side-by-side layout for small groups (2–4 children) so they read as
+  // "two blocks inside a container" rather than a tall single-column stack.
+  const cols = n <= 1 ? 1 : (n <= 4 ? 2 : 3);
   const rows = Math.ceil(n / cols);
   const cellW = NODE_W;
   const cellH = Math.max(...sorted.map(c => c.h || NODE_H_BASE));
@@ -924,13 +1055,117 @@ function layoutBlockColumns(columns) {{
   }});
 }}
 
+// Human-readable title for a layered band. Uses the dominant kind and role
+// among the blocks in the lane so the backdrop reads like an architecture
+// diagram ("Entry & CLI" / "Data & State" / "Tests") instead of "Layer 2".
+function describeBandForBlocks(blocks, laneIndex, laneCount) {{
+  if (!blocks || blocks.length === 0) {{
+    return {{ title: 'Layer ' + (laneIndex + 1), subtitle: '' }};
+  }}
+  const kindCounts = {{}};
+  const roleCounts = {{}};
+  for (const b of blocks) {{
+    const k = b.kind || b.shape || 'process';
+    kindCounts[k] = (kindCounts[k] || 0) + 1;
+    const r = b.role || '';
+    if (r) roleCounts[r] = (roleCounts[r] || 0) + 1;
+  }}
+  const topKind = Object.entries(kindCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || 'process';
+  const topRole = Object.entries(roleCounts).sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  const allTests = blocks.every(b => b.role === 'test' || b.kind === 'test');
+  if (allTests) return {{ title: 'Tests', subtitle: 'verification & coverage' }};
+  if (laneIndex === 0) {{
+    if (topKind === 'entry' || topRole === 'entry_point') {{
+      return {{ title: 'Entry & CLI', subtitle: 'what the user runs' }};
+    }}
+    return {{ title: 'Entry layer', subtitle: 'drives the pipeline' }};
+  }}
+  if (laneIndex === laneCount - 1) {{
+    if (topKind === 'data') return {{ title: 'Data & State', subtitle: 'what the system remembers' }};
+    return {{ title: 'Foundations', subtitle: 'depended on by layers above' }};
+  }}
+  switch (topKind) {{
+    case 'data': return {{ title: 'Data & State', subtitle: 'shared types & storage' }};
+    case 'decision': return {{ title: 'Decisions & Policy', subtitle: 'routing & validation' }};
+    case 'analysis': return {{ title: 'Analysis', subtitle: 'parsing & scoring' }};
+    case 'entry': return {{ title: 'Entry layer', subtitle: 'drives the pipeline' }};
+    case 'test': return {{ title: 'Tests', subtitle: 'verification & coverage' }};
+    default: return {{ title: 'Core logic', subtitle: 'application layer' }};
+  }}
+}}
+
+// Compute band rectangles for each non-empty lane from the (already
+// positioned) blocks. Called after layoutBlockRows/Columns so we can use the
+// actual x/y of each block. Populates window.__layerBands so drawClusters's
+// band backdrop routine picks them up.
+function computeBlockLayerBands(nonEmptyLanes, direction) {{
+  if (!nonEmptyLanes || nonEmptyLanes.length === 0) {{
+    window.__layerBands = null;
+    return;
+  }}
+  const bands = [];
+  const pad = 32;
+  const laneCount = nonEmptyLanes.length;
+  for (let i = 0; i < laneCount; i++) {{
+    const lane = nonEmptyLanes[i];
+    if (!lane || lane.length === 0) continue;
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    for (const n of lane) {{
+      minX = Math.min(minX, n.x - n.w / 2);
+      maxX = Math.max(maxX, n.x + n.w / 2);
+      minY = Math.min(minY, n.y - n.h / 2);
+      maxY = Math.max(maxY, n.y + n.h / 2);
+    }}
+    const info = describeBandForBlocks(lane, i, laneCount);
+    if (direction === 'horizontal') {{
+      bands.push({{
+        orientation: 'vertical',
+        top: minY - pad,
+        bottom: maxY + pad,
+        left: minX - pad,
+        right: maxX + pad,
+        title: info.title,
+        subtitle: info.subtitle,
+      }});
+    }} else {{
+      bands.push({{
+        orientation: 'horizontal',
+        top: minY - pad,
+        bottom: maxY + pad,
+        left: minX - pad,
+        right: maxX + pad,
+        title: info.title,
+        subtitle: info.subtitle,
+      }});
+    }}
+  }}
+  window.__layerBands = bands;
+}}
+
 function layoutGroupedBlocks(nodeList, edgeList) {{
   const blocks = nodeList.filter(n => n.isGroup);
   if (blocks.length === 0) return;
 
   const ranked = rankBlocks(blocks);
   const groupEdges = edgeList.filter(e => e.source.isGroup && e.target.isGroup);
-  const {{ depth, maxDepth }} = topologicalDepths(blocks, groupEdges);
+  // Prefer the precomputed semantic level when available — it comes from
+  // apply_topological_levels in diagram.py and is guaranteed consistent with
+  // the lane labels / band titles we show below.
+  const hasSemanticLevels = blocks.some(b => typeof b.level === 'number' && b.level > 0);
+  let depth, maxDepth;
+  if (hasSemanticLevels) {{
+    depth = {{}};
+    maxDepth = 0;
+    for (const b of blocks) {{
+      const lvl = typeof b.level === 'number' ? b.level : 0;
+      depth[b.id] = lvl;
+      if (lvl > maxDepth) maxDepth = lvl;
+    }}
+  }} else {{
+    const td = topologicalDepths(blocks, groupEdges);
+    depth = td.depth;
+    maxDepth = td.maxDepth;
+  }}
   const dir = resolvedFlowDirection();
 
   // Assign blocks to lanes (by topo depth). Depth 0 = first lane.
@@ -972,6 +1207,7 @@ function layoutGroupedBlocks(nodeList, edgeList) {{
     }} else {{
       layoutBlockRows(columns);
     }}
+    computeBlockLayerBands(columns.filter(c => c.length > 0), dir);
     return;
   }}
 
@@ -982,8 +1218,7 @@ function layoutGroupedBlocks(nodeList, edgeList) {{
     // Vertical flow: topo depth = row (top to bottom)
     layoutBlockRows(nonEmptyLanes);
   }}
-
-  layoutBlockColumns(columns);
+  computeBlockLayerBands(nonEmptyLanes, dir);
 }}
 
 function layoutExpandedBlock(nodeList) {{
@@ -1297,19 +1532,26 @@ function viewportSize() {{
   }};
 }}
 
+function clampTopDetailsHeight(nextHeight, vp = viewportSize()) {{
+  const headerHeight = Math.max(0, Math.ceil(panelHeader ? panelHeader.getBoundingClientRect().height : 0));
+  const maxDetailsHeight = Math.max(MIN_TOP_DETAILS_HEIGHT, Math.min(MAX_TOP_DETAILS_HEIGHT, vp.height - headerHeight - 120));
+  return {{
+    headerHeight,
+    detailsHeight: Math.max(MIN_TOP_DETAILS_HEIGHT, Math.min(maxDetailsHeight, nextHeight)),
+  }};
+}}
+
 function applyViewportHeight() {{
   const vp = viewportSize();
-  const headerHeight = Math.max(0, Math.ceil(panelHeader ? panelHeader.getBoundingClientRect().height : 0));
-  const detailsHeight = Math.max(0, Math.min(200, vp.height - headerHeight));
+  const {{ headerHeight, detailsHeight }} = clampTopDetailsHeight(topDetailsHeight, vp);
+  topDetailsHeight = detailsHeight;
   rootEl.style.setProperty('--viewport-height', `${{vp.height}}px`);
   rootEl.style.setProperty('--top-panel-header-height', `${{headerHeight}}px`);
   rootEl.style.setProperty('--top-details-height', `${{detailsHeight}}px`);
   bodyEl.style.height = `${{vp.height}}px`;
   bodyEl.style.maxHeight = `${{vp.height}}px`;
-  centerPane.style.height = `${{vp.height}}px`;
-  centerPane.style.maxHeight = `${{vp.height}}px`;
-  graphArea.style.height = `${{vp.height}}px`;
-  graphArea.style.maxHeight = `${{vp.height}}px`;
+  // centerPane and graphArea use flexbox (flex:1) to fill remaining space —
+  // do NOT set explicit heights here or the canvas overflows below the viewport.
   return vp;
 }}
 
@@ -1412,6 +1654,7 @@ function syncViewport() {{
     }}
     fitZoomLevel = computeFitZoom(size.width, size.height, fitNodesForViewport());
     const shouldRefit =
+      !panelResizeActive &&
       !viewportWasManuallyMoved &&
       !selectedNode &&
       !hoveredNode &&
@@ -1460,6 +1703,46 @@ function watchViewport() {{
   window.requestAnimationFrame(watchViewport);
 }}
 window.requestAnimationFrame(watchViewport);
+
+function startPanelResize(clientY) {{
+  if (leftPanel.classList.contains('collapsed')) {{
+    leftPanel.classList.remove('collapsed');
+    document.body.classList.remove('panel-collapsed');
+    panelToggle.innerHTML = '&#x25B2;';
+  }}
+  panelResizeActive = true;
+  panelResizeStartY = clientY;
+  panelResizeStartHeight = topDetailsHeight;
+  bodyEl.classList.add('panel-resizing');
+}}
+
+function updatePanelResize(clientY) {{
+  if (!panelResizeActive) return;
+  topDetailsHeight = panelResizeStartHeight + (clientY - panelResizeStartY);
+  syncViewport();
+}}
+
+function stopPanelResize() {{
+  if (!panelResizeActive) return;
+  panelResizeActive = false;
+  bodyEl.classList.remove('panel-resizing');
+}}
+
+panelResizer.addEventListener('mousedown', e => {{
+  if (e.button !== 0) return;
+  if (e.target && e.target.closest && e.target.closest('#panel-toggle')) return;
+  e.preventDefault();
+  startPanelResize(e.clientY);
+}});
+
+window.addEventListener('mousemove', e => {{
+  if (!panelResizeActive) return;
+  e.preventDefault();
+  updatePanelResize(e.clientY);
+}});
+
+window.addEventListener('mouseup', () => {{ stopPanelResize(); }});
+window.addEventListener('blur', () => {{ stopPanelResize(); }});
 
 // ── Pan limits — keep the diagram in view ────────────────────────────────────
 function clampPan() {{
@@ -1578,8 +1861,8 @@ function nodeSubtitle(n) {{
 
 // Primary title text — use group label for solo-group nodes in grouped mode
 function nodeTitleText(n) {{
-  if (groupingState !== 'flat' && n._soloGroupLabel) return n._soloGroupLabel;
-  return n.short_title || n.label;
+  if (n.isGroup) return n.label;
+  return n.short_title || derivedNodeTitle(n);
 }}
 
 function nodeSummaryText(n) {{
@@ -1975,6 +2258,114 @@ function nodeBox(n) {{
   return {{ x: n.x, y: n.y, w: n.w, h: n.h }};
 }}
 
+function traceBlockShape(ctx, x, y, w, h, shape, radius) {{
+  const normalized = shape || 'process';
+  if (normalized === 'decision') {{
+    ctx.beginPath();
+    ctx.moveTo(x + w / 2, y);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.lineTo(x + w / 2, y + h);
+    ctx.lineTo(x, y + h / 2);
+    ctx.closePath();
+    return;
+  }}
+  if (normalized === 'analysis') {{
+    const inset = Math.max(18, Math.min(28, w * 0.12));
+    ctx.beginPath();
+    ctx.moveTo(x + inset, y);
+    ctx.lineTo(x + w - inset, y);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.lineTo(x + w - inset, y + h);
+    ctx.lineTo(x + inset, y + h);
+    ctx.lineTo(x, y + h / 2);
+    ctx.closePath();
+    return;
+  }}
+  if (normalized === 'data') {{
+    const skew = Math.max(16, Math.min(28, w * 0.12));
+    ctx.beginPath();
+    ctx.moveTo(x + skew, y);
+    ctx.lineTo(x + w, y);
+    ctx.lineTo(x + w - skew, y + h);
+    ctx.lineTo(x, y + h);
+    ctx.closePath();
+    return;
+  }}
+  roundRect(ctx, x, y, w, h, normalized === 'entry' ? Math.max(radius, 18) : radius);
+}}
+
+// Inside a collapsed semantic group, draw a small row of sub-block shapes so
+// the group reads as "a container with structured pieces" instead of "one fat
+// card with a file count". For small groups (≤4 children) we draw each file
+// as its own mini shape in its actual kind; for larger groups we show up to
+// five distinct-kind chips with counts so the shape mix is still legible.
+function drawGroupSubBlocks(ctx, group, sx, sy, sw, sh, topY, groupColorStr) {{
+  if (!group || !group.childIds || group.childIds.length === 0) return;
+  const children = group.childIds
+    .map(id => nodeIndex[id])
+    .filter(Boolean);
+  if (children.length === 0) return;
+
+  const bottomY = sy + sh / 2 - 12;
+  const availableH = bottomY - topY;
+  if (availableH < 18) return;
+
+  const CHIP_W = 36;
+  const CHIP_H = 16;
+  const CHIP_GAP = 6;
+
+  function kindOf(node) {{
+    const semantic = FILE_SEMANTICS[node.id] || {{}};
+    return semantic.kind || semantic.shape || node.kind || node.shape || 'process';
+  }}
+
+  // Draw the row of chips centered horizontally, clipped to the group width.
+  function drawChipRow(items) {{
+    const count = items.length;
+    if (count === 0) return;
+    const totalW = count * CHIP_W + (count - 1) * CHIP_GAP;
+    let cursorX = sx - totalW / 2;
+    const cy = bottomY - CHIP_H / 2;
+    for (const item of items) {{
+      ctx.save();
+      ctx.fillStyle = '#0d1117';
+      ctx.strokeStyle = groupColorStr;
+      ctx.lineWidth = 1;
+      traceBlockShape(ctx, cursorX, cy - CHIP_H / 2, CHIP_W, CHIP_H, item.shape, 3);
+      ctx.fill();
+      ctx.stroke();
+      if (item.count > 1) {{
+        ctx.fillStyle = groupColorStr;
+        ctx.font = 'bold 10px -apple-system, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('x' + item.count, cursorX + CHIP_W / 2, cy);
+      }}
+      ctx.restore();
+      cursorX += CHIP_W + CHIP_GAP;
+    }}
+  }}
+
+  // Small groups: show every child as its own chip.
+  if (children.length <= 4) {{
+    const items = children.map(child => ({{ shape: kindOf(child), count: 1 }}));
+    drawChipRow(items);
+    return;
+  }}
+
+  // Larger groups: collapse to distinct kinds (max 5) with counts.
+  const kindCounts = {{}};
+  for (const child of children) {{
+    const k = kindOf(child);
+    kindCounts[k] = (kindCounts[k] || 0) + 1;
+  }}
+  const ordered = Object.entries(kindCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([shape, count]) => ({{ shape, count }}));
+  drawChipRow(ordered);
+}}
+
 function draw() {{
 
   const dpr = window.devicePixelRatio || 1;
@@ -1994,8 +2385,9 @@ function draw() {{
   // Cluster backgrounds
   drawClusters();
 
-  // Layer bands (when in layered mode) — each layer gets a distinct color
-  if (layoutMode === 'layered' && groupingState === 'flat' && window.__layerBands && window.__layerBands.length) {{
+  // Layer bands — rendered only in flat mode. In semantic/grouped mode the
+  // group containers already encode the architecture layers visually.
+  if (groupingState === 'flat' && window.__layerBands && window.__layerBands.length) {{
     const BAND_COLORS = [
       {{ bg: '#22c55e12', border: '#22c55e30', text: '#22c55e' }},  // green  — entry points
       {{ bg: '#3b82f612', border: '#3b82f630', text: '#3b82f6' }},  // blue   — app logic
@@ -2008,28 +2400,50 @@ function draw() {{
     for (let i = 0; i < bands.length; i++) {{
       const b = bands[i];
       const palette = BAND_COLORS[i % BAND_COLORS.length];
-      // Band background
-      ctx.fillStyle = palette.bg;
-      ctx.fillRect(-2000, b.top, 6000, b.bottom - b.top);
-      // Top border line
-      ctx.strokeStyle = palette.border;
-      ctx.lineWidth = 1.5 / zoom;
-      ctx.beginPath();
-      ctx.moveTo(-2000, b.top);
-      ctx.lineTo(4000, b.top);
-      ctx.stroke();
-      // Lane title — positioned relative to viewport center, not world origin
-      // This keeps labels visible regardless of pan position
-      const labelX = (-pan.x / zoom) + 20 / zoom;
-      ctx.font = `bold ${{14 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-      ctx.fillStyle = palette.text;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillText(b.title, labelX, b.top + 8);
-      // Lane subtitle on its own line so the meaning stays readable.
-      ctx.font = `${{11 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
-      ctx.fillStyle = '#6e7681';
-      ctx.fillText(b.subtitle, labelX, b.top + 28);
+      const orientation = b.orientation || 'horizontal';
+      if (orientation === 'vertical') {{
+        // Column band (horizontal flow): fills vertically, label on top.
+        const left = typeof b.left === 'number' ? b.left : -2000;
+        const right = typeof b.right === 'number' ? b.right : 4000;
+        ctx.fillStyle = palette.bg;
+        ctx.fillRect(left, -4000, right - left, 9000);
+        ctx.strokeStyle = palette.border;
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(left, -4000);
+        ctx.lineTo(left, 5000);
+        ctx.stroke();
+        const labelY = (-pan.y / zoom) + 20 / zoom;
+        ctx.font = `bold ${{14 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        ctx.fillStyle = palette.text;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(b.title, left + 12 / zoom, labelY);
+        ctx.font = `${{11 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        ctx.fillStyle = '#6e7681';
+        ctx.fillText(b.subtitle, left + 12 / zoom, labelY + 20 / zoom);
+      }} else {{
+        // Row band (vertical flow) — horizontal stripe.
+        ctx.fillStyle = palette.bg;
+        ctx.fillRect(-2000, b.top, 6000, b.bottom - b.top);
+        ctx.strokeStyle = palette.border;
+        ctx.lineWidth = 1.5 / zoom;
+        ctx.beginPath();
+        ctx.moveTo(-2000, b.top);
+        ctx.lineTo(4000, b.top);
+        ctx.stroke();
+        // Lane title — positioned relative to viewport center, not world origin,
+        // so it stays visible regardless of pan position.
+        const labelX = (-pan.x / zoom) + 20 / zoom;
+        ctx.font = `bold ${{14 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        ctx.fillStyle = palette.text;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(b.title, labelX, b.top + 8);
+        ctx.font = `${{11 / zoom}}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+        ctx.fillStyle = '#6e7681';
+        ctx.fillText(b.subtitle, labelX, b.top + 28);
+      }}
     }}
   }}
 
@@ -2266,7 +2680,7 @@ function draw() {{
 
   // Draw arrow from a→b, routing around any blocking nodes
   // laneIdx = unique index for this edge, used to offset routing lanes
-  function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx) {{
+  function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx, labelText) {{
     const aBox = nodeBox(a), bBox = nodeBox(b);
     const LANE_SPREAD = 18 / zoom;
     const laneOffset = (laneIdx - (totalLanes - 1) / 2) * LANE_SPREAD;
@@ -2391,8 +2805,11 @@ function draw() {{
       _deferredArrowheads.push({{ fx: waypoints[1].x, fy: waypoints[1].y, tx: waypoints[0].x, ty: waypoints[0].y, color, size: arrowSize, alpha: ctx.globalAlpha }});
     }}
 
-    // Weight label
-    if (weight > 1) {{
+    // Semantic label / edge weight
+    const edgeBadgeText = labelText
+      ? (weight > 1 ? `${{labelText}} · ×${{weight}}` : labelText)
+      : (weight > 1 ? '×' + weight : '');
+    if (edgeBadgeText) {{
       const midIdx = Math.floor(waypoints.length / 2);
       const lx = (waypoints[midIdx - 1].x + waypoints[midIdx].x) / 2;
       const ly = (waypoints[midIdx - 1].y + waypoints[midIdx].y) / 2;
@@ -2402,7 +2819,7 @@ function draw() {{
       ctx.font = 'bold 14px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      const text = '\u00d7' + weight;
+      const text = edgeBadgeText;
       const tw = ctx.measureText(text).width + 8;
       ctx.fillStyle = '#0d1117cc';
       ctx.beginPath();
@@ -2478,7 +2895,8 @@ function draw() {{
     const arrowSz = (isCycle ? 24 : 20) / zoom;
 
     const laneIdx = edgeLaneMap[srcId + '|' + tgtId] || 0;
-    drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx);
+    const edgeLabel = typeof e.label === 'string' ? e.label : '';
+    drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx, edgeLabel);
   }}
 
   ctx.globalAlpha = 1;
@@ -2536,58 +2954,79 @@ function draw() {{
         }}
         // Container background with group color
         const gc = groupColor(n.id);
-        ctx.fillStyle = '#0d1117';
+        // Slightly tinted background (not pitch-black) so the container reads
+        // as a distinct surface rather than a window cut out of the backdrop.
+        ctx.fillStyle = gc + '0c';
         ctx.strokeStyle = gc;
-        ctx.lineWidth = 2.5 / zoom;
+        ctx.lineWidth = Math.max(1.5, 2.5 / zoom);
         roundRect(ctx, gLeft, gTop, layout.openW, layout.openH, 10);
         ctx.fill(); ctx.stroke();
-        // Subtle colored inner glow
-        ctx.strokeStyle = gc + '18';
-        ctx.lineWidth = 6 / zoom;
-        roundRect(ctx, gLeft + 3, gTop + 3, layout.openW - 6, layout.openH - 6, 8);
+        // Header band — full-opacity group-color tint across the top
+        ctx.fillStyle = gc + '30';
+        roundRect(ctx, gLeft + 1.5, gTop + 1.5, layout.openW - 3, OPEN_GROUP_HEADER, {{ tl: 9, tr: 9, bl: 0, br: 0 }});
+        ctx.fill();
+        // Separator line between header and body
+        ctx.strokeStyle = gc + '60';
+        ctx.lineWidth = Math.max(0.5, 0.8 / zoom);
+        ctx.beginPath();
+        ctx.moveTo(gLeft + 8, gTop + OPEN_GROUP_HEADER);
+        ctx.lineTo(gLeft + layout.openW - 8, gTop + OPEN_GROUP_HEADER);
         ctx.stroke();
         ctx.shadowBlur = 0;
-        // Header in screen space
-        if (layout.openW * zoom >= 60) {{
+        // Header in screen space — always render if container is large enough
+        if (layout.openW * zoom >= 80) {{
           ctx.save();
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           const sx = n.x * zoom + pan.x;
           const sy = gTop * zoom + pan.y;
           const sw = layout.openW * zoom;
-          // Group label in group color
-          ctx.font = 'bold 17px -apple-system, sans-serif';
-          ctx.fillStyle = gc;
+          const hh = OPEN_GROUP_HEADER * zoom; // header height in screen px
+          // Clip to header area so long labels don't overflow into body
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(sx - sw/2 + 2, sy + 1, sw - 4, hh - 2);
+          ctx.clip();
+          // Kind eyebrow (small, uppercase)
+          const kindLabel = humanizeSemanticKind(n.kind || n.shape || 'process').toUpperCase();
+          ctx.font = '9px -apple-system, sans-serif';
+          ctx.fillStyle = gc + 'bb';
           ctx.textAlign = 'left';
           ctx.textBaseline = 'top';
-          ctx.fillText(n.label, sx - sw/2 + 12, sy + 8);
-          // File count + pin
-          ctx.font = '14px -apple-system, sans-serif';
-          ctx.fillStyle = '#8b949e';
-          const meta = n.fileCount + (n.fileCount === 1 ? ' file' : ' files') + (pinned ? '  \u2022 pinned' : '');
-          ctx.fillText(meta, sx - sw/2 + 12, sy + 28);
-          // Group color dot
-          ctx.fillStyle = gc;
-          ctx.beginPath();
-          ctx.arc(sx + sw/2 - 16, sy + 18, 6, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillText(kindLabel, sx - sw/2 + 14, sy + 7);
+          // Group label — bright, bold, larger
+          ctx.font = 'bold 15px -apple-system, sans-serif';
+          ctx.fillStyle = '#e6edf3';
+          ctx.fillText(n.label, sx - sw/2 + 14, sy + 19);
+          ctx.restore(); // end header clip
+          // File count (below header clip, but still in screen space)
+          ctx.font = '11px -apple-system, sans-serif';
+          ctx.fillStyle = gc + 'aa';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'top';
+          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx + sw/2 - 14, sy + 7);
           ctx.restore();
         }}
       }} else {{
         // ── Collapsed: stacked-cards with group color ─────────────────
         const gc = groupColor(n.id);
+        const shape = n.shape || n.kind || 'process';
         ctx.fillStyle = '#1a1f26';
         ctx.strokeStyle = gc + '40';
         ctx.lineWidth = 0.5 / zoom;
-        roundRect(ctx, x + 4, y + 4, nw, nh, NODE_R); ctx.fill(); ctx.stroke();
-        roundRect(ctx, x + 2, y + 2, nw, nh, NODE_R); ctx.fill(); ctx.stroke();
+        traceBlockShape(ctx, x + 4, y + 4, nw, nh, shape, NODE_R); ctx.fill(); ctx.stroke();
+        traceBlockShape(ctx, x + 2, y + 2, nw, nh, shape, NODE_R); ctx.fill(); ctx.stroke();
         // Main card with colored border
         ctx.fillStyle = isHovered ? '#21262d' : '#161b22';
         ctx.strokeStyle = isHovered ? gc : gc + '80';
         ctx.lineWidth = (isHovered ? 2 : 1.5) / zoom;
-        roundRect(ctx, x, y, nw, nh, NODE_R); ctx.fill(); ctx.stroke();
+        if (shape === 'external' || shape === 'test') ctx.setLineDash([8 / zoom, 6 / zoom]);
+        traceBlockShape(ctx, x, y, nw, nh, shape, NODE_R); ctx.fill(); ctx.stroke();
+        ctx.setLineDash([]);
         // Color bar on left
-        ctx.fillStyle = gc;
-        roundRect(ctx, x, y, 5, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }}); ctx.fill();
+        if (shape === 'process' || shape === 'entry' || shape === 'external' || shape === 'test') {{
+          ctx.fillStyle = gc;
+          roundRect(ctx, x, y, 5, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }}); ctx.fill();
+        }}
         ctx.shadowBlur = 0;
         // Text in screen space
         if (nw * zoom >= 40) {{
@@ -2598,12 +3037,15 @@ function draw() {{
           ctx.beginPath();
           ctx.rect(sx - sw/2, sy - sh/2, sw, sh);
           ctx.clip();
-          ctx.font = 'bold 17px -apple-system, sans-serif';
-          ctx.fillStyle = gc;
+          ctx.font = '11px -apple-system, sans-serif';
+          ctx.fillStyle = '#8b949e';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
+          ctx.fillText(humanizeSemanticKind(shape), sx, sy - sh / 2 + 8);
+          ctx.font = 'bold 17px -apple-system, sans-serif';
+          ctx.fillStyle = gc;
           const groupTitleLines = wrapTextLines(ctx, n.label, sw - 22, 2);
-          let groupY = sy - sh / 2 + 8;
+          let groupY = sy - sh / 2 + 24;
           groupTitleLines.forEach(line => {{
             ctx.fillText(line, sx, groupY);
             groupY += 14;
@@ -2611,6 +3053,7 @@ function draw() {{
           ctx.font = '14px -apple-system, sans-serif';
           ctx.fillStyle = '#8b949e';
           ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx, groupY + 2);
+          let subRowBottom = groupY + 18;
           if (n.description && sh > 60) {{
             ctx.font = '13px -apple-system, sans-serif';
             ctx.fillStyle = '#6e7681';
@@ -2618,9 +3061,14 @@ function draw() {{
             let descY = groupY + 18;
             descLines.forEach(line => {{
               ctx.fillText(line, sx, descY);
-              descY += 11;
+              descY += 15;
             }});
+            subRowBottom = descY;
           }}
+          // Sub-block hints: show that this group CONTAINS structured pieces,
+          // not just a file count. Tiny traced shapes of the children's kinds
+          // (or the actual children if the group is small).
+          drawGroupSubBlocks(ctx, n, sx, sy, sw, sh, subRowBottom, gc);
           ctx.restore();
         }}
       }}
@@ -2628,22 +3076,33 @@ function draw() {{
     }}
 
     // ── Regular file node card background ──────────────────────────────
+    const semantic = fileSemantic(n);
+    const nodeShape = semantic.shape || n.shape || n.kind || 'process';
+    // Nodes drawn inside an open group container get a simplified "component
+    // block" style — just the title, no description or footer, with a
+    // group-color border/bar so they read as parts of the parent block.
+    const isGroupChild = openGroupChildSet.has(n.id);
+    const parentGroupId = isGroupChild ? nodeToGroup[n.id] : null;
+    const parentGc = parentGroupId ? groupColor(parentGroupId) : null;
+
     // Shadow for selected/hovered/blast
     if (isSelected || isHovered || inBlast) {{
       ctx.shadowColor = inBlast ? '#f59e0b' : color;
       ctx.shadowBlur = (isSelected ? 14 : inBlast ? 10 : 6) / zoom;
     }}
-    ctx.fillStyle = isSelected ? color : (inBlast ? '#2d2008' : (isHovered ? '#21262d' : '#161b22'));
-    ctx.strokeStyle = inCycle ? '#f85149' : (inBlast ? '#f59e0b' : (isSelected ? color : (isHovered ? color : '#30363d')));
-    ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : inBlast ? 1.5 : 1) / zoom;
-    roundRect(ctx, x, y, nw, nh, NODE_R);
+    ctx.fillStyle = isSelected ? color : (inBlast ? '#2d2008' : (isGroupChild ? '#1a212b' : (isHovered ? '#21262d' : '#161b22')));
+    ctx.strokeStyle = inCycle ? '#f85149' : (inBlast ? '#f59e0b' : (isSelected ? color : (isGroupChild && parentGc ? parentGc + '70' : (isHovered ? color : '#30363d'))));
+    ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : inBlast ? 1.5 : isGroupChild ? 0.8 : 1) / zoom;
+    if (nodeShape === 'external' || nodeShape === 'test') ctx.setLineDash([8 / zoom, 6 / zoom]);
+    traceBlockShape(ctx, x, y, nw, nh, nodeShape, NODE_R);
     ctx.fill();
     ctx.stroke();
+    ctx.setLineDash([]);
     ctx.shadowBlur = 0;
-    // Language indicator (left bar)
-    if (!isSelected) {{
-      ctx.fillStyle = color;
-      roundRect(ctx, x, y, 4, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }});
+    // Left accent bar — group color for group children, language color otherwise
+    if (!isSelected && (nodeShape === 'process' || nodeShape === 'entry' || nodeShape === 'external' || nodeShape === 'test')) {{
+      ctx.fillStyle = isGroupChild && parentGc ? parentGc : color;
+      roundRect(ctx, x, y, isGroupChild ? 3 : 4, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }});
       ctx.fill();
     }}
     // Cycle indicator (right bar, red)
@@ -2662,12 +3121,13 @@ function draw() {{
         ctx.fillStyle = '#8b949e';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText(n.label.replace(JS_EXT_RE, ''), n.x * zoom + pan.x, n.y * zoom + pan.y);
+        ctx.fillText(nodeTitleText(n), n.x * zoom + pan.x, n.y * zoom + pan.y);
         ctx.restore();
       }}
       continue;
     }}
-    const compactCard = nh * zoom < 90; // too short for description + footer
+    // Group children: always compact (title only — no description or footer)
+    const compactCard = isGroupChild || nh * zoom < 90;
 
     // Clip ALL text drawing to the card rectangle — prevents overflow onto adjacent cards
     // Text is drawn in SCREEN SPACE (constant 12px size regardless of zoom).
@@ -2678,7 +3138,7 @@ function draw() {{
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // reset to screen coords (dpr-aware)
     ctx.beginPath();
-    roundRect(ctx, screenX - screenW/2 + 1, screenY - screenH/2 + 1, screenW - 2, screenH - 2, NODE_R * zoom);
+    traceBlockShape(ctx, screenX - screenW/2 + 1, screenY - screenH/2 + 1, screenW - 2, screenH - 2, nodeShape, NODE_R * zoom);
     ctx.clip();
 
     ctx.textAlign = 'center';
@@ -2693,7 +3153,7 @@ function draw() {{
     const padding = 8;
     const innerW = screenW - padding * 2;
 
-    // ── Section 1: title + short explanation ─────────────────────────────
+    // ── Section 1: kind chip (group children only) + title ───────────────
     const titleText = nodeTitleText(n);
     const summaryText = nodeSummaryText(n);
     ctx.font = 'bold 16px -apple-system, sans-serif';
@@ -2702,6 +3162,28 @@ function draw() {{
     ctx.font = '13px -apple-system, sans-serif';
     const summaryLines = wrapTextLines(ctx, summaryText, maxLineW, 2);
 
+    // For group children: kind label at top, then title centered in remaining space
+    if (isGroupChild) {{
+      const kindLabel = humanizeSemanticKind(nodeShape);
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.fillStyle = parentGc ? parentGc + 'cc' : mutedColor;
+      ctx.textBaseline = 'top';
+      ctx.textAlign = 'center';
+      ctx.fillText(kindLabel, screenX, screenY - screenH / 2 + 5);
+
+      // Title: vertically centered in the card
+      ctx.font = 'bold 14px -apple-system, sans-serif';
+      ctx.fillStyle = textColor;
+      ctx.textBaseline = 'middle';
+      const titleY = screenY + (titleLines.length > 1 ? -8 : 0);
+      titleLines.forEach((line, i) => {{
+        ctx.fillText(line, screenX, titleY + i * 17);
+      }});
+      ctx.restore();
+      continue;
+    }}
+
+    // ── Standard file card: title + optional description + footer ─────────
     // Top of text content in screen px (NODE_R * zoom = border radius in screen px)
     let curY = screenY - screenH / 2 + NODE_R * zoom + 6;
 
@@ -2751,7 +3233,8 @@ function draw() {{
     ctx.restore(); // end card clip
 
     // Indegree badge on hub nodes (indegree >= 3) — top-right corner
-    if (!isSelected && n.indegree >= 3) {{
+    // Not shown for group children (their container already signals importance)
+    if (!isSelected && !isGroupChild && n.indegree >= 3) {{
       const badge = String(n.indegree);
       const bx = x + nw - 2, by = y - 2;
       ctx.fillStyle = '#58a6ff';
@@ -2873,10 +3356,14 @@ function nodeAt(wx, wy) {{
 function runSingleNodeClick(node) {{
   if (!node) return;
   if (node.isGroup && groupingState !== 'flat') {{
-    toggleGroupPin(node.id);
-  }} else {{
-    selectNode(node);
+    selectedNode = null;
+    highlightSet = null;
+    blastRadiusSet = new Set();
+    if (sidebarEnabled) renderGroupSidebar(node);
+    draw();
+    return;
   }}
+  selectNode(node);
 }}
 
 function clearPendingNodeClick(commit) {{
@@ -3059,7 +3546,7 @@ function renderGroupSidebar(g) {{
   const children = (g.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
   const ranked = rankChildNodes(children);
   const fileList = ranked.map(c => {{
-    const title = c.short_title || c.label.replace(JS_EXT_RE, '');
+    const title = nodeTitleText(c);
     const desc = c.description ? ` \u2014 ${{compactText(c.description, 60)}}` : '';
     return `<div class="neighbor" onclick="jumpTo('${{esc(c.id)}}')" style="flex-direction:column;align-items:flex-start;gap:2px">
       <span style="font-weight:600">${{esc(title)}}</span>
@@ -3070,7 +3557,7 @@ function renderGroupSidebar(g) {{
   sidebar.innerHTML = `
     <div>
       <h2>${{esc(g.label)}}</h2>
-      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{g.fileCount}} file${{g.fileCount !== 1 ? 's' : ''}} \u00b7 ${{esc(g.language || '')}}</div>
+      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{g.fileCount}} file${{g.fileCount !== 1 ? 's' : ''}} \u00b7 ${{esc(g.language || '')}}${{g.kind ? ` \u00b7 ${{esc(humanizeSemanticKind(g.kind))}}` : ''}}</div>
     </div>
     ${{g.description ? `<p class="desc">${{esc(g.description)}}</p>` : ''}}
     <div>
@@ -3128,6 +3615,10 @@ function renderSidebar(n) {{
 
   const roleLabel = n.role ? n.role.replace(/_/g, ' ') : '';
   const rolePill = roleLabel ? `<span class="role-tag" style="background:${{ROLE_COLORS[n.role] || '#888'}}30;color:${{ROLE_COLORS[n.role] || '#888'}};margin-left:6px">${{roleLabel}}</span>` : '';
+  const semantic = fileSemantic(n);
+  const semanticPill = semantic.kind
+    ? `<span class="role-tag" style="background:#58a6ff22;color:#79c0ff;margin-left:6px">${{esc(humanizeSemanticKind(semantic.kind))}}</span>`
+    : '';
 
   // Code preview panel — first ~50 lines of the file, monospace, line-numbered.
   // Empty when --no-descriptions wasn't used or when the file couldn't be read.
@@ -3153,7 +3644,7 @@ function renderSidebar(n) {{
     <div>
       <h2>${{esc(nodeTitleText(n))}}</h2>
       <span style="font-size:11px;color:#6e7681;word-break:break-all">${{esc(n.id)}}</span>
-      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{esc(n.language || '')}} \u00b7 ${{(n.size/1024).toFixed(1)}} KB${{rolePill}}</div>
+      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{esc(n.language || '')}} \u00b7 ${{(n.size/1024).toFixed(1)}} KB${{rolePill}}${{semanticPill}}</div>
     </div>
     ${{inCycle ? '<div class="cycle-warning"><strong>\u26a0 In circular dependency</strong></div>' : ''}}
     ${{n.description ? `<p class="desc">${{esc(n.description)}}</p>` : ''}}
@@ -3173,9 +3664,13 @@ function renderSidebar(n) {{
 function jumpTo(nodeId) {{
   const n = nodeIndex[nodeId];
   if (!n) return;
+  const parentGroupId = nodeToGroup[nodeId];
   selectNode(n);
-  pan.x = canvasW() / 2 - n.x * zoom;
-  pan.y = canvasH() / 2 - n.y * zoom;
+  const target = (groupingState !== 'flat' && parentGroupId && groupMap[parentGroupId])
+    ? groupMap[parentGroupId]
+    : n;
+  pan.x = canvasW() / 2 - target.x * zoom;
+  pan.y = canvasH() / 2 - target.y * zoom;
   viewportWasManuallyMoved = true;
 }}
 window.jumpTo = jumpTo;
@@ -3188,7 +3683,47 @@ function compactText(text, maxLen) {{
 }}
 
 function displayNodeName(node) {{
-  return node.short_title || node.label.replace(JS_EXT_RE, '');
+  return nodeTitleText(node);
+}}
+
+function fileSemantic(node) {{
+  return node && node.id ? (FILE_SEMANTICS[node.id] || {{}}) : {{}};
+}}
+
+function derivedNodeTitle(node) {{
+  if (!node) return '';
+  // Prefer the actual filename (minus extension and path) — it's concrete
+  // and identifiable. Generic verb phrases like "Render View" or "Check
+  // Rules" collide across unrelated files and turn the diagram into a word
+  // soup. Tidy underscores/dashes into title-case so `test_describer.py`
+  // reads as "Test Describer" rather than a raw identifier.
+  const rawLabel = String(node.label || '');
+  const stripped = rawLabel
+    .replace(JS_EXT_RE, '')
+    .replace(/\.(py|pyi|kt|kts|rb|java|cs|swift|go|rs|c|cc|cpp|h|hpp)$/i, '');
+  if (stripped) {{
+    const pretty = titleCaseWords(flowWords(stripped));
+    if (pretty) return pretty;
+    return stripped;
+  }}
+  // Only fall back to the phrase/role heuristics for truly empty labels.
+  const semantic = fileSemantic(node);
+  const phrase = phraseFromText(node.description || semantic.summary || '');
+  if (phrase) return phrase;
+  const rolePhrase = roleFlowPhrase(node.role, '');
+  if (rolePhrase) return rolePhrase;
+  const words = flowWords(rawLabel);
+  if (words.length > 0) return titleCaseWords(words.slice(0, 3));
+  return rawLabel;
+}}
+
+function flowShapeForNode(node, fallbackShape) {{
+  if (!node) return fallbackShape || 'process';
+  const semantic = fileSemantic(node);
+  if (semantic.shape) return semantic.shape;
+  if (node.shape) return node.shape;
+  if (node.kind) return node.kind;
+  return fallbackShape || 'process';
 }}
 
 function itemFromNode(node, meta, fallbackSummary) {{
@@ -3375,6 +3910,12 @@ const FLOW_TYPE_COLORS = {{
   end: '#22c55e',
   decision: '#58a6ff',
   step: '#f59e0b',
+  entry: '#22c55e',
+  process: '#f59e0b',
+  analysis: '#eab308',
+  data: '#14b8a6',
+  external: '#94a3b8',
+  test: '#ef4444',
 }};
 
 function layoutFlowchart(fc) {{
@@ -3449,9 +3990,11 @@ function layoutFlowchart(fc) {{
     for (let i = 0; i < group.length; i++) {{
       const n = group[i];
       const x = startX + i * COL_GAP;
-      const shape = n.type || 'step';
+      const shape = n.shape || n.type || 'step';
       const color = FLOW_TYPE_COLORS[shape] || '#f59e0b';
-      positioned.push(flowNode(n.id, shape, n.label, x, y, [], color, n.description || ''));
+      const detailLines = [];
+      if (n.description) detailLines.push(compactText(n.description, 56));
+      positioned.push(flowNode(n.id, shape, n.label, x, y, detailLines, color, n.description || ''));
       if (x > maxX) maxX = x;
     }}
   }}
@@ -3471,11 +4014,11 @@ function buildFlowDiagram(config) {{
     width: 860,
     height: 680,
     nodes: [
-      flowNode('start', 'start', config.startLabel, 430, 74, config.startDetails, '#22c55e'),
-      flowNode('focus', 'decision', config.focusLabel, 430, 248, config.focusDetails, '#58a6ff'),
-      flowNode('left', 'step', config.leftLabel, 210, 440, config.leftDetails, '#f59e0b'),
-      flowNode('right', 'step', config.rightLabel, 650, 440, config.rightDetails, '#a78bfa'),
-      flowNode('end', 'end', config.endLabel, 430, 600, config.endDetails, '#22c55e'),
+      flowNode('start', config.startShape || 'start', config.startLabel, 430, 74, config.startDetails, FLOW_TYPE_COLORS[config.startShape || 'start'] || '#22c55e'),
+      flowNode('focus', config.focusShape || 'decision', config.focusLabel, 430, 248, config.focusDetails, FLOW_TYPE_COLORS[config.focusShape || 'decision'] || '#58a6ff'),
+      flowNode('left', config.leftShape || 'step', config.leftLabel, 210, 440, config.leftDetails, FLOW_TYPE_COLORS[config.leftShape || 'step'] || '#f59e0b'),
+      flowNode('right', config.rightShape || 'step', config.rightLabel, 650, 440, config.rightDetails, FLOW_TYPE_COLORS[config.rightShape || 'step'] || '#a78bfa'),
+      flowNode('end', config.endShape || 'end', config.endLabel, 430, 600, config.endDetails, FLOW_TYPE_COLORS[config.endShape || 'end'] || '#22c55e'),
     ],
     edges: [
       flowEdge('start', 'focus', config.startEdge || 'invoked'),
@@ -3494,10 +4037,17 @@ function svgNodeShape(node) {{
     const dh = 68, dw = 118;
     return `<polygon class="flow-node-shape" points="${{node.x}},${{node.y - dh}} ${{node.x + dw}},${{node.y}} ${{node.x}},${{node.y + dh}} ${{node.x - dw}},${{node.y}}" fill="${{node.color}}22" stroke="${{node.color}}" />`;
   }}
-  const width = node.shape === 'step' ? 200 : 178;
-  const height = node.shape === 'end' ? 74 : 86;
-  const rx = node.shape === 'step' ? 12 : 26;
-  return `<rect class="flow-node-shape" x="${{node.x - width / 2}}" y="${{node.y - height / 2}}" width="${{width}}" height="${{height}}" rx="${{rx}}" fill="${{node.color}}20" stroke="${{node.color}}" />`;
+  if (node.shape === 'analysis') {{
+    return `<polygon class="flow-node-shape" points="${{node.x - 80}},${{node.y - 43}} ${{node.x + 80}},${{node.y - 43}} ${{node.x + 104}},${{node.y}} ${{node.x + 80}},${{node.y + 43}} ${{node.x - 80}},${{node.y + 43}} ${{node.x - 104}},${{node.y}}" fill="${{node.color}}20" stroke="${{node.color}}" />`;
+  }}
+  if (node.shape === 'data') {{
+    return `<polygon class="flow-node-shape" points="${{node.x - 82}},${{node.y - 43}} ${{node.x + 92}},${{node.y - 43}} ${{node.x + 82}},${{node.y + 43}} ${{node.x - 92}},${{node.y + 43}}" fill="${{node.color}}20" stroke="${{node.color}}" />`;
+  }}
+  const width = node.shape === 'step' || node.shape === 'process' ? 200 : 178;
+  const height = node.shape === 'end' || node.shape === 'entry' ? 74 : 86;
+  const rx = (node.shape === 'step' || node.shape === 'process') ? 12 : 26;
+  const dash = (node.shape === 'external' || node.shape === 'test') ? ' stroke-dasharray="8 6"' : '';
+  return `<rect class="flow-node-shape" x="${{node.x - width / 2}}" y="${{node.y - height / 2}}" width="${{width}}" height="${{height}}" rx="${{rx}}" fill="${{node.color}}20" stroke="${{node.color}}"${{dash}} />`;
 }}
 
 function svgLabelLines(label) {{
@@ -3533,8 +4083,8 @@ function nodeAnchor(node, side) {{
     if (side === 'left') return {{ x: node.x - 118, y: node.y }};
     return {{ x: node.x + 118, y: node.y }};
   }}
-  const width = node.shape === 'step' ? 200 : 178;
-  const height = node.shape === 'end' ? 74 : 86;
+  const width = node.shape === 'analysis' ? 208 : ((node.shape === 'data' || node.shape === 'step' || node.shape === 'process') ? 200 : 178);
+  const height = node.shape === 'end' || node.shape === 'entry' ? 74 : 86;
   if (side === 'top') return {{ x: node.x, y: node.y - height / 2 }};
   if (side === 'bottom') return {{ x: node.x, y: node.y + height / 2 }};
   if (side === 'left') return {{ x: node.x - width / 2, y: node.y }};
@@ -3587,6 +4137,10 @@ function renderFlowSvg(diagram) {{
       <text x="118" y="0" fill="#6e7681" font-size="11">Decision</text>
       <rect x="196" y="-12" width="16" height="16" rx="3" fill="none" stroke="#6e7681" stroke-width="1.5" />
       <text x="218" y="0" fill="#6e7681" font-size="11">Step</text>
+      <polygon points="296,-10 308,-10 318,0 308,10 296,10 286,0" fill="none" stroke="#6e7681" stroke-width="1.5" />
+      <text x="326" y="0" fill="#6e7681" font-size="11">Analysis</text>
+      <polygon points="414,-12 430,-12 420,12 404,12" fill="none" stroke="#6e7681" stroke-width="1.5" />
+      <text x="438" y="0" fill="#6e7681" font-size="11">Data / state</text>
     </g>
   `;
   return `<div class="flow-graph-wrap"><svg class="flow-svg" viewBox="0 0 ${{diagram.width}} ${{diagram.height}}" role="img" aria-label="Workflow diagram">${{defs}}${{edges}}${{nodes}}${{legend}}</svg></div>`;
@@ -3626,6 +4180,20 @@ function buildGroupFlowModel(groupNode) {{
   const childNodes = rankChildNodes(groupNode.childIds.map(id => nodeIndex[id]).filter(Boolean));
   const internalIds = new Set(childNodes.map(node => node.id));
   if (childNodes.length === 0) return null;
+
+  if (groupNode.detailDiagram && groupNode.detailDiagram.nodes && groupNode.detailDiagram.edges) {{
+    return {{
+      eyebrow: 'Block Workflow',
+      title: groupNode.label,
+      subtitle: compactText(groupNode.description || 'Derived from the files and dependency flow inside this block.', 180),
+      meta: [
+        {{ label: 'Files', value: groupNode.fileCount }},
+        {{ label: 'Incoming Links', value: groupNode.indegree }},
+        {{ label: 'Outgoing Links', value: groupNode.outdegree }},
+      ],
+      diagram: layoutFlowchart(groupNode.detailDiagram),
+    }};
+  }}
 
   let leftLabel = 'Starts Here';
   let leftNodes = childNodes.filter(node =>
@@ -3682,11 +4250,14 @@ function buildGroupFlowModel(groupNode) {{
       startLabel: 'Enter Block',
       startDetails: nodesDetailLines(leftNodes, 2),
       startEdge: 'called',
+      startShape: groupNode.kind === 'entry' ? 'entry' : 'start',
       focusLabel: nodeFlowPhrase(groupNode, roleFlowPhrase(groupNode.role, 'Core Logic')),
       focusDetails: nodesDetailLines(childNodes, 3),
+      focusShape: groupNode.shape || 'decision',
       leftEdge: 'internal path',
       leftLabel: symbolFlowPhrase(insideNode.symbols?.[0]) || nodeFlowPhrase(insideNode, 'Main Step'),
       leftDetails: nodeDetailLines(insideNode, 2),
+      leftShape: flowShapeForNode(insideNode, 'process'),
       rightEdge: dependencyNode ? 'external dep' : 'alt path',
       rightLabel: dependencyNode
         ? nodeFlowPhrase(dependencyNode, rightLabel === 'Depends On' ? 'Use Shared Code' : 'Second Step')
@@ -3694,10 +4265,12 @@ function buildGroupFlowModel(groupNode) {{
       rightDetails: dependencyNode
         ? nodeDetailLines(dependencyNode, 2)
         : nodeDetailLines(branchNode, 2),
+      rightShape: dependencyNode ? flowShapeForNode(dependencyNode, 'external') : flowShapeForNode(branchNode, 'process'),
       leftEndEdge: 'returns',
       rightEndEdge: 'returns',
       endLabel: outcomeFlowPhrase(groupNode.description, groupNode.role, 'Exit Block'),
       endDetails: [],
+      endShape: groupNode.kind === 'test' ? 'test' : 'end',
     }}),
   }};
 }}
@@ -3735,6 +4308,7 @@ function buildFileFlowModel(fileNode) {{
   const branchItem = centerItems[1] || itemFromNode(fileNode, 'File step', 'Core work inside the file');
   const dependencyNode = dependencies[0] || null;
   const secondSymbol = sortedSymbols[1] || null;
+  const semantic = fileSemantic(fileNode);
 
   // Use AI-generated flowchart if available, otherwise fall back to generic template
   const aiFlowchart = fileNode.flowchart;
@@ -3744,11 +4318,14 @@ function buildFileFlowModel(fileNode) {{
       startLabel: 'Enter File',
       startDetails: nodeDetailLines(fileNode, 2),
       startEdge: 'imported',
+      startShape: semantic.kind === 'entry' ? 'entry' : 'start',
       focusLabel: nodeFlowPhrase(fileNode, roleFlowPhrase(fileNode.role, 'Core Logic')),
       focusDetails: symbolDetailLines(sortedSymbols, 3),
+      focusShape: semantic.shape || 'decision',
       leftEdge: 'main logic',
       leftLabel: symbolFlowPhrase(sortedSymbols[0]) || nodeFlowPhrase(fileNode, 'Main Step'),
       leftDetails: sortedSymbols[0] ? [humanizeSymbolName(sortedSymbols[0])] : [],
+      leftShape: semantic.shape || 'process',
       rightEdge: dependencyNode ? 'delegates to' : 'also runs',
       rightLabel: dependencyNode
         ? nodeFlowPhrase(dependencyNode, 'Use Helper')
@@ -3756,10 +4333,12 @@ function buildFileFlowModel(fileNode) {{
       rightDetails: dependencyNode
         ? nodeDetailLines(dependencyNode, 2)
         : (secondSymbol ? [humanizeSymbolName(secondSymbol)] : []),
+      rightShape: dependencyNode ? flowShapeForNode(dependencyNode, 'external') : (semantic.kind === 'data' ? 'data' : 'process'),
       leftEndEdge: 'returns',
       rightEndEdge: 'returns',
       endLabel: outcomeFlowPhrase(fileNode.description, fileNode.role, 'Finish Here'),
       endDetails: [],
+      endShape: semantic.kind === 'test' ? 'test' : 'end',
     }});
 
   return {{
@@ -4008,7 +4587,7 @@ function toggleHelp() {{
 
 function renderStatsBar() {{
   const sb = document.getElementById('lp-statsbar');
-  if (!METRICS) return;
+  if (!sb || !METRICS) return;
 
   // Entry point (where the program starts)
   const entryNodes = nodes.filter(n => n.role === 'entry_point');
@@ -4155,20 +4734,40 @@ function startAnim() {{
 }}
 
 // Initial sidebar with metrics
-renderDefaultSidebar();
-renderStatsBar();
-renderLangBar();
-renderSummary();
+try {{ renderDefaultSidebar(); }} catch(e) {{ console.error('[prefxplain] renderDefaultSidebar failed:', e); }}
+try {{ renderStatsBar(); }} catch(e) {{ console.error('[prefxplain] renderStatsBar failed:', e); }}
+try {{ renderLangBar(); }} catch(e) {{ console.error('[prefxplain] renderLangBar failed:', e); }}
+try {{ renderSummary(); }} catch(e) {{ console.error('[prefxplain] renderSummary failed:', e); }}
 
 // Initialize minimap size
-minimap.width = 160;
-minimap.height = 100;
+if (minimap) {{ minimap.width = 160; minimap.height = 100; }}
 
-// Start: build groups, then the architecture-block layout
+// Start: build groups, open them all so the main view reads as
+// container-with-children (not scattered file cards), then run the
+// architecture-block layout. We bump each group's w/h to its expanded
+// container size BEFORE laying out, so the topological row/column layout
+// reserves enough space for every container.
 (function initLayout() {{
   layoutMode = 'layered';
   buildGroups();
+  if (groupingState === 'grouped') {{
+    for (const gid of Object.keys(groupMap)) pinnedGroupIds.add(gid);
+    // Use the full expanded container size for layout so the row/column
+    // placer actually sees how much room each group will take up. Keep the
+    // closed-state dimensions in sync so overlap resolution and hit-testing
+    // use the same numbers we laid out with.
+    for (const g of Object.values(groupMap)) {{
+      const layout = layoutOpenGroupChildren(g);
+      g.w = layout.openW;
+      g.h = layout.openH;
+      g._closedW = layout.openW;
+      g._closedH = layout.openH;
+    }}
+  }}
   layoutBlocks(visibleNodes, visibleEdges);
+  if (groupingState === 'grouped') {{
+    resolveGroupOverlaps();
+  }}
   simRunning = false;
   draw();
   drawMinimap();

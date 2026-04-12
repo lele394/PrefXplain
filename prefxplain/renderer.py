@@ -1609,12 +1609,17 @@ function graphBounds(nodeList) {{
 function computeFitZoom(width, height, nodeList) {{
   const bounds = graphBounds(nodeList);
   if (!bounds) return 1;
-  const pad = 80;
-  const spanX = Math.max(bounds.wx1 - bounds.wx0, 1);
-  const spanY = Math.max(bounds.wy1 - bounds.wy0, 1);
+  // graphBounds only measures raw node boxes; intra-group edge labels
+  // ("tests · xN") and group chrome extend beyond. Reserve slack so content
+  // doesn't clip on the edges of the viewport.
+  const pad = 48;
+  const labelMarginX = 90;
+  const labelMarginY = 40;
+  const spanX = Math.max(bounds.wx1 - bounds.wx0 + labelMarginX * 2, 1);
+  const spanY = Math.max(bounds.wy1 - bounds.wy0 + labelMarginY * 2, 1);
   const zx = Math.max(0.01, (width - pad * 2) / spanX);
   const zy = Math.max(0.01, (height - pad * 2) / spanY);
-  return Math.max(0.3, Math.min(zx, zy, 2));
+  return Math.max(0.3, Math.min(zx, zy, 2.5));
 }}
 
 function syncZoomScale(width, height) {{

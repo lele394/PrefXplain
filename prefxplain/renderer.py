@@ -535,8 +535,8 @@ function buildGroups() {{
       // Groups in semantic mode read as architecture blocks, not as fat file
       // cards. Size them so there's room for title + description + a row of
       // child sub-block hints rendered inside.
-      group.w = 308;
-      group.h = 168;
+      group.w = 360;
+      group.h = 210;
 
       groupMap[group.id] = group;
       for (const id of ids) nodeToGroup[id] = group.id;
@@ -816,9 +816,9 @@ function collapseGroups() {{
 
 // Position children inside an open group as a grid of full-size cards.
 // Returns {{ items: [{{ node, cx, cy }}], openW, openH, cols, rows }}.
-const OPEN_GROUP_HEADER = 56;
-const OPEN_GROUP_PAD = 28;
-const OPEN_GROUP_GAP = 40;
+const OPEN_GROUP_HEADER = 120;
+const OPEN_GROUP_PAD = 36;
+const OPEN_GROUP_GAP = 48;
 
 function layoutOpenGroupChildren(group) {{
   const children = (group.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
@@ -2310,9 +2310,9 @@ function drawGroupSubBlocks(ctx, group, sx, sy, sw, sh, topY, groupColorStr) {{
   const availableH = bottomY - topY;
   if (availableH < 18) return;
 
-  const CHIP_W = 36;
-  const CHIP_H = 16;
-  const CHIP_GAP = 6;
+  const CHIP_W = 44;
+  const CHIP_H = 20;
+  const CHIP_GAP = 8;
 
   function kindOf(node) {{
     const semantic = FILE_SEMANTICS[node.id] || {{}};
@@ -2704,46 +2704,88 @@ function draw() {{
       ep = shiftAlongBorder(ep, bBox, laneOffset);
       waypoints = [sp, ep];
     }} else {{
-      // Route around ALL blockers with per-edge lane offset
+      // Route around ALL blockers with per-edge lane offset.
+      // Corridor axis depends on the flow direction:
+      //   vertical flow   → corridor is a vertical line (constant X, vary Y)
+      //   horizontal flow → corridor is a horizontal line (constant Y, vary X)
       const routeOffset = laneIdx * LANE_SPREAD;
       const margin = 24 / zoom;
-      const goRight = aBox.x <= bBox.x;
-      // Find the rightmost (or leftmost) edge of all blockers + source/target
-      let sideX;
-      if (goRight) {{
-        sideX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
-        for (const ob of blockers) sideX = Math.max(sideX, ob.x + ob.w / 2);
-        sideX += margin + routeOffset;
-      }} else {{
-        sideX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
-        for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
-        sideX -= margin + routeOffset;
-      }}
-      // Exit/entry from the side of source/target facing the detour
-      const sp = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-      const ep = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-      waypoints = [sp, {{ x: sideX, y: sp.y }}, {{ x: sideX, y: ep.y }}, ep];
+      const dir = resolvedFlowDirection(); // 'horizontal' | 'vertical'
 
-      // Validate the detour doesn't hit any obstacle (if it does, try the other side)
-      let detourBlocked = false;
-      for (const ob of obstacles) {{
-        for (let i = 0; i < waypoints.length - 1; i++) {{
-          if (lineHitsRect(waypoints[i].x, waypoints[i].y,
-              waypoints[i+1].x, waypoints[i+1].y, ob.x, ob.y, ob.w, ob.h, 4)) {{
-            detourBlocked = true;
-            break;
-          }}
+      if (dir === 'horizontal') {{
+        // Horizontal flow: route via a horizontal corridor (fixed sideY)
+        const goDown = aBox.y <= bBox.y;
+        let sideY;
+        if (goDown) {{
+          sideY = Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2);
+          for (const ob of blockers) sideY = Math.max(sideY, ob.y + ob.h / 2);
+          sideY += margin + routeOffset;
+        }} else {{
+          sideY = Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2);
+          for (const ob of blockers) sideY = Math.min(sideY, ob.y - ob.h / 2);
+          sideY -= margin + routeOffset;
         }}
-        if (detourBlocked) break;
-      }}
-      if (detourBlocked) {{
-        // Try opposite side
-        const altSideX = goRight
-          ? Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2, ...blockers.map(o => o.x - o.w / 2)) - margin - routeOffset
-          : Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2, ...blockers.map(o => o.x + o.w / 2)) + margin + routeOffset;
-        const sp2 = rectEdgePoint(altSideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-        const ep2 = rectEdgePoint(altSideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-        waypoints = [sp2, {{ x: altSideX, y: sp2.y }}, {{ x: altSideX, y: ep2.y }}, ep2];
+        // Exit/entry from top or bottom of source/target
+        const sp = rectEdgePoint(aBox.x, sideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+        const ep = rectEdgePoint(bBox.x, sideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+        waypoints = [sp, {{ x: sp.x, y: sideY }}, {{ x: ep.x, y: sideY }}, ep];
+
+        // Validate; try opposite side if blocked
+        let detourBlocked = false;
+        for (const ob of obstacles) {{
+          for (let i = 0; i < waypoints.length - 1; i++) {{
+            if (lineHitsRect(waypoints[i].x, waypoints[i].y,
+                waypoints[i+1].x, waypoints[i+1].y, ob.x, ob.y, ob.w, ob.h, 4)) {{
+              detourBlocked = true; break;
+            }}
+          }}
+          if (detourBlocked) break;
+        }}
+        if (detourBlocked) {{
+          const altSideY = goDown
+            ? Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2, ...blockers.map(o => o.y - o.h / 2)) - margin - routeOffset
+            : Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2, ...blockers.map(o => o.y + o.h / 2)) + margin + routeOffset;
+          const sp2 = rectEdgePoint(aBox.x, altSideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+          const ep2 = rectEdgePoint(bBox.x, altSideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+          waypoints = [sp2, {{ x: sp2.x, y: altSideY }}, {{ x: ep2.x, y: altSideY }}, ep2];
+        }}
+      }} else {{
+        // Vertical flow: route via a vertical corridor (fixed sideX)
+        const goRight = aBox.x <= bBox.x;
+        let sideX;
+        if (goRight) {{
+          sideX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
+          for (const ob of blockers) sideX = Math.max(sideX, ob.x + ob.w / 2);
+          sideX += margin + routeOffset;
+        }} else {{
+          sideX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
+          for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
+          sideX -= margin + routeOffset;
+        }}
+        // Exit/entry from the side of source/target facing the detour
+        const sp = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+        const ep = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+        waypoints = [sp, {{ x: sideX, y: sp.y }}, {{ x: sideX, y: ep.y }}, ep];
+
+        // Validate; try opposite side if blocked
+        let detourBlocked = false;
+        for (const ob of obstacles) {{
+          for (let i = 0; i < waypoints.length - 1; i++) {{
+            if (lineHitsRect(waypoints[i].x, waypoints[i].y,
+                waypoints[i+1].x, waypoints[i+1].y, ob.x, ob.y, ob.w, ob.h, 4)) {{
+              detourBlocked = true; break;
+            }}
+          }}
+          if (detourBlocked) break;
+        }}
+        if (detourBlocked) {{
+          const altSideX = goRight
+            ? Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2, ...blockers.map(o => o.x - o.w / 2)) - margin - routeOffset
+            : Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2, ...blockers.map(o => o.x + o.w / 2)) + margin + routeOffset;
+          const sp2 = rectEdgePoint(altSideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+          const ep2 = rectEdgePoint(altSideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+          waypoints = [sp2, {{ x: altSideX, y: sp2.y }}, {{ x: altSideX, y: ep2.y }}, ep2];
+        }}
       }}
     }}
 
@@ -2841,7 +2883,7 @@ function draw() {{
   const drawnBidiPairs = new Set();
 
   // Pre-assign sequential lane indices to edges for non-overlapping routing.
-  // Each edge gets a unique laneIdx used to offset its vertical routing segment.
+  // Each edge gets a unique laneIdx used to offset its routing corridor.
   let _laneCounter = 0;
   const edgeLaneMap = {{}};
   for (const e of drawEdges) {{
@@ -2984,26 +3026,34 @@ function draw() {{
           // Clip to header area so long labels don't overflow into body
           ctx.save();
           ctx.beginPath();
+          // Strict clip to actual header height — extending beyond hh lets text
+          // render in the body where child card backgrounds cover it.
           ctx.rect(sx - sw/2 + 2, sy + 1, sw - 4, hh - 2);
           ctx.clip();
-          // Kind eyebrow (small, uppercase)
+          // Proportional font sizes and positions within the real header height.
           const kindLabel = humanizeSemanticKind(n.kind || n.shape || 'process').toUpperCase();
-          ctx.font = '9px -apple-system, sans-serif';
-          ctx.fillStyle = gc + 'bb';
+          const kindFont = Math.max(7, Math.min(11, Math.floor(hh * 0.18)));
+          const titleFont = Math.max(9, Math.min(16, Math.floor(hh * 0.28)));
+          const kindY = sy + Math.max(2, Math.floor(hh * 0.10));
+          const titleY = kindY + kindFont + Math.max(2, Math.floor(hh * 0.06));
+          ctx.font = `bold ${{kindFont}}px -apple-system, sans-serif`;
+          ctx.fillStyle = gc + 'cc';
           ctx.textAlign = 'left';
           ctx.textBaseline = 'top';
-          ctx.fillText(kindLabel, sx - sw/2 + 14, sy + 7);
-          // Group label — bright, bold, larger
-          ctx.font = 'bold 15px -apple-system, sans-serif';
-          ctx.fillStyle = '#e6edf3';
-          ctx.fillText(n.label, sx - sw/2 + 14, sy + 19);
-          ctx.restore(); // end header clip
-          // File count (below header clip, but still in screen space)
-          ctx.font = '11px -apple-system, sans-serif';
+          ctx.fillText(kindLabel, sx - sw/2 + 12, kindY);
+          // File count — top-right of header, same row as kind label
+          ctx.font = `${{kindFont}}px -apple-system, sans-serif`;
           ctx.fillStyle = gc + 'aa';
           ctx.textAlign = 'right';
-          ctx.textBaseline = 'top';
-          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx + sw/2 - 14, sy + 7);
+          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx + sw/2 - 12, kindY);
+          // Group label — only render if it fits within the header
+          if (titleY + titleFont < sy + hh) {{
+            ctx.font = `bold ${{titleFont}}px -apple-system, sans-serif`;
+            ctx.fillStyle = '#e6edf3';
+            ctx.textAlign = 'left';
+            ctx.fillText(n.label, sx - sw/2 + 12, titleY);
+          }}
+          ctx.restore(); // end header clip
           ctx.restore();
         }}
       }} else {{
@@ -3037,23 +3087,23 @@ function draw() {{
           ctx.beginPath();
           ctx.rect(sx - sw/2, sy - sh/2, sw, sh);
           ctx.clip();
-          ctx.font = '11px -apple-system, sans-serif';
+          ctx.font = 'bold 10px -apple-system, sans-serif';
           ctx.fillStyle = '#8b949e';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(humanizeSemanticKind(shape), sx, sy - sh / 2 + 8);
-          ctx.font = 'bold 17px -apple-system, sans-serif';
+          ctx.fillText(humanizeSemanticKind(shape).toUpperCase(), sx, sy - sh / 2 + 12);
+          ctx.font = 'bold 18px -apple-system, sans-serif';
           ctx.fillStyle = gc;
-          const groupTitleLines = wrapTextLines(ctx, n.label, sw - 22, 2);
-          let groupY = sy - sh / 2 + 24;
+          const groupTitleLines = wrapTextLines(ctx, n.label, sw - 28, 2);
+          let groupY = sy - sh / 2 + 30;
           groupTitleLines.forEach(line => {{
             ctx.fillText(line, sx, groupY);
-            groupY += 14;
+            groupY += 20;
           }});
-          ctx.font = '14px -apple-system, sans-serif';
-          ctx.fillStyle = '#8b949e';
-          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx, groupY + 2);
-          let subRowBottom = groupY + 18;
+          ctx.font = '13px -apple-system, sans-serif';
+          ctx.fillStyle = '#6e7681';
+          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx, groupY + 4);
+          let subRowBottom = groupY + 22;
           if (n.description && sh > 60) {{
             ctx.font = '13px -apple-system, sans-serif';
             ctx.fillStyle = '#6e7681';

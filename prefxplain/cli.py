@@ -97,7 +97,9 @@ def _open_ide_preview(path: Path) -> bool:
 def _open_output(path: Path) -> None:
     """Open the output in the IDE preview when possible, otherwise in the browser."""
     resolved = str(path.resolve())
-    if _in_ide() and _open_ide_preview(path):
+    # Always attempt the IDE preview URI first — the OS routes vscode:// to VS Code
+    # if the extension is installed, regardless of whether we're inside the IDE terminal.
+    if _open_ide_preview(path):
         return
     webbrowser.open(f"file://{resolved}")
 

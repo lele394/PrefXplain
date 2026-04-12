@@ -280,5 +280,5 @@ class TestRenderer:
         assert "if (children.length <= 4) {" in html
         assert ".slice(0, 5)" in html
         # Groups get bumped container dimensions so there's room for the row.
-        assert "group.w = 308;" in html
-        assert "group.h = 168;" in html
+        assert "group.w = 360;" in html
+        assert "group.h = 210;" in html

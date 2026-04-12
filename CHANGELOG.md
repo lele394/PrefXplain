@@ -4,6 +4,20 @@ All notable changes to PrefXplain are documented here.
 
 ---
 
+## [0.1.0.1] - 2026-04-12
+
+### Fixed
+- **Group header titles invisible at low zoom**: proportional font sizing and strict clip to actual header height (`OPEN_GROUP_HEADER = 120px`) ensures labels always render within the header band regardless of zoom level
+- **Horizontal flow arrow overlap**: arrow routing now uses a horizontal corridor (`sideY`) in `Flow: →` mode instead of a vertical one, giving each edge its own horizontal lane
+- **VS Code preview always opens**: `_open_output()` now attempts the `vscode://` URI first unconditionally, so the IDE webview opens even when running from a non-IDE terminal
+
+### Changed
+- Enlarged open group header (`OPEN_GROUP_HEADER`: 56 → 120px), padding, and gap constants for better readability
+- Closed group block dimensions increased to 360×210 (was 308×168) to accommodate title and description
+- Chip sizes for collapsed group sub-block hints increased (44×20, was 36×16)
+
+---
+
 ## [0.1.0.0] - 2026-04-12
 
 ### Added

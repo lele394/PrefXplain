@@ -85,7 +85,8 @@ _HTML_TEMPLATE = """\
   #graph-area {{ flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }}
   #canvas {{ flex: 1; min-width: 0; cursor: grab; display: block; }}
   #canvas.dragging {{ cursor: grabbing; }}
-  #minimap {{ position: absolute; bottom: 12px; right: 12px; width: 140px; height: 90px; background: #161b22cc; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; z-index: 10; }}
+  #minimap {{ position: absolute; bottom: 12px; right: 12px; width: 140px; height: 90px; background: #161b22e6; border: 1px solid #484f58; border-radius: 6px; cursor: pointer; z-index: 10; box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }}
+  #minimap:hover {{ border-color: #58a6ff; }}
   #help-overlay {{ display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 24px; z-index: 20; min-width: 280px; }}
   #help-overlay h3 {{ color: #e6edf3; font-size: 14px; margin-bottom: 12px; }}
   #help-overlay kbd {{ background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: monospace; }}

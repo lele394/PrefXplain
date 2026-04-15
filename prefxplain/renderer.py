@@ -50,7 +50,7 @@ _HTML_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PrefXplain — {repo}</title>
 <style>
-  :root {{ --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 200px; }}
+  :root {{ --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 68px; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   html, body {{ height: var(--viewport-height); min-height: var(--viewport-height); max-height: var(--viewport-height); width: 100%; overflow: hidden; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height); }}
@@ -122,36 +122,30 @@ _HTML_TEMPLATE = """\
     .flow-svg {{ min-width: 560px; }}
   }}
 
-  /* ── Detail section (fills remaining height in top panel, scrollable) */
-  #sidebar {{ flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height); overflow-y: auto; padding: 6px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 8px; }}
+  /* ── Detail section — 2-line horizontal info bar ─────────────────── */
+  #sidebar {{ flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height); overflow: hidden; padding: 2px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 0; }}
   #sidebar.hidden {{ display: none; }}
-  #sidebar > * {{ flex-shrink: 0; }}
-  #sidebar h2 {{ font-size: 13px; font-weight: 600; color: #e6edf3; word-break: break-all; }}
-  #sidebar .desc {{ color: #8b949e; line-height: 1.5; }}
-  #sidebar .section-title {{ font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6e7681; margin-top: 4px; }}
-  #sidebar .symbol {{ display: inline-block; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 2px 6px; font-size: 11px; font-family: monospace; margin: 2px; }}
+  #sidebar .sb-row {{ display: flex; align-items: center; gap: 5px; height: 32px; overflow: hidden; white-space: nowrap; flex-shrink: 0; }}
+  #sidebar .sb-row + .sb-row {{ border-top: 1px solid #21262d; }}
+  #sidebar .sb-title {{ font-size: 13px; font-weight: 700; color: #e6edf3; flex-shrink: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }}
+  #sidebar .sb-path {{ font-size: 11px; color: #484f58; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
+  #sidebar .sb-meta {{ font-size: 11px; color: #6e7681; flex-shrink: 0; }}
+  #sidebar .sb-sep {{ color: #30363d; flex-shrink: 0; font-size: 13px; }}
+  #sidebar .sb-vdiv {{ width: 1px; height: 14px; background: #30363d; flex-shrink: 0; margin: 0 6px; }}
+  #sidebar .sb-spacer {{ flex: 1; min-width: 8px; }}
+  #sidebar .sb-label {{ font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6e7681; flex-shrink: 0; }}
+  #sidebar .sb-desc {{ font-size: 11px; color: #8b949e; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  #sidebar .symbol {{ display: inline-flex; align-items: center; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 5px; font-size: 11px; font-family: monospace; flex-shrink: 0; }}
   #sidebar .symbol.fn {{ color: #d2a8ff; }}
   #sidebar .symbol.cls {{ color: #79c0ff; }}
   #sidebar .symbol.var {{ color: #ffa657; }}
-  #sidebar .neighbor {{ display: flex; align-items: center; gap: 6px; padding: 4px 0; cursor: pointer; color: #58a6ff; }}
-  #sidebar .neighbor:hover {{ color: #79c0ff; }}
-  #sidebar .neighbor .arrow {{ color: #6e7681; font-size: 10px; }}
+  #sidebar .neighbor {{ display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; background: #21262d; border: 1px solid #30363d; border-radius: 4px; cursor: pointer; color: #58a6ff; font-size: 11px; flex-shrink: 0; max-width: 130px; overflow: hidden; text-overflow: ellipsis; }}
+  #sidebar .neighbor:hover {{ background: #30363d; color: #79c0ff; }}
+  #sidebar .neighbor .arrow {{ color: #6e7681; font-size: 10px; flex-shrink: 0; }}
   #sidebar .placeholder {{ color: #6e7681; font-style: italic; font-size: 12px; }}
-  #sidebar .role-tag {{ display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }}
-  .metric-row {{ display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; }}
-  .metric-row .label {{ color: #8b949e; }}
-  .metric-row .value {{ color: #e6edf3; font-weight: 600; }}
-  .cycle-warning {{ background: #f8514920; border: 1px solid #f85149; border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #f85149; }}
-  .cycle-warning strong {{ color: #ff7b72; }}
-  .metrics-panel {{ background: #21262d; border-radius: 6px; padding: 10px 12px; }}
-  .code-preview {{
-    background: #010409; border: 1px solid #30363d; border-radius: 6px;
-    padding: 10px 0; margin-top: 6px; max-height: min(360px, 34vh); overflow: auto;
-    font-family: "SF Mono", Monaco, Menlo, monospace; font-size: 11px;
-    line-height: 1.55; color: #c9d1d9; white-space: pre;
-  }}
-  .code-preview code {{ display: block; padding: 0 12px; }}
-  .code-preview .ln {{ display: inline-block; width: 32px; margin-right: 12px; color: #484f58; text-align: right; user-select: none; }}
+  #sidebar .role-tag {{ display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }}
+  #sidebar .cycle-flag {{ color: #f85149; font-size: 10px; flex-shrink: 0; }}
+  #sidebar .more {{ color: #6e7681; font-size: 11px; flex-shrink: 0; }}
   body.panel-resizing {{ cursor: ns-resize; }}
 </style>
 </head>
@@ -287,6 +281,12 @@ const pinnedGroupIds = new Set();
 let viewportWasManuallyMoved = false;
 let fitZoomLevel = 1;
 let userZoomScale = 1;
+// World-space bounding rect of the last frame drawn — includes node boxes,
+// edge waypoints, and edge label bboxes. Populated at the end of draw() and
+// consumed by computeFitZoom / zoomToFit / clampPan so that fitting never
+// clips arrows or labels routed outside raw node bounds. null until first
+// draw completes.
+let _lastDrawnVisualBounds = null;
 let spreadFactor = 1.0; // controls spacing between blocks (scroll wheel)
 let topDetailsHeight = DEFAULT_TOP_DETAILS_HEIGHT;
 let panelResizeActive = false;
@@ -1021,7 +1021,9 @@ function layoutBlockRows(rows) {{
   const nonEmpty = rows.filter(r => r.length > 0);
   if (nonEmpty.length === 0) return;
 
-  const ROW_GAP = Math.max(280, 280 * spreadFactor);
+  // Vertical flow: flow axis is vertical, so stretch ROW_GAP — content can
+  // scroll vertically and edge labels between layers get more breathing room.
+  const ROW_GAP = Math.max(460, 460 * spreadFactor);
   const COL_GAP = Math.max(180, 180 * spreadFactor);
   const rowHeights = nonEmpty.map(row => Math.max(...row.map(n => n.h)));
   const rowWidths = nonEmpty.map(row =>
@@ -1049,7 +1051,9 @@ function layoutBlockColumns(columns) {{
   const nonEmpty = columns.filter(col => col.length > 0);
   if (nonEmpty.length === 0) return;
 
-  const COLUMN_GAP = Math.max(320, 320 * spreadFactor);
+  // Horizontal flow: flow axis is horizontal, so stretch COLUMN_GAP — content
+  // can scroll horizontally and edge labels between layers get breathing room.
+  const COLUMN_GAP = Math.max(560, 560 * spreadFactor);
   const ROW_GAP = Math.max(180, 180 * spreadFactor);
   const widths = nonEmpty.map(col => Math.max(...col.map(n => n.w)));
   const heights = nonEmpty.map(col => col.reduce((sum, n) => sum + n.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
@@ -1747,28 +1751,54 @@ function graphBounds(nodeList) {{
 }}
 
 function computeFitZoom(width, height, nodeList) {{
-  const bounds = graphBounds(nodeList);
-  if (!bounds) return 1;
-  // graphBounds only measures raw node boxes; intra-group edge labels
-  // ("tests · xN") and group chrome extend beyond. Reserve slack so content
-  // doesn't clip on the edges of the viewport.
-  const pad = 48;
-  // Edges routing around blocks extend well beyond node bboxes on the axis
-  // perpendicular to the flow direction (edges detour sideways in vertical
-  // flow, vertically in horizontal flow). Reserve generous slack on that axis.
-  const dirForMargin = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
-  const labelMarginX = dirForMargin === 'horizontal' ? 160 : 700;
-  const labelMarginY = dirForMargin === 'horizontal' ? 700 : 120;
-  const spanX = Math.max(bounds.wx1 - bounds.wx0 + labelMarginX * 2, 1);
-  const spanY = Math.max(bounds.wy1 - bounds.wy0 + labelMarginY * 2, 1);
+  // Prefer the real drawn extent from the previous frame — it includes edge
+  // waypoints routed outside node bboxes and edge label boxes. Fall back to
+  // raw node bounds on the very first frame, with a conservative static
+  // fallback margin until the real extent is known.
+  const nodeB = graphBounds(nodeList);
+  if (!nodeB) return 1;
+  const vb = _lastDrawnVisualBounds;
+  const bounds = vb ? {{
+    wx0: Math.min(vb.wx0, nodeB.wx0),
+    wy0: Math.min(vb.wy0, nodeB.wy0),
+    wx1: Math.max(vb.wx1, nodeB.wx1),
+    wy1: Math.max(vb.wy1, nodeB.wy1),
+  }} : nodeB;
+  const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
+  const rawSpanX = Math.max(bounds.wx1 - bounds.wx0, 1);
+  const rawSpanY = Math.max(bounds.wy1 - bounds.wy0, 1);
+  // On the first frame we don't yet have the real routing extent, so pad
+  // generously on the perpendicular axis. Once _lastDrawnVisualBounds is
+  // populated the real detours are already baked into bounds and we only
+  // need a small aesthetic margin on both sides.
+  const aestheticPad = 0.015; // 1.5% of the axis on each side
+  // Guaranteed absolute safety gap (world units) on top of the relative pad
+  // so no object ever touches the viewport edge, even on large graphs where
+  // 1.5% would round to just a handful of pixels.
+  const safetyGap = 60;
+  let spanX, spanY;
+  if (vb) {{
+    spanX = rawSpanX * (1 + aestheticPad * 2) + safetyGap * 2;
+    spanY = rawSpanY * (1 + aestheticPad * 2) + safetyGap * 2;
+  }} else {{
+    const fallbackPerp = dir === 'horizontal' ? 700 : 700;
+    spanX = dir === 'horizontal'
+      ? rawSpanX * (1 + aestheticPad * 2) + safetyGap * 2
+      : rawSpanX + fallbackPerp * 2;
+    spanY = dir === 'horizontal'
+      ? rawSpanY + fallbackPerp * 2
+      : rawSpanY * (1 + aestheticPad * 2) + safetyGap * 2;
+  }}
+  const pad = 24; // viewport inner padding (screen px)
   const zx = Math.max(0.01, (width - pad * 2) / spanX);
   const zy = Math.max(0.01, (height - pad * 2) / spanY);
   // Axis-locked fit: in vertical flow the user scrolls vertically, so content
   // must never overflow horizontally (fit width). In horizontal flow, fit
   // height instead so content stays inside vertically.
-  const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
   const axisFit = dir === 'horizontal' ? zy : zx;
-  return Math.max(0.3, Math.min(axisFit, 2.5));
+  // Lower floor than before (0.3 silently swallowed any extra margin on
+  // dense graphs). Keep a tiny floor so we never go to zero.
+  return Math.max(0.05, Math.min(axisFit, 2.5));
 }}
 
 function syncZoomScale(width, height) {{
@@ -1919,13 +1949,19 @@ function clampPan() {{
   pan.y = Math.max(minPanY, Math.min(maxPanY, pan.y));
   // When zoomed out to (or past) the axis-fit level, the perpendicular axis
   // already fits entirely in the viewport — lock pan on that axis so the user
-  // can only scroll along the flow axis.
+  // can only scroll along the flow axis. Use the visual extent (nodes +
+  // routing + labels) when available so asymmetric edges are centered.
   if (fitZoomLevel && zoom <= fitZoomLevel + 1e-3) {{
+    const vb = _lastDrawnVisualBounds;
+    const cx0 = vb ? Math.min(vb.wx0, wx0) : wx0;
+    const cx1 = vb ? Math.max(vb.wx1, wx1) : wx1;
+    const cy0 = vb ? Math.min(vb.wy0, wy0) : wy0;
+    const cy1 = vb ? Math.max(vb.wy1, wy1) : wy1;
     const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
     if (dir === 'vertical') {{
-      pan.x = (canvasW() - (wx0 + wx1) * zoom) / 2;
+      pan.x = (canvasW() - (cx0 + cx1) * zoom) / 2;
     }} else {{
-      pan.y = (canvasH() - (wy0 + wy1) * zoom) / 2;
+      pan.y = (canvasH() - (cy0 + cy1) * zoom) / 2;
     }}
   }}
 }}
@@ -1938,6 +1974,10 @@ const WHITESPACE_RE = new RegExp('\\\\s+', 'g');
 const JS_EXT_RE = new RegExp('\\\\.(py|js|ts)$');
 
 const NODE_W = 540, NODE_H_BASE = 160, NODE_R = 6;
+// Solo blocks (nodes that live outside any group container) get a bigger
+// minimum footprint so they read as first-class citizens next to the grouped
+// cards — and so their description has room without wrapping too tightly.
+const SOLO_NODE_W = 780, SOLO_NODE_H = 240;
 // Taller nodes need more space — bump repulsion and spring length
 const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
@@ -1959,7 +1999,9 @@ function nodeHeight(n) {{
     : 0;
   // Layout: topPad(12) + title(lines×18) + gap(6) + summary(lines×15) + margin(11) + footer(22)
   const needed = 12 + titleLines * 18 + 6 + summaryLines * 15 + 11 + 22;
-  return Math.max(NODE_H_BASE, needed);
+  const isSolo = !nodeToGroup[n.id];
+  const minH = isSolo ? SOLO_NODE_H : NODE_H_BASE;
+  return Math.max(minH, needed);
 }}
 
 // ── Topology-aware initial placement ─────────────────────────────────────────
@@ -2030,7 +2072,9 @@ nodes.forEach(n => {{
   const m = NODE_METRICS[n.id] || {{}};
   // Width adapts to the title length so text never truncates.
   // Bold 16px ≈ 9px/char; add 70px chrome (left bar + padding).
-  n.w = Math.max(NODE_W, Math.ceil(nodeTitleText(n).length * 9 + 70));
+  const _isSoloInit = !nodeToGroup[n.id];
+  const _minW = _isSoloInit ? SOLO_NODE_W : NODE_W;
+  n.w = Math.max(_minW, Math.ceil(nodeTitleText(n).length * 9 + 70));
   n.h = nodeHeight(n); // dynamic: base + symbols
   n.indegree = m.indegree || 0;
   n.outdegree = m.outdegree || 0;
@@ -2882,6 +2926,22 @@ function draw() {{
   // beyond a few pixels is not. Reset right before the edge draw loop.
   let _drawnSegments = [];
   let _drawnLabels = []; // world-space bboxes of edge labels already placed
+  // Frame-scoped visual extent tracker: grows to include every waypoint and
+  // label bbox we touch, so the next fit computation can honour the real
+  // drawn rectangle rather than just the raw node bboxes.
+  let _frameVis = {{ x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }};
+  function _visExpandPoint(x, y) {{
+    if (x < _frameVis.x0) _frameVis.x0 = x;
+    if (y < _frameVis.y0) _frameVis.y0 = y;
+    if (x > _frameVis.x1) _frameVis.x1 = x;
+    if (y > _frameVis.y1) _frameVis.y1 = y;
+  }}
+  function _visExpandBox(left, top, right, bottom) {{
+    if (left < _frameVis.x0) _frameVis.x0 = left;
+    if (top < _frameVis.y0) _frameVis.y0 = top;
+    if (right > _frameVis.x1) _frameVis.x1 = right;
+    if (bottom > _frameVis.y1) _frameVis.y1 = bottom;
+  }}
   const _OVERLAP_TOL = 6; // world units of collinear overlap we accept
   // True if segment (ax,ay)->(bx,by) shares a collinear run longer than tol
   // with any previously drawn segment. Non-axis-aligned legs are ignored
@@ -3083,6 +3143,9 @@ function draw() {{
     }}
 
     _pushDrawnSegments(waypoints);
+    // Grow frame visual bounds by every waypoint so the next fit includes the
+    // real routing extent (labels get added separately below when placed).
+    for (const wp of waypoints) _visExpandPoint(wp.x, wp.y);
 
     // Shorten endpoints so the line stops at the arrowhead base (not the tip)
     const tipLen = arrowSize * 0.7;
@@ -3229,6 +3292,7 @@ function draw() {{
         top: lyw - thWorld / 2,
         bottom: lyw + thWorld / 2,
       }});
+      _visExpandBox(lxw - twWorld / 2, lyw - thWorld / 2, lxw + twWorld / 2, lyw + thWorld / 2);
       const lsx = lxw * zoom + pan.x, lsy = lyw * zoom + pan.y;
       ctx.fillStyle = '#0d1117cc';
       ctx.beginPath();
@@ -3359,7 +3423,13 @@ function draw() {{
   // Reset any group-child width overrides from the previous frame so standalone
   // elementary blocks (not inside any open group) always use their base NODE_W.
   // Reset group-child width overrides; keep title-based min width for standalone nodes.
-  for (const n of nodes) {{ if (!n.isGroup) {{ n.w = Math.max(NODE_W, Math.ceil(nodeTitleText(n).length * 9 + 70)); n.h = nodeHeight(n); }} }}
+  for (const n of nodes) {{
+    if (n.isGroup) continue;
+    const isSolo = !nodeToGroup[n.id];
+    const minW = isSolo ? SOLO_NODE_W : NODE_W;
+    n.w = Math.max(minW, Math.ceil(nodeTitleText(n).length * 9 + 70));
+    n.h = nodeHeight(n);
+  }}
   let drawNodes;
   const openGroupChildSet = new Set();
   if (groupingState !== 'flat') {{
@@ -3776,6 +3846,20 @@ function draw() {{
   ctx.globalAlpha = 1;
   ctx.restore();
 
+  // Commit frame visual bounds: merge edge/label extent with raw node bounds
+  // so the next fit computation honours the full rendered rectangle.
+  const _nodeListForBounds = (groupingState !== 'flat') ? visibleNodes : nodes;
+  const _nb = graphBounds(_nodeListForBounds);
+  if (_nb) {{
+    _visExpandBox(_nb.wx0, _nb.wy0, _nb.wx1, _nb.wy1);
+  }}
+  if (isFinite(_frameVis.x0) && isFinite(_frameVis.x1)) {{
+    _lastDrawnVisualBounds = {{
+      wx0: _frameVis.x0, wy0: _frameVis.y0,
+      wx1: _frameVis.x1, wy1: _frameVis.y1,
+    }};
+  }}
+
   window.__backButton = null;
 }}
 
@@ -3987,7 +4071,7 @@ canvas.addEventListener('wheel', e => {{
     const wy = (e.offsetY - pan.y) / zoom;
     // Clamp min zoom to the axis-fit level so content can't shrink past the
     // width (vertical flow) or height (horizontal flow) of the viewport.
-    const minZoom = Math.max(0.3, fitZoomLevel || 0.5);
+    const minZoom = fitZoomLevel || 0.3;
     zoom = Math.max(minZoom, Math.min(3.0, zoom * factor));
     pan.x = e.offsetX - wx * zoom;
     pan.y = e.offsetY - wy * zoom;
@@ -4038,36 +4122,39 @@ function selectNode(n) {{
 function renderGroupSidebar(g) {{
   const children = (g.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
   const ranked = rankChildNodes(children);
-  const fileList = ranked.map(c => {{
-    const title = nodeTitleText(c);
-    const desc = c.description ? ` \u2014 ${{compactText(c.description, 60)}}` : '';
-    return `<div class="neighbor" onclick="jumpTo('${{esc(c.id)}}')" style="flex-direction:column;align-items:flex-start;gap:2px">
-      <span style="font-weight:600">${{esc(title)}}</span>
-      <span style="color:#8b949e;font-size:11px">${{esc(c.id)}}${{desc}}</span>
-    </div>`;
-  }}).join('');
+
+  // Row 1: group label · meta · description snippet
+  const metaParts = [g.fileCount + ' file' + (g.fileCount !== 1 ? 's' : '')];
+  if (g.language) metaParts.push(esc(g.language));
+  if (g.kind) metaParts.push(esc(humanizeSemanticKind(g.kind)));
+  const descSnippet = g.description ? compactText(g.description, 80) : '';
+
+  // Row 2: file chips
+  const MAX_FILES = 12;
+  const fileChips = ranked.slice(0, MAX_FILES).map(c =>
+    `<span class="neighbor" onclick="jumpTo('${{esc(c.id)}}')">${{esc(nodeTitleText(c))}}</span>`
+  ).join('');
+  const moreFiles = ranked.length > MAX_FILES
+    ? `<span class="more">+${{ranked.length - MAX_FILES}} more</span>` : '';
 
   sidebar.innerHTML = `
-    <div>
-      <h2>${{esc(g.label)}}</h2>
-      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{g.fileCount}} file${{g.fileCount !== 1 ? 's' : ''}} \u00b7 ${{esc(g.language || '')}}${{g.kind ? ` \u00b7 ${{esc(humanizeSemanticKind(g.kind))}}` : ''}}</div>
+    <div class="sb-row">
+      <span class="sb-title">${{esc(g.label)}}</span>
+      <span class="sb-sep">/</span>
+      <span class="sb-meta">${{metaParts.join(' \u00b7 ')}}</span>
+      ${{descSnippet ? `<span class="sb-vdiv"></span><span class="sb-meta" style="color:#8b949e">${{esc(descSnippet)}}</span>` : ''}}
     </div>
-    ${{g.description ? `<p class="desc">${{esc(g.description)}}</p>` : ''}}
-    <div>
-      <p class="section-title">Files</p>
-      <div style="margin-top:4px">${{fileList}}</div>
+    <div class="sb-row">
+      <span class="sb-label">Files</span>
+      <span class="sb-vdiv"></span>
+      ${{fileChips}}${{moreFiles}}
     </div>
   `;
 }}
 
 function renderDefaultSidebar() {{
-  if (sidebarEnabled) {{
-    sidebar.classList.remove('hidden');
-    sidebar.innerHTML = '<div class="placeholder">Hover or click a block to see details.</div>';
-  }} else {{
-    sidebar.classList.add('hidden');
-    sidebar.innerHTML = '';
-  }}
+  sidebar.classList.remove('hidden');
+  sidebar.innerHTML = '<div class="sb-row"><span class="placeholder">Hover or click a block to see details.</span></div>';
 }}
 
 function metricRow(label, value, color) {{
@@ -4076,82 +4163,59 @@ function metricRow(label, value, color) {{
 }}
 
 function renderSidebar(n) {{
-  // O(1) lookup via pre-built adjacency index instead of O(E) filter.
-  const imports = importsByNode[n.id] || [];
+  const imports    = importsByNode[n.id]  || [];
   const importedBy = importedByNode[n.id] || [];
-  const inCycle = CYCLE_NODES.has(n.id);
-
-  const roleHtml = n.role ? '<span class="role-tag" style="background:' + (ROLE_COLORS[n.role] || '#888') + '30;color:' + (ROLE_COLORS[n.role] || '#888') + '">' + n.role.replace('_', ' ') + '</span>' : '';
-
-  // Top symbols: classes first, then functions, max 6
-  const sortedSymbols = [...n.symbols].sort((a, b) => {{
-    const kindOrder = {{ class: 0, function: 1 }};
-    return (kindOrder[a.kind] ?? 2) - (kindOrder[b.kind] ?? 2);
-  }});
-  const topSymbols = sortedSymbols.slice(0, 6);
-  const symbolHtml = topSymbols.length
-    ? topSymbols.map(s => `<span class="symbol ${{s.kind === 'function' ? 'fn' : s.kind === 'class' ? 'cls' : 'var'}}">${{esc(s.name)}}</span>`).join('')
-      + (n.symbols.length > 6 ? `<span style="color:#6e7681;font-size:11px;margin-left:4px">+${{n.symbols.length - 6}} more</span>` : '')
-    : '';
-
-  const neighborHtml = (list, arrow) => list.slice(0, 8).map(item => {{
-    // O(1) node lookup via nodeIndex instead of O(N) Array.find.
-    const node = nodeIndex[item.id];
-    const label = node ? node.label : item.id.split('/').pop();
-    const cycleFlag = CYCLE_EDGES.has(n.id + '|' + item.id) || CYCLE_EDGES.has(item.id + '|' + n.id)
-      ? ' <span style="color:#f85149;font-size:10px">\u26a0 cycle</span>' : '';
-    return `<div class="neighbor" onclick="jumpTo('${{esc(item.id)}}')">`
-      + `<span class="arrow">${{arrow}}</span>`
-      + `<span>${{esc(label)}}</span>${{cycleFlag}}`
-      + `</div>`;
-  }}).join('') || '<span style="color:#6e7681;font-size:12px">none</span>';
+  const inCycle    = CYCLE_NODES.has(n.id);
 
   const roleLabel = n.role ? n.role.replace(/_/g, ' ') : '';
-  const rolePill = roleLabel ? `<span class="role-tag" style="background:${{ROLE_COLORS[n.role] || '#888'}}30;color:${{ROLE_COLORS[n.role] || '#888'}};margin-left:6px">${{roleLabel}}</span>` : '';
-  const semantic = fileSemantic(n);
-  const semanticPill = semantic.kind
-    ? `<span class="role-tag" style="background:#58a6ff22;color:#79c0ff;margin-left:6px">${{esc(humanizeSemanticKind(semantic.kind))}}</span>`
+  const rolePill  = roleLabel
+    ? `<span class="role-tag" style="background:${{ROLE_COLORS[n.role]||'#888'}}30;color:${{ROLE_COLORS[n.role]||'#888'}}">${{roleLabel}}</span>`
     : '';
+  const semantic  = fileSemantic(n);
+  const kindPill  = semantic.kind
+    ? `<span class="role-tag" style="background:#58a6ff22;color:#79c0ff">${{esc(humanizeSemanticKind(semantic.kind))}}</span>`
+    : '';
+  const cycleFlag = inCycle ? `<span class="cycle-flag">\u26a0 cycle</span>` : '';
 
-  // Code preview panel — first ~50 lines of the file, monospace, line-numbered.
-  // Empty when --no-descriptions wasn't used or when the file couldn't be read.
-  let codePanelHtml = '';
-  if (n.preview) {{
-    // Use String.fromCharCode(10) for newline so the Python template doesn't
-    // turn the embedded \\n into a literal newline, breaking the JS string.
-    const NL = String.fromCharCode(10);
-    const lines = n.preview.split(NL);
-    const numbered = lines.map((line, i) => {{
-      const num = String(i + 1).padStart(3, ' ');
-      return `<span class="ln">${{num}}</span>${{esc(line) || ' '}}`;
-    }}).join(NL);
-    codePanelHtml = `
-      <div>
-        <p class="section-title">Code preview</p>
-        <pre class="code-preview"><code>${{numbered}}</code></pre>
-      </div>
-    `;
-  }}
+  const metaParts = [esc(n.language || ''), (n.size/1024).toFixed(1) + ' KB'].filter(Boolean);
+
+  // Description snippet for row 1 — first 90 chars, far more useful than raw symbol names
+  const descSnippet = n.description ? n.description.replace(WHITESPACE_RE, ' ').trim().slice(0, 90) : '';
+
+  const MAX_NB = 10;
+  const nbChip = (item, arrow) => {{
+    const node  = nodeIndex[item.id];
+    const label = node ? (node.label || node.short_title || item.id.split('/').pop()) : item.id.split('/').pop();
+    const cy    = CYCLE_EDGES.has(n.id+'|'+item.id) || CYCLE_EDGES.has(item.id+'|'+n.id)
+      ? ' <span style="color:#f85149;font-size:9px">\u26a0</span>' : '';
+    return `<span class="neighbor" onclick="jumpTo('${{esc(item.id)}}')">`
+      + `<span class="arrow">${{arrow}}</span>${{esc(label)}}${{cy}}</span>`;
+  }};
+  const ibChips = importedBy.slice(0, MAX_NB).map(i => nbChip(i, '\u2190')).join('');
+  const imChips = imports.slice(0, MAX_NB).map(i => nbChip(i, '\u2192')).join('');
+  const moreIb  = importedBy.length > MAX_NB ? `<span class="more">+${{importedBy.length - MAX_NB}}</span>` : '';
+  const moreIm  = imports.length    > MAX_NB ? `<span class="more">+${{imports.length - MAX_NB}}</span>`    : '';
 
   sidebar.innerHTML = `
-    <div>
-      <h2>${{esc(nodeTitleText(n))}}</h2>
-      <span style="font-size:11px;color:#6e7681;word-break:break-all">${{esc(n.id)}}</span>
-      <div style="margin-top:4px;font-size:11px;color:#6e7681">${{esc(n.language || '')}} \u00b7 ${{(n.size/1024).toFixed(1)}} KB${{rolePill}}${{semanticPill}}</div>
+    <div class="sb-row">
+      <span class="sb-title">${{esc(nodeTitleText(n))}}</span>
+      <span class="sb-sep">/</span>
+      <span class="sb-path">${{esc(n.id)}}</span>
+      <span class="sb-vdiv"></span>
+      <span class="sb-meta">${{metaParts.join(' \u00b7 ')}}</span>
+      ${{rolePill}}${{kindPill}}${{cycleFlag}}
+      ${{descSnippet ? `<span class="sb-vdiv"></span><span class="sb-desc">${{esc(descSnippet)}}</span>` : ''}}
     </div>
-    ${{inCycle ? '<div class="cycle-warning"><strong>\u26a0 In circular dependency</strong></div>' : ''}}
-    ${{n.description ? `<p class="desc">${{esc(n.description)}}</p>` : ''}}
-    <div class="metrics-panel">
-      ${{metricRow('Imported by', n.indegree + ' file' + (n.indegree !== 1 ? 's' : ''))}}
-      ${{metricRow('Imports', n.outdegree + ' file' + (n.outdegree !== 1 ? 's' : ''))}}
-      ${{blastRadiusSet.size > 0 ? metricRow('Blast radius', blastRadiusSet.size + ' files affected', '#f59e0b') : ''}}
+    <div class="sb-row">
+      <span class="sb-label">Imported by (${{importedBy.length}})</span>
+      <span class="sb-vdiv"></span>
+      ${{ibChips || '<span class="more">none</span>'}}${{moreIb}}
+      <span class="sb-vdiv"></span>
+      <span class="sb-label">Imports (${{imports.length}})</span>
+      <span class="sb-vdiv"></span>
+      ${{imChips || '<span class="more">none</span>'}}${{moreIm}}
     </div>
-    ${{symbolHtml ? `<div><p class="section-title">Key Symbols</p><div style="margin-top:6px">${{symbolHtml}}</div></div>` : ''}}
-    ${{imports.length ? `<div><p class="section-title">Imports (${{imports.length}})</p><div style="margin-top:4px">${{neighborHtml(imports, '\u2192')}}</div></div>` : ''}}
-    ${{importedBy.length ? `<div><p class="section-title">Imported by (${{importedBy.length}})</p><div style="margin-top:4px">${{neighborHtml(importedBy, '\u2190')}}</div></div>` : ''}}
-    ${{codePanelHtml}}
   `;
-  // Resize canvas after sidebar appears
 }}
 
 function jumpTo(nodeId) {{
@@ -5058,15 +5122,46 @@ document.addEventListener('keydown', e => {{
 function zoomToFit() {{
   const fitNodes = fitNodesForViewport();
   if (fitNodes.length === 0) return;
-  const bounds = graphBounds(fitNodes);
-  if (!bounds) return;
+  const nodeB = graphBounds(fitNodes);
+  if (!nodeB) return;
   fitZoomLevel = computeFitZoom(canvasW(), canvasH(), fitNodes);
   zoom = fitZoomLevel;
   userZoomScale = 1;
-  pan.x = canvasW() / 2 - ((bounds.wx0 + bounds.wx1) / 2) * zoom;
-  pan.y = canvasH() / 2 - ((bounds.wy0 + bounds.wy1) / 2) * zoom;
+  // Center on the real drawn extent (nodes + routing + labels) so asymmetric
+  // edge detours don't push content off-screen. Falls back to node bounds on
+  // the very first frame before _lastDrawnVisualBounds is populated.
+  const vb = _lastDrawnVisualBounds;
+  const b = vb ? {{
+    wx0: Math.min(vb.wx0, nodeB.wx0),
+    wy0: Math.min(vb.wy0, nodeB.wy0),
+    wx1: Math.max(vb.wx1, nodeB.wx1),
+    wy1: Math.max(vb.wy1, nodeB.wy1),
+  }} : nodeB;
+  pan.x = canvasW() / 2 - ((b.wx0 + b.wx1) / 2) * zoom;
+  pan.y = canvasH() / 2 - ((b.wy0 + b.wy1) / 2) * zoom;
   viewportWasManuallyMoved = false;
   draw();
+  // Fixed-point iteration: each draw may shift zoom slightly, which changes
+  // the world-space footprint of zoom-invariant labels (tw/zoom), which in
+  // turn changes the next fit. Loop until fit stabilises — usually 2-3
+  // passes — so labels never clip even after the layout settles.
+  for (let i = 0; i < 5; i++) {{
+    if (!_lastDrawnVisualBounds) break;
+    const fitN = computeFitZoom(canvasW(), canvasH(), fitNodes);
+    const vbN = _lastDrawnVisualBounds;
+    const panX = canvasW() / 2 - ((vbN.wx0 + vbN.wx1) / 2) * fitN;
+    const panY = canvasH() / 2 - ((vbN.wy0 + vbN.wy1) / 2) * fitN;
+    const converged =
+      Math.abs(fitN - fitZoomLevel) < 1e-4 &&
+      Math.abs(panX - pan.x) < 0.5 &&
+      Math.abs(panY - pan.y) < 0.5;
+    fitZoomLevel = fitN;
+    zoom = fitN;
+    pan.x = panX;
+    pan.y = panY;
+    draw();
+    if (converged) break;
+  }}
 }}
 
 // ── Help overlay ──────────────────────────────────────────────────────────────

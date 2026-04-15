@@ -3978,14 +3978,6 @@ function nodeAt(wx, wy) {{
 
 function runSingleNodeClick(node) {{
   if (!node) return;
-  if (node.isGroup && groupingState !== 'flat') {{
-    selectedNode = null;
-    highlightSet = null;
-    blastRadiusSet = new Set();
-    if (sidebarEnabled) renderGroupSidebar(node);
-    draw();
-    return;
-  }}
   selectNode(node);
 }}
 
@@ -4147,23 +4139,53 @@ canvas.addEventListener('wheel', e => {{
 function selectNode(n) {{
   selectedNode = selectedNode === n ? null : n;
   if (selectedNode) {{
-    highlightSet = nhopNeighborhood(n.id, 1);
-    // Add parent group IDs so group-level nodes + edges light up
-    for (const id of [...highlightSet]) {{
-      const gid = nodeToGroup[id];
-      if (gid) highlightSet.add(gid);
-    }}
-    // Add groups connected to the focal group via inter-group edges
-    const myGroup = nodeToGroup[n.id];
-    if (myGroup) {{
+    if (n.isGroup) {{
+      // Clicking a group lights up: the group itself, every child inside it,
+      // every file-level neighbor of any child (i.e. the specific elementary
+      // blocks actually linked across groups), and the parent groups of those
+      // neighbors so the directly-connected group blocks also read as lit.
+      highlightSet = new Set([n.id]);
+      const childIds = (n.childIds || []);
+      childIds.forEach(id => highlightSet.add(id));
+      for (const cid of childIds) {{
+        const nbrs = nhopNeighborhood(cid, 1);
+        for (const id of nbrs) {{
+          highlightSet.add(id);
+          const gid = nodeToGroup[id];
+          if (gid) highlightSet.add(gid);
+        }}
+      }}
+      // Also add groups connected via inter-group visible edges (catches cases
+      // where the group-level edge exists even if no file-level edge survived
+      // the visible-node filter).
       for (const ve of visibleEdges) {{
         const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
-        if (sid === myGroup) highlightSet.add(tid);
-        if (tid === myGroup) highlightSet.add(sid);
+        if (sid === n.id) highlightSet.add(tid);
+        if (tid === n.id) highlightSet.add(sid);
       }}
+      blastRadiusSet = new Set();
+    }} else {{
+      highlightSet = nhopNeighborhood(n.id, 1);
+      // Add parent group IDs so group-level nodes + edges light up
+      for (const id of [...highlightSet]) {{
+        const gid = nodeToGroup[id];
+        if (gid) highlightSet.add(gid);
+      }}
+      // Add groups connected to the focal group via inter-group edges
+      const myGroup = nodeToGroup[n.id];
+      if (myGroup) {{
+        for (const ve of visibleEdges) {{
+          const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
+          if (sid === myGroup) highlightSet.add(tid);
+          if (tid === myGroup) highlightSet.add(sid);
+        }}
+      }}
+      blastRadiusSet = computeBlastRadius(n.id);
     }}
-    blastRadiusSet = computeBlastRadius(n.id);
-    if (sidebarEnabled) renderSidebar(n);
+    if (sidebarEnabled) {{
+      if (n.isGroup) renderGroupSidebar(n);
+      else renderSidebar(n);
+    }}
   }} else {{
     highlightSet = null;
     blastRadiusSet = new Set();

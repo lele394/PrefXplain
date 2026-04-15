@@ -1046,8 +1046,8 @@ function layoutBlockRows(rows) {{
 
   // Vertical flow: flow axis is vertical, so stretch ROW_GAP — content can
   // scroll vertically and edge labels between layers get more breathing room.
-  const ROW_GAP = Math.max(460, 460 * spreadFactor);
-  const COL_GAP = Math.max(180, 180 * spreadFactor);
+  const ROW_GAP = Math.max(320, 320 * spreadFactor);
+  const COL_GAP = Math.max(130, 130 * spreadFactor);
   const rowHeights = nonEmpty.map(row => Math.max(...row.map(n => n.h)));
   const rowWidths = nonEmpty.map(row =>
     row.reduce((sum, n) => sum + n.w, 0) + Math.max(0, row.length - 1) * COL_GAP
@@ -1076,8 +1076,8 @@ function layoutBlockColumns(columns) {{
 
   // Horizontal flow: flow axis is horizontal, so stretch COLUMN_GAP — content
   // can scroll horizontally and edge labels between layers get breathing room.
-  const COLUMN_GAP = Math.max(560, 560 * spreadFactor);
-  const ROW_GAP = Math.max(180, 180 * spreadFactor);
+  const COLUMN_GAP = Math.max(400, 400 * spreadFactor);
+  const ROW_GAP = Math.max(130, 130 * spreadFactor);
   const widths = nonEmpty.map(col => Math.max(...col.map(n => n.w)));
   const heights = nonEmpty.map(col => col.reduce((sum, n) => sum + n.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
   const totalWidth = widths.reduce((sum, width) => sum + width, 0) + Math.max(0, widths.length - 1) * COLUMN_GAP;
@@ -2011,7 +2011,7 @@ const NODE_W = 540, NODE_H_BASE = 160, NODE_R = 6;
 // Solo blocks (nodes that live outside any group container) get a bigger
 // minimum footprint so they read as first-class citizens next to the grouped
 // cards — and so their description has room without wrapping too tightly.
-const SOLO_NODE_W = 780, SOLO_NODE_H = 240;
+const SOLO_NODE_W = 1404, SOLO_NODE_H = 432;
 // Taller nodes need more space — bump repulsion and spring length
 const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
@@ -3781,6 +3781,20 @@ function draw() {{
     // ── Standard file card: title + optional description + footer ─────────
     // Top of text content in screen px (NODE_R * zoom = border radius in screen px)
     let curY = screenY - screenH / 2 + NODE_R * zoom + 6;
+
+    // Solo blocks: vertically center the title + description block so the
+    // text sits in the middle of the (now larger) card instead of hugging
+    // the top edge. Footer stays pinned at the bottom as usual.
+    if (soloBlock && !compactCard) {{
+      const titleBlockH = titleLines.length * 18;
+      const summaryBlockH = summaryLines.length > 0 ? 6 + summaryLines.length * 15 : 0;
+      const contentH = titleBlockH + summaryBlockH;
+      const footerReserve = 22;
+      const availTop = screenY - screenH / 2 + NODE_R * zoom + 6;
+      const availBottom = screenY + screenH / 2 - footerReserve;
+      const availCenter = (availTop + availBottom) / 2;
+      curY = Math.max(availTop, availCenter - contentH / 2);
+    }}
 
     // Title line(s)
     ctx.fillStyle = textColor;
@@ -5562,8 +5576,8 @@ if (minimap) {{ minimap.width = 160; minimap.height = 100; }}
         // isSingletonGroup branch in draw()), so use standard node
         // dimensions. We still inherit the child's shape so the block
         // looks semantically the same as the file it wraps.
-        g.w = NODE_W;
-        g.h = NODE_H_BASE;
+        g.w = SOLO_NODE_W;
+        g.h = SOLO_NODE_H;
         g._closedW = g.w;
         g._closedH = g.h;
         if (child) g.shape = child.shape || child.kind || g.shape;

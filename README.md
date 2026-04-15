@@ -39,7 +39,10 @@ Free. MIT. Fork it, improve it, make it yours.
 
 ## See it
 
-![PrefXplain — interactive architecture map of a codebase](docs/images/diagram.png)
+![PrefXplain open side-by-side with Claude Code inside VS Code](docs/images/hero-split.png)
+
+*PrefXplain on the left, Claude Code on the right. Architecture stays
+visible while your agent codes. No alt-tab, no context loss.*
 
 Every block is a file or an architectural group. Click to see the
 description, the blast radius, the imports, and the actual logic as a
@@ -70,7 +73,7 @@ Open Claude Code (or Codex) inside any repo and type:
 /prefxplain
 ```
 
-![/prefxplain running inside Claude Code](docs/images/claude-code-terminal.png)
+![The /prefxplain slash-command showing up inside Claude Code](docs/images/slash-command.png)
 
 The agent reads your files, groups them into architectural blocks, writes
 a short description for each, and opens an interactive diagram in an IDE
@@ -90,6 +93,16 @@ If you'd rather call a model directly (CI, automation, headless), set
 - **Blast radius on click** — select any file and see every file that breaks if you change it, highlighted in amber.
 - **Semantic search** — type `auth` or `database` and it matches descriptions, not just filenames.
 - **Flowcharts** — double-click a file to see its real logic as a flowchart.
+
+![Clicking a block highlights its blast radius and shows the description on hover](docs/images/blast-radius.png)
+
+*Click any block: neighbors fade, dependency edges light up with labels,
+and a hover reveals the plain-English description.*
+
+![Double-clicking a file opens its real logic as a flowchart](docs/images/flowchart-popup.png)
+
+*Double-click to see the actual control flow of a file — start, decisions,
+steps, end. Not a generic diagram, the real shape of the code.*
 
 Everything is in a single self-contained HTML file. No server, no CDN, no
 JavaScript dependencies, no upload. Safe to share with anyone.

@@ -115,7 +115,7 @@ class TestRenderer:
 
     def test_layout_supports_vertical_shrink(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
-        assert ":root { --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 200px; }" in html
+        assert ":root { --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 68px; }" in html
         assert "body { font-family:" in html
         assert "display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height);" in html
         assert "#left-panel { width: 100%; height: calc(var(--top-panel-header-height) + var(--top-details-height)); max-height: calc(var(--top-panel-header-height) + var(--top-details-height));" in html
@@ -123,9 +123,9 @@ class TestRenderer:
         assert "#center { flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: 0; overflow: hidden; }" in html
         assert "#graph-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }" in html
         assert "#sidebar { flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height);" in html
-        assert "#sidebar > * { flex-shrink: 0; }" in html
+        assert "#sidebar .sb-row { display: flex; align-items: center;" in html
         assert "body.panel-resizing { cursor: ns-resize; }" in html
-        assert "max-height: min(360px, 34vh);" in html
+        assert "max-height: calc(var(--viewport-height) - 72px);" in html
 
     def test_resize_tracks_graph_container(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
@@ -222,7 +222,7 @@ class TestRenderer:
         assert "return n.short_title || derivedNodeTitle(n);" in html
         assert "const nodeShape = semantic.shape || n.shape || n.kind || 'process';" in html
         assert "traceBlockShape(ctx, x, y, nw, nh, nodeShape, NODE_R);" in html
-        assert "ctx.fillText(nodeTitleText(n), n.x * zoom + pan.x, n.y * zoom + pan.y);" in html
+        assert "const titleText = nodeTitleText(n);" in html
 
     def test_double_click_opens_workflow_overlay(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
@@ -280,5 +280,5 @@ class TestRenderer:
         assert "if (children.length <= 4) {" in html
         assert ".slice(0, 5)" in html
         # Groups get bumped container dimensions so there's room for the row.
-        assert "group.w = 360;" in html
-        assert "group.h = 210;" in html
+        assert "group.w = Math.max(420," in html
+        assert "group.h = 230;" in html

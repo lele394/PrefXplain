@@ -16,9 +16,15 @@ All notable changes to PrefXplain are documented here.
 - **Open group cell width**: cell width inside open groups now dynamically widens to fit the longest title without truncation (capped at 2× `NODE_W`)
 - **Group block width**: closed group block width scales with label length to prevent title truncation
 
+### Added
+- **VS Code Dark+ code preview**: clicking a node expands the sidebar to show syntax-highlighted source code; keywords, strings, comments, numbers, types, and functions each get their own VS Code color; supports Python, TypeScript, JavaScript, Go, Rust, Java, and Kotlin
+- **Description snippet in sidebar**: the sidebar now shows the first 90 characters of the file's natural-language description instead of raw symbol names like `to_dict` or `CapabilityProfile`
+- **Group header legibility**: closed group headers use a single uniform font size across kind label, file count, and title — cleaner than the previous proportional sizing
+
 ### Changed
 - **Lane corridor spacing** (`LANE_SPREAD`): increased from 18 → 65 world units so parallel arrow corridors are visually well-separated at all zoom levels
 - Hover tooltip button added to toolbar (`Hover: On/Off`); details sidebar button removed
+- **Sidebar default height**: reduced to 68px (collapsed state); expands to 260px when a node with a code preview is selected
 
 ---
 

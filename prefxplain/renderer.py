@@ -146,6 +146,9 @@ _HTML_TEMPLATE = """\
   #sidebar .role-tag {{ display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }}
   #sidebar .cycle-flag {{ color: #f85149; font-size: 10px; flex-shrink: 0; }}
   #sidebar .more {{ color: #6e7681; font-size: 11px; flex-shrink: 0; }}
+  #sidebar .sb-code {{ flex: 1; min-height: 0; overflow-y: auto; margin: 0 -12px 0; background: #1e1e1e; }}
+  #sidebar .sb-code pre {{ font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 11px; line-height: 1.6; color: #d4d4d4; white-space: pre; padding: 8px 0; background: #1e1e1e; }}
+  #sidebar .sb-code .ln {{ color: #3c3c3c; user-select: none; display: inline-block; min-width: 40px; text-align: right; padding-right: 16px; border-right: 1px solid #2d2d2d; margin-right: 14px; }}
   body.panel-resizing {{ cursor: ns-resize; }}
 </style>
 </head>
@@ -3522,28 +3525,31 @@ function draw() {{
           // render in the body where child card backgrounds cover it.
           ctx.rect(sx - sw/2 + 2, sy + 1, sw - 4, hh - 2);
           ctx.clip();
-          // Proportional font sizes and positions within the real header height.
+          // Single uniform font size for kind / file count / title.
+          // Floor is tuned for worst-case zoom-out legibility; cap keeps big
+          // headers from looking cartoonish. Same size for all three labels.
           const kindLabel = humanizeSemanticKind(n.kind || n.shape || 'process').toUpperCase();
-          const kindFont = Math.max(7, Math.min(11, Math.floor(hh * 0.18)));
-          const titleFont = Math.max(9, Math.min(16, Math.floor(hh * 0.28)));
-          const kindY = sy + Math.max(2, Math.floor(hh * 0.10));
-          const titleY = kindY + kindFont + Math.max(2, Math.floor(hh * 0.06));
-          ctx.font = `bold ${{kindFont}}px -apple-system, sans-serif`;
+          const labelFont = Math.max(13, Math.min(20, Math.floor(hh * 0.24)));
+          const padX = 16;
+          const topY = sy + Math.max(6, Math.floor(hh * 0.14));
+          const bottomY = sy + hh - Math.max(6, Math.floor(hh * 0.14)) - labelFont;
+          ctx.textBaseline = 'top';
+          // Top-left: type
+          ctx.font = `bold ${{labelFont}}px -apple-system, sans-serif`;
           ctx.fillStyle = gc + 'cc';
           ctx.textAlign = 'left';
-          ctx.textBaseline = 'top';
-          ctx.fillText(kindLabel, sx - sw/2 + 12, kindY);
-          // File count — top-right of header, same row as kind label
-          ctx.font = `${{kindFont}}px -apple-system, sans-serif`;
+          ctx.fillText(kindLabel, sx - sw/2 + padX, topY);
+          // Top-right: file count
+          ctx.font = `bold ${{labelFont}}px -apple-system, sans-serif`;
           ctx.fillStyle = gc + 'aa';
           ctx.textAlign = 'right';
-          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx + sw/2 - 12, kindY);
-          // Group label — only render if it fits within the header
-          if (titleY + titleFont < sy + hh) {{
-            ctx.font = `bold ${{titleFont}}px -apple-system, sans-serif`;
+          ctx.fillText(n.fileCount + (n.fileCount === 1 ? ' file' : ' files'), sx + sw/2 - padX, topY);
+          // Bottom-left: title
+          if (bottomY > topY + labelFont) {{
+            ctx.font = `bold ${{labelFont}}px -apple-system, sans-serif`;
             ctx.fillStyle = '#e6edf3';
             ctx.textAlign = 'left';
-            ctx.fillText(n.label, sx - sw/2 + 12, titleY);
+            ctx.fillText(n.label, sx - sw/2 + padX, bottomY);
           }}
           ctx.restore(); // end header clip
           ctx.restore();
@@ -4119,6 +4125,145 @@ function selectNode(n) {{
   drawMinimap();
 }}
 
+// ── Syntax highlighter (VS Code Dark+ palette) ─────────────────────────────
+function hesc(s) {{
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}}
+
+function syntaxHighlight(line, lang) {{
+  const L = (lang || '').toLowerCase();
+  const isPy   = L === 'python';
+  const isTS   = L === 'typescript';
+  const isJS   = L === 'javascript' || isTS;
+  const isGo   = L === 'go';
+  const isRust = L === 'rust';
+  const isJava = L === 'java' || L === 'kotlin';
+
+  const KW = {{
+    python: new Set(['False','None','True','and','as','assert','async','await','break',
+      'class','continue','def','del','elif','else','except','finally','for','from',
+      'global','if','import','in','is','lambda','nonlocal','not','or','pass','raise',
+      'return','self','try','while','with','yield']),
+    ts: new Set(['abstract','as','async','await','break','case','catch','class','const',
+      'continue','declare','default','delete','do','else','enum','export','extends',
+      'finally','for','from','function','if','implements','import','in','instanceof',
+      'interface','let','namespace','new','of','override','private','protected',
+      'public','readonly','return','static','super','switch','this','throw','try',
+      'type','typeof','var','void','while','yield']),
+    js: new Set(['async','await','break','case','catch','class','const','continue',
+      'default','delete','do','else','export','extends','finally','for','from',
+      'function','if','import','in','instanceof','let','new','of','return','static',
+      'super','switch','this','throw','try','typeof','var','void','while','yield']),
+    go: new Set(['break','case','chan','const','continue','default','defer','else',
+      'fallthrough','for','func','go','goto','if','import','interface','map',
+      'package','range','return','select','struct','switch','type','var']),
+    rust: new Set(['as','async','await','break','const','continue','crate','dyn','else',
+      'enum','extern','false','fn','for','if','impl','in','let','loop','match',
+      'mod','move','mut','pub','ref','return','self','Self','static','struct',
+      'super','trait','true','type','unsafe','use','where','while']),
+    java: new Set(['abstract','assert','boolean','break','byte','case','catch','char',
+      'class','const','continue','default','do','double','else','enum','extends',
+      'final','finally','float','for','goto','if','implements','import','instanceof',
+      'int','interface','long','native','new','package','private','protected',
+      'public','return','short','static','super','switch','synchronized','this',
+      'throw','throws','transient','try','var','void','volatile','while']),
+  }};
+
+  const kwSet = KW[isPy ? 'python' : isTS ? 'ts' : isJS ? 'js' : isGo ? 'go' : isRust ? 'rust' : isJava ? 'java' : ''] || new Set();
+
+  let out = '';
+  let i = 0;
+  const s = line;
+  const n = s.length;
+
+  while (i < n) {{
+    const c = s[i];
+
+    // Python comment
+    if (isPy && c === '#') {{
+      out += `<span style="color:#6a9955;font-style:italic">${{hesc(s.slice(i))}}</span>`;
+      break;
+    }}
+    // Line comment //
+    if (!isPy && c === '/' && s[i+1] === '/') {{
+      out += `<span style="color:#6a9955;font-style:italic">${{hesc(s.slice(i))}}</span>`;
+      break;
+    }}
+    // Block comment /* ... */
+    if (!isPy && c === '/' && s[i+1] === '*') {{
+      const e = s.indexOf('*/', i+2);
+      const end = e === -1 ? n : e + 2;
+      out += `<span style="color:#6a9955;font-style:italic">${{hesc(s.slice(i, end))}}</span>`;
+      i = end; continue;
+    }}
+    // Triple-quoted string (Python) — built at runtime to avoid closing the Python template string
+    if (isPy && (s.slice(i,i+3) === '"'.repeat(3) || s.slice(i,i+3) === "'".repeat(3))) {{
+      const q = s.slice(i,i+3);
+      const e = s.indexOf(q, i+3);
+      const end = e === -1 ? n : e + 3;
+      out += `<span style="color:#ce9178">${{hesc(s.slice(i, end))}}</span>`;
+      i = end; continue;
+    }}
+    // String with optional Python prefix (f/r/b/u)
+    if (c === '"' || c === "'" ||
+        (isPy && /[fFrRbBuU]/.test(c) && (s[i+1] === '"' || s[i+1] === "'"))) {{
+      const start = i;
+      if (c !== '"' && c !== "'") i++;
+      const q = s[i];
+      let j = i + 1;
+      while (j < n && s[j] !== q) {{ if (s[j] === '\\\\') j++; j++; }}
+      if (j < n) j++;
+      out += `<span style="color:#ce9178">${{hesc(s.slice(start, j))}}</span>`;
+      i = j; continue;
+    }}
+    // Template literal
+    if (!isPy && c === '`') {{
+      let j = i + 1;
+      while (j < n && s[j] !== '`') {{ if (s[j] === '\\\\') j++; j++; }}
+      if (j < n) j++;
+      out += `<span style="color:#ce9178">${{hesc(s.slice(i, j))}}</span>`;
+      i = j; continue;
+    }}
+    // Number
+    if (/[0-9]/.test(c) && (i === 0 || !/[a-zA-Z_]/.test(s[i-1]))) {{
+      let j = i;
+      while (j < n && /[0-9a-fA-FxXoObB._]/.test(s[j])) j++;
+      out += `<span style="color:#b5cea8">${{hesc(s.slice(i, j))}}</span>`;
+      i = j; continue;
+    }}
+    // Decorator @name
+    if (c === '@' && i+1 < n && /[a-zA-Z_]/.test(s[i+1])) {{
+      let j = i + 1;
+      while (j < n && /[a-zA-Z0-9_.]/.test(s[j])) j++;
+      out += `<span style="color:#c586c0">${{hesc(s.slice(i, j))}}</span>`;
+      i = j; continue;
+    }}
+    // Identifier → keyword / PascalCase type / function call / plain
+    if (/[a-zA-Z_]/.test(c)) {{
+      let j = i;
+      while (j < n && /[a-zA-Z0-9_]/.test(s[j])) j++;
+      const word = s.slice(i, j);
+      let peek = j;
+      while (peek < n && (s[peek] === ' ' || s[peek] === '\t')) peek++;
+      if (kwSet.has(word)) {{
+        out += `<span style="color:#569cd6">${{hesc(word)}}</span>`;
+      }} else if (/^[A-Z]/.test(word) && word !== word.toUpperCase()) {{
+        out += `<span style="color:#4ec9b0">${{hesc(word)}}</span>`;
+      }} else if (s[peek] === '(') {{
+        out += `<span style="color:#dcdcaa">${{hesc(word)}}</span>`;
+      }} else {{
+        out += hesc(word);
+      }}
+      i = j; continue;
+    }}
+
+    out += hesc(c);
+    i++;
+  }}
+  return out;
+}}
+// ── End syntax highlighter ─────────────────────────────────────────────────
+
 function renderGroupSidebar(g) {{
   const children = (g.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
   const ranked = rankChildNodes(children);
@@ -4137,6 +4282,8 @@ function renderGroupSidebar(g) {{
   const moreFiles = ranked.length > MAX_FILES
     ? `<span class="more">+${{ranked.length - MAX_FILES}} more</span>` : '';
 
+  sidebar.style.flexBasis = '68px';
+  sidebar.style.maxHeight = '68px';
   sidebar.innerHTML = `
     <div class="sb-row">
       <span class="sb-title">${{esc(g.label)}}</span>
@@ -4153,6 +4300,8 @@ function renderGroupSidebar(g) {{
 }}
 
 function renderDefaultSidebar() {{
+  sidebar.style.flexBasis = '68px';
+  sidebar.style.maxHeight = '68px';
   sidebar.classList.remove('hidden');
   sidebar.innerHTML = '<div class="sb-row"><span class="placeholder">Hover or click a block to see details.</span></div>';
 }}
@@ -4196,6 +4345,22 @@ function renderSidebar(n) {{
   const moreIb  = importedBy.length > MAX_NB ? `<span class="more">+${{importedBy.length - MAX_NB}}</span>` : '';
   const moreIm  = imports.length    > MAX_NB ? `<span class="more">+${{imports.length - MAX_NB}}</span>`    : '';
 
+  // Build code preview block if available
+  let codeBlockHtml = '';
+  if (n.preview) {{
+    const NL = String.fromCharCode(10);
+    const lines = n.preview.split(NL);
+    const numbered = lines.map((line, i) =>
+      `<span class="ln">${{String(i + 1).padStart(3, ' ')}}</span>${{syntaxHighlight(line, n.language) || ' '}}`
+    ).join(NL);
+    codeBlockHtml = `<div class="sb-code"><pre><code>${{numbered}}</code></pre></div>`;
+  }}
+
+  // Expand bar height to fit code preview, collapse back to compact when none
+  const expandedH = n.preview ? '260px' : '68px';
+  sidebar.style.flexBasis = expandedH;
+  sidebar.style.maxHeight = expandedH;
+
   sidebar.innerHTML = `
     <div class="sb-row">
       <span class="sb-title">${{esc(nodeTitleText(n))}}</span>
@@ -4215,6 +4380,7 @@ function renderSidebar(n) {{
       <span class="sb-vdiv"></span>
       ${{imChips || '<span class="more">none</span>'}}${{moreIm}}
     </div>
+    ${{codeBlockHtml}}
   `;
 }}
 

@@ -33,6 +33,8 @@ Free. MIT. Fork it, improve it, make it yours.
 - **Devs steering a coding agent** and tired of reviewing diffs blind
 - **Tech leads onboarding onto a repo** they didn't write
 
+**Lives inside your IDE.** `/prefxplain` opens the diagram in a preview tab right next to your agent — VS Code, Cursor, Windsurf, Antigravity, whatever. Architecture map on the left, Claude Code (or Codex) on the right. No window swapping, no context loss. (Prefer a browser? The HTML works standalone too.)
+
 ---
 
 ## See it

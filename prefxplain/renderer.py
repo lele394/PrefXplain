@@ -2977,38 +2977,124 @@ function draw() {{
   // already claimed that slot.
   let _sideSlotReservations = new Map();
   const _SIDE_SLOT_SPACING = 65;
+  const _SLOT_ANGLE_GAP = Math.PI * 35 / 180; // edges sharing a slot must diverge by ≥35°
   function _sideSlots(blockId) {{
     let rec = _sideSlotReservations.get(blockId);
     if (!rec) {{
-      rec = {{ top: new Set(), bottom: new Set(), left: new Set(), right: new Set() }};
+      // key "side:slot" -> array of outgoing angles already committed.
+      rec = new Map();
       _sideSlotReservations.set(blockId, rec);
     }}
     return rec;
   }}
-  // Return side/slot/point — midpoint of the facing side, with slot 0
-  // as first choice and alternating fallback. Marks the slot used.
-  function reserveMidpointAnchor(box, otherCX, otherCY, blockId) {{
-    const dx = otherCX - box.x, dy = otherCY - box.y;
-    const adx = Math.abs(dx), ady = Math.abs(dy);
-    let side;
-    if (adx * box.h > ady * box.w) side = dx >= 0 ? 'right' : 'left';
-    else side = dy >= 0 ? 'bottom' : 'top';
-    const slots = _sideSlots(blockId)[side];
-    let slot = 0;
-    if (slots.has(0)) {{
-      for (let k = 1; k < 16; k++) {{
-        if (!slots.has(k)) {{ slot = k; break; }}
-        if (!slots.has(-k)) {{ slot = -k; break; }}
-      }}
+  function _slotAvailable(rec, key, angle) {{
+    const list = rec.get(key);
+    if (!list || list.length === 0) return true;
+    for (const a of list) {{
+      let diff = Math.abs(angle - a);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+      if (diff < _SLOT_ANGLE_GAP) return false;
     }}
-    slots.add(slot);
+    return true;
+  }}
+  function _slotCommit(rec, key, angle) {{
+    let list = rec.get(key);
+    if (!list) {{ list = []; rec.set(key, list); }}
+    list.push(angle);
+  }}
+  // Proper segment-segment intersection (strict — shared endpoints ignored).
+  function _segmentsCross(ax, ay, bx, by, cx, cy, dx_, dy_) {{
+    const eps = 1e-6;
+    // Ignore if any endpoint is shared (adjacent segments at an anchor).
+    const samePt = (px, py, qx, qy) => Math.abs(px - qx) < 0.5 && Math.abs(py - qy) < 0.5;
+    if (samePt(ax, ay, cx, cy) || samePt(ax, ay, dx_, dy_)
+        || samePt(bx, by, cx, cy) || samePt(bx, by, dx_, dy_)) return false;
+    const d1 = (dx_ - cx) * (ay - cy) - (dy_ - cy) * (ax - cx);
+    const d2 = (dx_ - cx) * (by - cy) - (dy_ - cy) * (bx - cx);
+    const d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    const d4 = (bx - ax) * (dy_ - ay) - (by - ay) * (dx_ - ax);
+    return ((d1 > eps && d2 < -eps) || (d1 < -eps && d2 > eps))
+        && ((d3 > eps && d4 < -eps) || (d3 < -eps && d4 > eps));
+  }}
+  function _countCrossings(sx, sy, ex, ey) {{
+    let n = 0;
+    for (const s of _drawnEdgeSegmentsAll) {{
+      if (_segmentsCross(sx, sy, ex, ey, s.x1, s.y1, s.x2, s.y2)) n++;
+    }}
+    return n;
+  }}
+  function _anchorFromSideSlot(box, side, slot) {{
     const off = slot * _SIDE_SLOT_SPACING;
     const hw = box.w / 2 - 10;
     const hh = box.h / 2 - 10;
-    if (side === 'right') return {{ side, slot, x: box.x + box.w / 2 + 2, y: box.y + Math.max(-hh, Math.min(hh, off)) }};
-    if (side === 'left')  return {{ side, slot, x: box.x - box.w / 2 - 2, y: box.y + Math.max(-hh, Math.min(hh, off)) }};
+    if (side === 'right')  return {{ side, slot, x: box.x + box.w / 2 + 2, y: box.y + Math.max(-hh, Math.min(hh, off)) }};
+    if (side === 'left')   return {{ side, slot, x: box.x - box.w / 2 - 2, y: box.y + Math.max(-hh, Math.min(hh, off)) }};
     if (side === 'bottom') return {{ side, slot, x: box.x + Math.max(-hw, Math.min(hw, off)), y: box.y + box.h / 2 + 2 }};
     return {{ side, slot, x: box.x + Math.max(-hw, Math.min(hw, off)), y: box.y - box.h / 2 - 2 }};
+  }}
+  // Enumerate anchor candidates on the two quadrant sides, priority-ordered.
+  // Does NOT commit — caller decides which to pick based on crossing count.
+  function enumerateAnchorCandidates(box, otherCX, otherCY) {{
+    const dx = otherCX - box.x, dy = otherCY - box.y;
+    const horizSide = dx >= 0 ? 'right' : 'left';
+    const vertSide  = dy >= 0 ? 'bottom' : 'top';
+    const horizPull = Math.abs(dx) * box.h;
+    const vertPull  = Math.abs(dy) * box.w;
+    const sides = horizPull >= vertPull ? [horizSide, vertSide] : [vertSide, horizSide];
+    const out = [];
+    let pri = 0;
+    for (const side of sides) out.push({{ ..._anchorFromSideSlot(box, side, 0), priority: pri++ }});
+    for (let k = 1; k < 5; k++) {{
+      for (const sign of [1, -1]) {{
+        for (const side of sides) out.push({{ ..._anchorFromSideSlot(box, side, sign * k), priority: pri++ }});
+      }}
+    }}
+    return out;
+  }}
+  // Return side/slot/point. Two candidate sides are considered (the two
+  // sides of the quadrant the peer lives in), prioritising the side whose
+  // axis matches the dominant direction component. Slot 0 (midpoint) is
+  // tried first. Sharing a slot is allowed if the outgoing angle diverges
+  // from every previously committed angle at that slot by ≥35°: two arrows
+  // fanning out in different directions can leave the same anchor without
+  // overlap. Only when angles would collide do we fall back to slot ±1/±2…
+  function reserveMidpointAnchor(box, otherCX, otherCY, blockId) {{
+    const dx = otherCX - box.x, dy = otherCY - box.y;
+    const myAngle = Math.atan2(dy, dx);
+    const horizSide = dx >= 0 ? 'right' : 'left';
+    const vertSide  = dy >= 0 ? 'bottom' : 'top';
+    const horizPull = Math.abs(dx) * box.h;
+    const vertPull  = Math.abs(dy) * box.w;
+    const candidates = horizPull >= vertPull
+      ? [horizSide, vertSide]
+      : [vertSide, horizSide];
+    const rec = _sideSlots(blockId);
+    const tryCommit = (side, slot) => {{
+      const key = side + ':' + slot;
+      if (_slotAvailable(rec, key, myAngle)) {{
+        _slotCommit(rec, key, myAngle);
+        return _anchorFromSideSlot(box, side, slot);
+      }}
+      return null;
+    }};
+    // Pass 1: slot 0 on either candidate side, sharing allowed if angles diverge.
+    for (const side of candidates) {{
+      const anchor = tryCommit(side, 0);
+      if (anchor) return anchor;
+    }}
+    // Pass 2: fan out ±k, alternating sides.
+    for (let k = 1; k < 16; k++) {{
+      for (const sign of [1, -1]) {{
+        for (const side of candidates) {{
+          const anchor = tryCommit(side, sign * k);
+          if (anchor) return anchor;
+        }}
+      }}
+    }}
+    // Final fallback — force slot 0 on the priority side.
+    const side = candidates[0];
+    _slotCommit(rec, side + ':0', myAngle);
+    return _anchorFromSideSlot(box, side, 0);
   }}
   // Frame-scoped visual extent tracker: grows to include every waypoint and
   // label bbox we touch, so the next fit computation can honour the real
@@ -3105,13 +3191,39 @@ function draw() {{
       return false;
     }};
     if (blockers.length === 0) {{
-      // Straight: anchor at the midpoint of the side facing the peer, with
-      // slot-based fallback when the midpoint is already claimed by an
-      // earlier edge this frame. Guarantees no two arrows exit/enter a
-      // block at the exact same point.
-      const sAnchor = reserveMidpointAnchor(aBox, bBox.x, bBox.y, a.id);
-      const tAnchor = reserveMidpointAnchor(bBox, aBox.x, aBox.y, b.id);
-      waypoints = [{{ x: sAnchor.x, y: sAnchor.y }}, {{ x: tAnchor.x, y: tAnchor.y }}];
+      // Straight: enumerate anchor candidates on both endpoints, then pick
+      // the (source, target) pair that minimises crossings with edges already
+      // drawn this frame. Ties break on priority (closer to the side
+      // midpoint wins). Sharing an anchor is allowed when the outgoing
+      // angles diverge by ≥35°.
+      const spCands = enumerateAnchorCandidates(aBox, bBox.x, bBox.y);
+      const epCands = enumerateAnchorCandidates(bBox, aBox.x, aBox.y);
+      const spAngle = Math.atan2(bBox.y - aBox.y, bBox.x - aBox.x);
+      const epAngle = Math.atan2(aBox.y - bBox.y, aBox.x - bBox.x);
+      const recA = _sideSlots(a.id), recB = _sideSlots(b.id);
+      let best = null;
+      for (const sp of spCands) {{
+        if (!_slotAvailable(recA, sp.side + ':' + sp.slot, spAngle)) continue;
+        for (const ep of epCands) {{
+          if (!_slotAvailable(recB, ep.side + ':' + ep.slot, epAngle)) continue;
+          const crossings = _countCrossings(sp.x, sp.y, ep.x, ep.y);
+          const score = crossings * 1000 + sp.priority + ep.priority;
+          if (!best || score < best.score) best = {{ sp, ep, score, crossings }};
+          // Early exit on a perfect no-cross slot-0 pair.
+          if (crossings === 0 && sp.priority === 0 && ep.priority === 0) break;
+        }}
+        if (best && best.crossings === 0 && best.sp.priority === 0) break;
+      }}
+      if (!best) {{
+        // Angle conflicts everywhere — fall back to the reservation helper.
+        const sFB = reserveMidpointAnchor(aBox, bBox.x, bBox.y, a.id);
+        const tFB = reserveMidpointAnchor(bBox, aBox.x, aBox.y, b.id);
+        waypoints = [{{ x: sFB.x, y: sFB.y }}, {{ x: tFB.x, y: tFB.y }}];
+      }} else {{
+        _slotCommit(recA, best.sp.side + ':' + best.sp.slot, spAngle);
+        _slotCommit(recB, best.ep.side + ':' + best.ep.slot, epAngle);
+        waypoints = [{{ x: best.sp.x, y: best.sp.y }}, {{ x: best.ep.x, y: best.ep.y }}];
+      }}
       // Re-verify: the lane shift may have pushed the line across a block,
       // or the straight run may sit on top of a previously drawn edge.
       // Either way, fall through to corridor routing so the rules

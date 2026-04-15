@@ -52,3 +52,8 @@ prefxplain-vscode/out/
 
 # Local design audit artifacts (screenshots, reports) — not diagram code
 design-audit/
+
+# Local working artifacts — personal screenshots, transcripts, notes
+images/
+transcript_*.md
+transcript_*.txt

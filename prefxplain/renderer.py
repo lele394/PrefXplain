@@ -103,9 +103,10 @@ _HTML_TEMPLATE = """\
   #help-overlay h3 {{ color: #e6edf3; font-size: 14px; margin-bottom: 12px; }}
   #help-overlay kbd {{ background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 6px; font-size: 11px; font-family: monospace; }}
   #help-overlay .kb-row {{ display: flex; justify-content: space-between; gap: 20px; padding: 4px 0; font-size: 12px; color: #c9d1d9; }}
-  #flow-overlay {{ display: none; position: absolute; inset: 0; align-items: center; justify-content: center; padding: 28px; background: rgba(1, 4, 9, 0.72); z-index: 25; }}
+  #flow-overlay {{ display: none; position: fixed; inset: 0; align-items: center; justify-content: center; padding: 28px; background: rgba(1, 4, 9, 0.72); z-index: 40; }}
   #flow-overlay.open {{ display: flex; }}
-  #flow-panel {{ width: min(960px, calc(100vw - 180px)); max-height: calc(var(--viewport-height) - 72px); overflow: auto; background: #161b22; border: 1px solid #30363d; border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); }}
+  #flow-panel {{ width: min(960px, calc(100vw - 180px)); max-height: calc(100vh - 56px); overflow: auto; background: #161b22; border: 1px solid #30363d; border-radius: 14px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45); display: flex; flex-direction: column; }}
+  #flow-panel header {{ position: sticky; top: 0; background: #161b22; z-index: 2; }}
   #flow-panel header {{ display: flex; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid #21262d; }}
   #flow-panel .flow-eyebrow {{ font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: #58a6ff; font-weight: 700; }}
   #flow-panel h3 {{ font-size: 18px; color: #e6edf3; line-height: 1.25; margin-top: 4px; }}
@@ -130,7 +131,7 @@ _HTML_TEMPLATE = """\
   .flow-note {{ margin-top: 16px; font-size: 13px; color: #9aa4af; line-height: 1.55; }}
   @media (max-width: 900px) {{
     #flow-overlay {{ padding: 16px; }}
-    #flow-panel {{ width: min(100%, calc(100vw - 32px)); max-height: calc(var(--viewport-height) - 32px); }}
+    #flow-panel {{ width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); }}
     .flow-svg {{ min-width: 560px; }}
   }}
 
@@ -5301,7 +5302,7 @@ function layoutFlowchart(fc) {{
   }}
 
   const width = Math.max(860, maxX + PAD_X + NODE_W / 2);
-  const height = PAD_Y + (maxLayer + 1) * LAYER_GAP + 40;
+  const height = PAD_Y + (maxLayer + 1) * LAYER_GAP + 130;
 
   const edges = fc.edges.map(e => flowEdge(e.from, e.to, e.label || ''));
 
@@ -5431,7 +5432,7 @@ function renderFlowSvg(diagram) {{
     return `<g class="flow-node-group"${{attrs}}>${{svgNodeShape(node)}}${{svgNodeLabel(node)}}</g>`;
   }}).join('');
   const legend = `
-    <g transform="translate(20, ${{diagram.height - 40}})">
+    <g transform="translate(20, ${{diagram.height - 28}})">
       <rect x="0" y="-12" width="16" height="16" rx="8" fill="none" stroke="#6e7681" stroke-width="1.5" />
       <text x="22" y="0" fill="#6e7681" font-size="11">Start / End</text>
       <polygon points="100,-4 112,4 100,12 88,4" fill="none" stroke="#6e7681" stroke-width="1.5" />

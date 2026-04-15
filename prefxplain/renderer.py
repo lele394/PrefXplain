@@ -837,7 +837,7 @@ function resolveGroupOverlaps() {{
 
 function collapseGroups() {{
   pinnedGroupIds.clear();
-  selectedNode = null; highlightSet = null; e2eMode = false; blastRadiusSet = new Set();
+  selectedNode = null; highlightSet = null; e2eMode = false; syncChainBtn(); blastRadiusSet = new Set();
   computeVisibleState();
   renderDefaultSidebar();
   relayout();
@@ -847,7 +847,7 @@ function collapseGroups() {{
 // Returns {{ items: [{{ node, cx, cy }}], openW, openH, cols, rows }}.
 const OPEN_GROUP_HEADER = 120;
 const OPEN_GROUP_PAD = 48;   // wider frame — more horizontal breathing room
-const OPEN_GROUP_GAP = 100;  // wider arrow zone between cells — enough for a label badge
+const OPEN_GROUP_GAP = 160;  // arrow zone between cells — sized so badge (18px) always fits at minimum zoom
 const OPEN_GROUP_INNER_TOP = 28; // breathing room between separator line and first child row
 
 function layoutOpenGroupChildren(group) {{
@@ -4121,7 +4121,7 @@ function draw() {{
       const KIND_FONT    = 12; // px — readable even at moderate zoom-out
       const KIND_RESERVE = 22; // vertical space reserved for kind label + gap below it
       const kindLabelY   = screenY - screenH / 2 + KIND_TOP;
-      const showKind     = screenH > 44; // enough room to show kind + title without overlap
+      const showKind     = screenH > 72; // worst case: KIND_RESERVE(22) + 2-line title(34) + margin
 
       if (showKind) {{
         ctx.font = `${{KIND_FONT}}px -apple-system, sans-serif`;
@@ -4314,11 +4314,10 @@ function draw() {{
         drawArrow(start.x, start.y, end.x, end.y, gc, lw, aSize);
 
         // Arrow label badge — drawn in screen space at the arrow midpoint.
-        // Hidden when the gap between cells is < 30 screen-px to avoid
-        // badge overflow onto card edges at very low zoom.
+        // Always shown regardless of zoom (OPEN_GROUP_GAP is sized to guarantee
+        // the badge fits between cells at minimum zoom).
         const labelText = (e.label || e.type || '').toLowerCase();
-        const screenGap = OPEN_GROUP_GAP * zoom;
-        if (labelText && alpha > 0.15 && screenGap > 30) {{
+        if (labelText && alpha > 0.15) {{
           const mx = (start.x + end.x) / 2;
           const my = (start.y + end.y) / 2;
           ctx.save();
@@ -4331,8 +4330,7 @@ function draw() {{
           ctx.textBaseline = 'middle';
           const tw = ctx.measureText(labelText).width + 10;
           ctx.fillStyle = '#0d1117dd';
-          ctx.beginPath();
-          ctx.roundRect(lsx - tw / 2, lsy - 9, tw, 18, 4);
+          roundRect(ctx, lsx - tw / 2, lsy - 9, tw, 18, 4);
           ctx.fill();
           ctx.fillStyle = gc + 'ee';
           ctx.fillText(labelText, lsx, lsy);
@@ -4611,13 +4609,15 @@ function syncChainBtn() {{
 }}
 
 function toggleChainMode() {{
+  // Mirror the E-key behavior: only meaningful when a node is selected.
+  // Flipping with nothing selected would show a misleading button state that
+  // resets immediately on the next selection (selectNode resets e2eMode).
+  if (!selectedNode) return;
   e2eMode = !e2eMode;
   syncChainBtn();
-  if (selectedNode) {{
-    applyHighlight(selectedNode);
-    draw();
-    drawMinimap();
-  }}
+  applyHighlight(selectedNode);
+  draw();
+  drawMinimap();
 }}
 
 // Compute and assign highlightSet for node n using the current e2eMode.
@@ -5840,6 +5840,11 @@ document.addEventListener('keydown', e => {{
     if (e.key === 'Escape') {{ e.target.blur(); searchQuery = ''; searchTokens = []; draw(); }}
     return;
   }}
+  // Don't steal browser/OS accelerators (Ctrl+L, Ctrl+T, Cmd+…).
+  if (e.ctrlKey || e.metaKey) return;
+  // When the flow-overlay modal is open, only Escape is handled below; all
+  // other keys would silently mutate graph state behind the modal.
+  if (flowOverlay.classList.contains('open') && e.key !== 'Escape') return;
   switch (e.key) {{
     case '/':
       e.preventDefault();

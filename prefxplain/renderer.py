@@ -1926,6 +1926,9 @@ function startPanelResize(clientY) {{
   panelResizeStartY = clientY;
   panelResizeStartHeight = topDetailsHeight;
   bodyEl.classList.add('panel-resizing');
+  // Panel resize is a manual viewport operation — prevent zoomToFit() from
+  // running in syncViewport() during or after the drag.
+  viewportWasManuallyMoved = true;
 }}
 
 function updatePanelResize(clientY) {{

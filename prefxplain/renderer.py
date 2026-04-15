@@ -916,11 +916,11 @@ function relayout() {{
   layoutBlocks(visibleNodes, visibleEdges);
   // Clear cached layout positions so resolveGroupOverlaps re-captures them
   for (const g of Object.values(groupMap)) {{ delete g._layoutX; delete g._layoutY; }}
-  viewportWasManuallyMoved = false;
+  if (!panelResizeActive) viewportWasManuallyMoved = false;
   simRunning = false;
   draw();
   drawMinimap();
-  setTimeout(() => {{ zoomToFit(); draw(); drawMinimap(); }}, 50);
+  if (!panelResizeActive) setTimeout(() => {{ zoomToFit(); draw(); drawMinimap(); }}, 50);
 }}
 
 function resolvedFlowDirection() {{
@@ -1852,7 +1852,7 @@ function syncViewport() {{
     : null;
   if (size.changed) {{
     // Re-layout if auto flow direction changed due to aspect ratio
-    if (flowDirection === 'auto' && groupingState !== 'flat') {{
+    if (flowDirection === 'auto' && groupingState !== 'flat' && !panelResizeActive) {{
       const newDir = resolvedFlowDirection();
       if (newDir !== _lastFlowDir) {{
         _lastFlowDir = newDir;

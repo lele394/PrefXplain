@@ -213,7 +213,7 @@ class TestRenderer:
         assert "detailDiagram: semanticNode.detail || null," in html
         assert "const edgeLabel = typeof e.label === 'string' ? e.label : '';" in html
         assert "humanizeSemanticKind" in html
-        assert "if (n.isGroup) renderGroupSidebar(n);" in html
+        assert "renderGroupSidebar(n);" in html
         assert "if (sidebarEnabled) {" in html
         assert "const target = (groupingState !== 'flat' && parentGroupId && groupMap[parentGroupId])" in html
 

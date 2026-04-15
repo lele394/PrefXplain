@@ -138,6 +138,8 @@ _HTML_TEMPLATE = """\
   #sidebar {{ flex: 1; min-height: 0; overflow: hidden; padding: 2px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 0; }}
   #sidebar.hidden {{ display: none; }}
   #sidebar .sb-row {{ display: flex; align-items: center; gap: 5px; height: 32px; overflow: hidden; white-space: nowrap; flex-shrink: 0; }}
+  #sidebar .sb-row--scroll {{ overflow-x: auto; scrollbar-width: none; }}
+  #sidebar .sb-row--scroll::-webkit-scrollbar {{ display: none; }}
   #sidebar .sb-row + .sb-row {{ border-top: 1px solid #21262d; }}
   #sidebar .sb-title {{ font-size: 13px; font-weight: 700; color: #e6edf3; flex-shrink: 0; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }}
   #sidebar .sb-path {{ font-size: 11px; color: #484f58; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }}
@@ -146,7 +148,8 @@ _HTML_TEMPLATE = """\
   #sidebar .sb-vdiv {{ width: 1px; height: 14px; background: #30363d; flex-shrink: 0; margin: 0 6px; }}
   #sidebar .sb-spacer {{ flex: 1; min-width: 8px; }}
   #sidebar .sb-label {{ font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6e7681; flex-shrink: 0; }}
-  #sidebar .sb-desc {{ font-size: 11px; color: #8b949e; flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  #sidebar .sb-desc-row {{ display: flex; align-items: flex-start; padding: 5px 0 4px; border-top: 1px solid #21262d; flex-shrink: 0; }}
+  #sidebar .sb-desc {{ font-size: 12px; font-weight: 600; color: #c9d1d9; line-height: 1.5; white-space: normal; overflow: visible; }}
   #sidebar .symbol {{ display: inline-flex; align-items: center; background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 1px 5px; font-size: 11px; font-family: monospace; flex-shrink: 0; }}
   #sidebar .symbol.fn {{ color: #d2a8ff; }}
   #sidebar .symbol.cls {{ color: #79c0ff; }}
@@ -3203,7 +3206,7 @@ function draw() {{
 
   // Draw arrow from a→b, routing around any blocking nodes
   // laneIdx = unique index for this edge, used to offset routing lanes
-  function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx, labelText) {{
+  function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx, labelText, srcId, tgtId) {{
     const aBox = nodeBox(a), bBox = nodeBox(b);
     // Lane spacing MUST be zoom-invariant in world units. Previously this
     // was `18 / zoom` to keep screen spacing constant, but that made corridor
@@ -3278,6 +3281,19 @@ function draw() {{
         if (lineHitsRect(spPt.x, spPt.y, epPt.x, epPt.y, bBox.x, bBox.y, bBox.w, bBox.h, 0)) return true;
         return false;
       }};
+      // Preferred side/slot from the global pre-pass. The scorer biases toward
+      // these choices via a deviation penalty so edges sharing a side stay in
+      // peer-angle order and don't cross each other.
+      const preferred = _preferredSlotMap.get(srcId + '|' + tgtId);
+      const slotDeviation = (sp, ep) => {{
+        if (!preferred) return 0;
+        let pen = 0;
+        if (preferred.sideA && sp.side !== preferred.sideA) pen += 600;
+        if (preferred.sideB && ep.side !== preferred.sideB) pen += 600;
+        pen += Math.abs(sp.slot - (preferred.slotA || 0)) * 80;
+        pen += Math.abs(ep.slot - (preferred.slotB || 0)) * 80;
+        return pen;
+      }};
       let best = null;
       for (const sp of spCands) {{
         if (!_slotAvailable(recA, sp.side + ':' + sp.slot, spAngle)) continue;
@@ -3290,11 +3306,10 @@ function draw() {{
           const crossings = _countCrossings(sp.x, sp.y, ep.x, ep.y);
           const axisAligned = Math.abs(sp.y - ep.y) < 1 || Math.abs(sp.x - ep.x) < 1;
           const axisPenalty = axisAligned ? 100000 : 0;
-          const score = crossings * 1000 + axisPenalty + sp.priority + ep.priority;
+          const prefPenalty = slotDeviation(sp, ep);
+          const score = crossings * 1000 + axisPenalty + prefPenalty + sp.priority + ep.priority;
           if (!best || score < best.score) best = {{ sp, ep, score, crossings, axisAligned }};
-          if (crossings === 0 && sp.priority === 0 && ep.priority === 0 && !axisAligned) break;
         }}
-        if (best && best.crossings === 0 && best.sp.priority === 0 && !best.axisAligned) break;
       }}
       // If no candidate passed the hard filters, retry without the grazing
       // constraint so we still produce a valid path (better a grazing
@@ -3321,14 +3336,14 @@ function draw() {{
         _slotCommit(recB, best.ep.side + ':' + best.ep.slot, epAngle);
         waypoints = [{{ x: best.sp.x, y: best.sp.y }}, {{ x: best.ep.x, y: best.ep.y }}];
       }}
-      // Re-verify: the lane shift may have pushed the line across a block,
-      // or the straight run may sit on top of a previously drawn edge.
-      // Either way, fall through to corridor routing so the rules
-      // (no arrow over/under a block, no long parallel overlap) hold.
+      // Re-verify: the chosen waypoints may still clip a drawn segment
+      // or an obstacle we couldn't steer around. Fall through to corridor
+      // routing so the manhattan path can detour around them.
       if (_segmentsHit(waypoints) || _waypointsOverlapDrawn(waypoints)) {{
+        const wpA = waypoints[0], wpB = waypoints[waypoints.length - 1];
         for (const ob of obstacles) {{
           if (lineHitsRect(aBox.x, aBox.y, bBox.x, bBox.y, ob.x, ob.y, ob.w, ob.h, 4)
-              || lineHitsRect(sp.x, sp.y, ep.x, ep.y, ob.x, ob.y, ob.w, ob.h, 4)) {{
+              || lineHitsRect(wpA.x, wpA.y, wpB.x, wpB.y, ob.x, ob.y, ob.w, ob.h, 4)) {{
             blockers.push(ob);
           }}
         }}
@@ -3685,6 +3700,58 @@ function draw() {{
   _drawnEdgeSegmentsAll = [];
   _sideSlotReservations = new Map();
 
+  // ── Precompute preferred side + slot order per edge ─────────────────────
+  // Rule: edges incident on the same side of a block should be ordered along
+  // the side according to the angular position of their peers. If three edges
+  // enter block B's left side, the edge whose peer sits higher on the canvas
+  // gets a slot above (smaller y), and the one whose peer sits lower gets a
+  // slot below. Same idea for outgoing edges. This eliminates crossings
+  // between edges that share a side but travel to different peers.
+  const _preferredSlotMap = new Map();
+  (function precomputePreferredSlots() {{
+    const sideOf = (box, peerCX, peerCY) => {{
+      const dx = peerCX - box.x, dy = peerCY - box.y;
+      if (Math.abs(dx) * box.h >= Math.abs(dy) * box.w) return dx >= 0 ? 'right' : 'left';
+      return dy >= 0 ? 'bottom' : 'top';
+    }};
+    const groups = new Map(); // blockId:side -> array of edge records
+    const edgeSides = new Map(); // eKey -> side choices
+    for (const e of drawEdges) {{
+      const a = e.source, b = e.target;
+      if (!a || !b || !isVisible(a) || !isVisible(b)) continue;
+      const aBox = nodeBox(a), bBox = nodeBox(b);
+      const sideA = sideOf(aBox, bBox.x, bBox.y);
+      const sideB = sideOf(bBox, aBox.x, aBox.y);
+      const eKey = (e._srcId || a.id) + '|' + (e._tgtId || b.id);
+      edgeSides.set(eKey, {{ sideA, sideB }});
+      // Sort key: vertical sides sort on y displacement, horizontal sides on x.
+      const coordA = (sideA === 'left' || sideA === 'right') ? (bBox.y - aBox.y) : (bBox.x - aBox.x);
+      const coordB = (sideB === 'left' || sideB === 'right') ? (aBox.y - bBox.y) : (aBox.x - bBox.x);
+      const gKeyA = a.id + ':' + sideA;
+      if (!groups.has(gKeyA)) groups.set(gKeyA, []);
+      groups.get(gKeyA).push({{ eKey, coord: coordA, which: 'A' }});
+      const gKeyB = b.id + ':' + sideB;
+      if (!groups.has(gKeyB)) groups.set(gKeyB, []);
+      groups.get(gKeyB).push({{ eKey, coord: coordB, which: 'B' }});
+    }}
+    for (const [, items] of groups) {{
+      items.sort((p, q) => p.coord - q.coord);
+      const n = items.length;
+      items.forEach((item, i) => {{
+        // Centered slots: n=1 -> [0]; n=2 -> [0,1]; n=3 -> [-1,0,1]; n=4 -> [-1,0,1,2]
+        const slot = i - Math.floor((n - 1) / 2);
+        let rec = _preferredSlotMap.get(item.eKey);
+        if (!rec) {{
+          const sides = edgeSides.get(item.eKey) || {{}};
+          rec = {{ sideA: sides.sideA, sideB: sides.sideB, slotA: 0, slotB: 0 }};
+          _preferredSlotMap.set(item.eKey, rec);
+        }}
+        if (item.which === 'A') rec.slotA = slot;
+        else rec.slotB = slot;
+      }});
+    }}
+  }})();
+
   for (const e of drawEdges) {{
     const a = e.source, b = e.target;
     if (!isVisible(a) || !isVisible(b)) continue;
@@ -3730,7 +3797,7 @@ function draw() {{
 
     const laneIdx = edgeLaneMap[srcId + '|' + tgtId] || 0;
     const edgeLabel = typeof e.label === 'string' ? e.label : '';
-    drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx, edgeLabel);
+    drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx, edgeLabel, srcId, tgtId);
   }}
 
   ctx.globalAlpha = 1;
@@ -4344,7 +4411,14 @@ canvas.addEventListener('mousemove', e => {{
         if (hoveredNode && !hoveredNode.isGroup) {{
           renderSidebar(hoveredNode);
         }} else if (hoveredNode && hoveredNode.isGroup) {{
-          renderGroupSidebar(hoveredNode);
+          const isSingletonGroup = (hoveredNode.childIds || []).length === 1;
+          if (isSingletonGroup) {{
+            const child = nodeIndex[(hoveredNode.childIds || [])[0]];
+            if (child) renderSidebar(child);
+            else renderGroupSidebar(hoveredNode);
+          }} else {{
+            renderGroupSidebar(hoveredNode);
+          }}
         }} else {{
           renderDefaultSidebar();
         }}
@@ -4466,8 +4540,20 @@ function selectNode(n) {{
       blastRadiusSet = computeBlastRadius(n.id);
     }}
     if (sidebarEnabled) {{
-      if (n.isGroup) renderGroupSidebar(n);
-      else renderSidebar(n);
+      if (n.isGroup) {{
+        // Singleton groups are drawn as solo file cards — show the child's
+        // full sidebar (filename + code preview) rather than the group view.
+        const isSingletonGroup = (n.childIds || []).length === 1;
+        if (isSingletonGroup) {{
+          const child = nodeIndex[(n.childIds || [])[0]];
+          if (child) renderSidebar(child);
+          else renderGroupSidebar(n);
+        }} else {{
+          renderGroupSidebar(n);
+        }}
+      }} else {{
+        renderSidebar(n);
+      }}
     }}
   }} else {{
     highlightSet = null;
@@ -4625,7 +4711,7 @@ function renderGroupSidebar(g) {{
   const metaParts = [g.fileCount + ' file' + (g.fileCount !== 1 ? 's' : '')];
   if (g.language) metaParts.push(esc(g.language));
   if (g.kind) metaParts.push(esc(humanizeSemanticKind(g.kind)));
-  const descSnippet = g.description ? compactText(g.description, 80) : '';
+  const descSnippet = g.description ? compactText(g.description, 300) : '';
 
   // Row 2: file chips
   const MAX_FILES = 12;
@@ -4640,9 +4726,9 @@ function renderGroupSidebar(g) {{
       <span class="sb-title">${{esc(g.label)}}</span>
       <span class="sb-sep">/</span>
       <span class="sb-meta">${{metaParts.join(' \u00b7 ')}}</span>
-      ${{descSnippet ? `<span class="sb-vdiv"></span><span class="sb-meta" style="color:#8b949e">${{esc(descSnippet)}}</span>` : ''}}
     </div>
-    <div class="sb-row">
+    ${{descSnippet ? `<div class="sb-desc-row"><span class="sb-desc">${{esc(descSnippet)}}</span></div>` : ''}}
+    <div class="sb-row sb-row--scroll">
       <span class="sb-label">Files</span>
       <span class="sb-vdiv"></span>
       ${{fileChips}}${{moreFiles}}
@@ -4678,7 +4764,7 @@ function renderSidebar(n) {{
   const metaParts = [esc(n.language || ''), (n.size/1024).toFixed(1) + ' KB'].filter(Boolean);
 
   // Description snippet for row 1 — first 90 chars, far more useful than raw symbol names
-  const descSnippet = n.description ? n.description.replace(WHITESPACE_RE, ' ').trim().slice(0, 90) : '';
+  const descSnippet = n.description ? n.description.replace(WHITESPACE_RE, ' ').trim() : '';
 
   const MAX_NB = 10;
   const nbChip = (item, arrow) => {{
@@ -4722,9 +4808,9 @@ function renderSidebar(n) {{
       <span class="sb-vdiv"></span>
       <span class="sb-meta">${{metaParts.join(' \u00b7 ')}}</span>
       ${{rolePill}}${{kindPill}}${{cycleFlag}}
-      ${{descSnippet ? `<span class="sb-vdiv"></span><span class="sb-desc">${{esc(descSnippet)}}</span>` : ''}}
     </div>
-    <div class="sb-row">
+    ${{descSnippet ? `<div class="sb-desc-row"><span class="sb-desc">${{esc(descSnippet)}}</span></div>` : ''}}
+    <div class="sb-row sb-row--scroll">
       <span class="sb-label">Imported by (${{importedBy.length}})</span>
       <span class="sb-vdiv"></span>
       ${{ibChips || '<span class="more">none</span>'}}${{moreIb}}

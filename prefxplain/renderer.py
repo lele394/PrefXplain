@@ -74,6 +74,14 @@ _HTML_TEMPLATE = """\
   #panel-header button {{ padding: 2px 7px; background: #21262d; border: 1px solid #30363d; border-radius: 5px; color: #c9d1d9; font-size: 10px; cursor: pointer; white-space: nowrap; }}
   #panel-header button:hover {{ background: #30363d; }}
   #panel-header button.active {{ background: #58a6ff; color: #0d1117; border-color: #58a6ff; }}
+  /* ── Language bar (GitHub-style, inline in header) ──────────────────── */
+  #lp-langs {{ display: flex; align-items: center; gap: 8px; }}
+  #lp-langs:empty {{ display: none; }}
+  .lp-langbar {{ display: flex; height: 8px; border-radius: 3px; overflow: hidden; width: 160px; flex-shrink: 0; gap: 2px; }}
+  .lang-segment {{ height: 100%; border-radius: 2px; }}
+  .lp-lang-labels {{ display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }}
+  .lp-lang-label {{ display: flex; align-items: center; gap: 4px; font-size: 10px; color: #8b949e; white-space: nowrap; }}
+  .lp-lang-dot {{ width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }}
 
   /* ── Toggle button (horizontal bar below top panel) ──────────────── */
   #panel-resizer {{ position: relative; z-index: 15; display: flex; align-items: center; gap: 10px; padding: 0 12px; height: 24px; flex-shrink: 0; cursor: ns-resize; user-select: none; background: transparent; transition: background .15s ease; }}
@@ -164,11 +172,11 @@ _HTML_TEMPLATE = """\
     <span class="ph-brand">PrefXplain — {repo}</span>
     <span class="ph-sep"></span>
     <span class="ph-stat"><b>{total_files}</b> files</span>
-    <span class="ph-stat"><b>{total_edges}</b> edges</span>
-    <span class="ph-stat">{languages}</span>
     <span id="tb-health"></span>
     <span class="ph-sep"></span>
     <input type="text" id="search" class="ph-search" placeholder="Search... (/)" autocomplete="off">
+    <span class="ph-spacer"></span>
+    <div id="lp-langs"></div>
     <span class="ph-spacer"></span>
     <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
     <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
@@ -2377,8 +2385,38 @@ function tickSim() {{
 let selectedNode = null;
 let hoveredNode = null;
 let searchQuery = '';
+let searchTokens = []; // pre-split tokens derived from searchQuery
 let highlightSet = null;
 let lastMouseWX = 0, lastMouseWY = 0; // last known mouse position in world coords
+
+// Build a single lowercase string that aggregates every searchable field for a
+// node. Called once per node after index construction and cached on the node
+// itself so draw() doesn't recompute it on every frame.
+function buildSearchCorpus(node) {{
+  if (node._searchCorpus !== undefined) return node._searchCorpus;
+  const parts = [
+    node.id,
+    node.label,
+    node.short_title || '',
+    node.description || '',
+    node.group || '',
+    node.role || '',
+    node.language || '',
+    node.kind || '',
+    node.shape || '',
+  ];
+  // Include flowchart node labels + descriptions so users can search by
+  // function name, class name, or any step label from the workflow diagram.
+  const fc = node.flowchart;
+  if (fc && Array.isArray(fc.nodes)) {{
+    for (const fn of fc.nodes) {{
+      if (fn.label) parts.push(fn.label);
+      if (fn.description) parts.push(fn.description);
+    }}
+  }}
+  node._searchCorpus = parts.join(' ').toLowerCase();
+  return node._searchCorpus;
+}}
 
 function nodeColor(n) {{
   if (colorMode === 'role' && n.role) return ROLE_COLORS[n.role] || '#888888';
@@ -2391,11 +2429,11 @@ function nodeTextColor(n) {{
 }}
 
 function isVisible(n) {{
-  if (!searchQuery) return true;
-  const matchesNode = node => node.id.toLowerCase().includes(searchQuery)
-    || node.label.toLowerCase().includes(searchQuery)
-    || (node.description || '').toLowerCase().includes(searchQuery)
-    || (node.short_title || '').toLowerCase().includes(searchQuery);
+  if (!searchTokens.length) return true;
+  const matchesNode = node => {{
+    const corpus = buildSearchCorpus(node);
+    return searchTokens.every(t => corpus.includes(t));
+  }};
   if (matchesNode(n)) return true;
   if (n.isGroup && n.childIds) {{
     return n.childIds.some(childId => {{
@@ -3208,24 +3246,70 @@ function draw() {{
       const spAngle = Math.atan2(bBox.y - aBox.y, bBox.x - aBox.x);
       const epAngle = Math.atan2(aBox.y - bBox.y, aBox.x - bBox.x);
       const recA = _sideSlots(a.id), recB = _sideSlots(b.id);
+      // Angle between the segment and the side's tangent direction.
+      // Horizontal sides have tangent (1,0); vertical sides have tangent (0,1).
+      // We want the arrow to hit the side at ≥30° from the tangent, i.e.
+      // the perpendicular component of the segment must dominate.
+      // cos(30°) ≈ 0.866, so |tangent · normalized_dir| must be < 0.866.
+      const MIN_SIDE_ANGLE_COS = 0.866;
+      const sideGrazes = (spPt, epPt, side) => {{
+        const dx = epPt.x - spPt.x, dy = epPt.y - spPt.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) return false;
+        // tangent · direction, absolute value normalised
+        const t = (side === 'left' || side === 'right')
+          ? Math.abs(dy) / len   // vertical side tangent (0,1)
+          : Math.abs(dx) / len;  // horizontal side tangent (1,0)
+        return t > MIN_SIDE_ANGLE_COS;
+      }};
+      // Rule 2: the straight segment must not traverse any block — including
+      // the source and target themselves. `getObstacles` excludes the endpoints
+      // by design, so without this self-check a segment can carve straight
+      // through the target card to reach an anchor on the opposite side
+      // (e.g. a "tests" arrow going up through Graph Data Model from below
+      // to land on the top corner). `lineHitsRect`'s internal 0.05/0.95
+      // t-cutoffs tolerate an endpoint touching the border, so a legitimate
+      // entry at sp/ep does NOT register as a traversal.
+      const segmentHitsAnyBlock = (spPt, epPt) => {{
+        for (const ob of obstacles) {{
+          if (lineHitsRect(spPt.x, spPt.y, epPt.x, epPt.y, ob.x, ob.y, ob.w, ob.h, 4)) return true;
+        }}
+        if (lineHitsRect(spPt.x, spPt.y, epPt.x, epPt.y, aBox.x, aBox.y, aBox.w, aBox.h, 0)) return true;
+        if (lineHitsRect(spPt.x, spPt.y, epPt.x, epPt.y, bBox.x, bBox.y, bBox.w, bBox.h, 0)) return true;
+        return false;
+      }};
       let best = null;
       for (const sp of spCands) {{
         if (!_slotAvailable(recA, sp.side + ':' + sp.slot, spAngle)) continue;
         for (const ep of epCands) {{
           if (!_slotAvailable(recB, ep.side + ':' + ep.slot, epAngle)) continue;
+          // Hard rejections: grazing entry/exit, or segment clipping a block.
+          if (sideGrazes(sp, ep, sp.side)) continue;
+          if (sideGrazes(sp, ep, ep.side)) continue;
+          if (segmentHitsAnyBlock(sp, ep)) continue;
           const crossings = _countCrossings(sp.x, sp.y, ep.x, ep.y);
-          // Penalise perfectly axis-aligned segments — a straight horizontal
-          // arrow into a left/right side reads as "stuck on the wall" and
-          // looks flat. Adding a slight vertical offset gives the arrowhead
-          // some slope, which matches how the user reads the direction.
           const axisAligned = Math.abs(sp.y - ep.y) < 1 || Math.abs(sp.x - ep.x) < 1;
-          const axisPenalty = axisAligned ? 500 : 0;
+          const axisPenalty = axisAligned ? 100000 : 0;
           const score = crossings * 1000 + axisPenalty + sp.priority + ep.priority;
           if (!best || score < best.score) best = {{ sp, ep, score, crossings, axisAligned }};
-          // Early exit: zero crossings, both at slot 0, and not axis-aligned.
           if (crossings === 0 && sp.priority === 0 && ep.priority === 0 && !axisAligned) break;
         }}
         if (best && best.crossings === 0 && best.sp.priority === 0 && !best.axisAligned) break;
+      }}
+      // If no candidate passed the hard filters, retry without the grazing
+      // constraint so we still produce a valid path (better a grazing
+      // arrow than none at all).
+      if (!best) {{
+        for (const sp of spCands) {{
+          if (!_slotAvailable(recA, sp.side + ':' + sp.slot, spAngle)) continue;
+          for (const ep of epCands) {{
+            if (!_slotAvailable(recB, ep.side + ':' + ep.slot, epAngle)) continue;
+            if (segmentHitsAnyBlock(sp, ep)) continue;
+            const crossings = _countCrossings(sp.x, sp.y, ep.x, ep.y);
+            const score = crossings * 1000 + sp.priority + ep.priority;
+            if (!best || score < best.score) best = {{ sp, ep, score, crossings, axisAligned: false }};
+          }}
+        }}
       }}
       if (!best) {{
         // Angle conflicts everywhere — fall back to the reservation helper.
@@ -5407,6 +5491,7 @@ flowBody.addEventListener('mouseout', e => {{
 
 searchInput.addEventListener('input', e => {{
   searchQuery = e.target.value.toLowerCase().trim();
+  searchTokens = searchQuery ? searchQuery.split(/\s+/).filter(Boolean) : [];
   if (!searchQuery) {{
     selectedNode = null;
     highlightSet = null;
@@ -5527,7 +5612,7 @@ canvas.addEventListener('dblclick', e => {{
 
 document.addEventListener('keydown', e => {{
   if (e.target.tagName === 'INPUT') {{
-    if (e.key === 'Escape') {{ e.target.blur(); searchQuery = ''; draw(); }}
+    if (e.key === 'Escape') {{ e.target.blur(); searchQuery = ''; searchTokens = []; draw(); }}
     return;
   }}
   switch (e.key) {{

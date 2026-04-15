@@ -184,6 +184,7 @@ _HTML_TEMPLATE = """\
     <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
     <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
     <button id="btnHover" onclick="toggleHoverTooltip()" class="active">Hover: On</button>
+    <button id="btnChain" onclick="toggleChainMode()">Chain: Direct</button>
     <button id="btnCodeTheme" onclick="toggleCodeTheme()">Code: Dark</button>
     <button onclick="zoomToFit()">Fit</button>
     <button onclick="toggleHelp()">?</button>
@@ -207,6 +208,11 @@ _HTML_TEMPLATE = """\
       <div class="kb-row"><span><kbd>/</kbd></span><span>Focus search</span></div>
       <div class="kb-row"><span><kbd>Esc</kbd></span><span>Deselect</span></div>
       <div class="kb-row"><span><kbd>F</kbd></span><span>Zoom to fit all nodes</span></div>
+      <div class="kb-row"><span><kbd>E</kbd></span><span>Chain: Direct ↔ E2E</span></div>
+      <div class="kb-row"><span><kbd>G</kbd></span><span>Edges: All ↔ Hover</span></div>
+      <div class="kb-row"><span><kbd>L</kbd></span><span>Flow: Auto ↔ → ↔ ↓</span></div>
+      <div class="kb-row"><span><kbd>T</kbd></span><span>Code theme: Dark ↔ Light</span></div>
+      <div class="kb-row"><span><kbd>H</kbd></span><span>Hover tooltips: On ↔ Off</span></div>
       <div class="kb-row"><span>Click</span><span>Open a block or inspect a file</span></div>
       <div class="kb-row"><span>Double-click</span><span>Open the workflow diagram</span></div>
       <div class="kb-row"><span><kbd>?</kbd></span><span>Toggle this help panel</span></div>
@@ -831,7 +837,7 @@ function resolveGroupOverlaps() {{
 
 function collapseGroups() {{
   pinnedGroupIds.clear();
-  selectedNode = null; highlightSet = null; blastRadiusSet = new Set();
+  selectedNode = null; highlightSet = null; e2eMode = false; blastRadiusSet = new Set();
   computeVisibleState();
   renderDefaultSidebar();
   relayout();
@@ -840,9 +846,9 @@ function collapseGroups() {{
 // Position children inside an open group as a grid of full-size cards.
 // Returns {{ items: [{{ node, cx, cy }}], openW, openH, cols, rows }}.
 const OPEN_GROUP_HEADER = 120;
-const OPEN_GROUP_PAD = 36;
-const OPEN_GROUP_GAP = 48;
-const OPEN_GROUP_INNER_TOP = 20; // breathing room between separator line and first child row
+const OPEN_GROUP_PAD = 48;   // wider frame — more horizontal breathing room
+const OPEN_GROUP_GAP = 100;  // wider arrow zone between cells — enough for a label badge
+const OPEN_GROUP_INNER_TOP = 28; // breathing room between separator line and first child row
 
 function layoutOpenGroupChildren(group) {{
   const children = (group.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
@@ -2390,6 +2396,10 @@ let hoveredNode = null;
 let searchQuery = '';
 let searchTokens = []; // pre-split tokens derived from searchQuery
 let highlightSet = null;
+// E2E highlight mode: when true, nhopNeighborhood uses unlimited hops so the
+// full transitive closure (all ancestors + descendants) lights up instead of
+// the default 1-hop direct-link view.  Toggle with the 'E' key.
+let e2eMode = false;
 let lastMouseWX = 0, lastMouseWY = 0; // last known mouse position in world coords
 
 // Build a single lowercase string that aggregates every searchable field for a
@@ -4099,30 +4109,47 @@ function draw() {{
     ctx.font = '13px -apple-system, sans-serif';
     const summaryLines = wrapTextLines(ctx, summaryText, maxLineW, 2);
 
-    // For group children: kind label at top, then title centered in remaining space
+    // For group children: kind label at top, then title centered in remaining space.
+    // The kind label ("Entry", "Process", etc.) uses a 12px font so it reads
+    // at a glance. We hide it below screenH=44 (zoom ≈ 0.28) to prevent it
+    // from overlapping the title at low zoom; the title then centers in the
+    // full card. Above that threshold we center the title in the space below
+    // the kind label so the two never collide.
     if (isGroupChild) {{
       const kindLabel = humanizeSemanticKind(nodeShape);
-      ctx.font = '10px -apple-system, sans-serif';
-      ctx.fillStyle = parentGc ? parentGc + 'cc' : mutedColor;
-      ctx.textBaseline = 'top';
-      ctx.textAlign = 'center';
-      ctx.fillText(kindLabel, screenX, screenY - screenH / 2 + 10);
+      const KIND_TOP     = 6;  // px from card top edge to kind label
+      const KIND_FONT    = 12; // px — readable even at moderate zoom-out
+      const KIND_RESERVE = 22; // vertical space reserved for kind label + gap below it
+      const kindLabelY   = screenY - screenH / 2 + KIND_TOP;
+      const showKind     = screenH > 44; // enough room to show kind + title without overlap
 
-      // Re-measure title wrap at the actual draw font (14px) so truncation
-      // matches what gets rendered. The outer titleLines above were computed
-      // at 16px, which mis-sizes the wrap for child cards.
+      if (showKind) {{
+        ctx.font = `${{KIND_FONT}}px -apple-system, sans-serif`;
+        ctx.fillStyle = parentGc ? parentGc + 'cc' : mutedColor;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'center';
+        ctx.fillText(kindLabel, screenX, kindLabelY);
+      }}
+
+      // Title: vertically centered in the space below kind label (when shown),
+      // or in the full card (when kind label is hidden).
+      // Re-measure at 14px — the outer titleLines were at 16px which mis-sizes
+      // wrapping; tighten width to avoid bleeding at shape clip edges.
       ctx.font = 'bold 14px -apple-system, sans-serif';
-      // Tighten the usable width: shape clip (hexagon/diamond/parallelogram)
-      // and card border chrome both eat a few px on each side. Without this
-      // buffer the text visually butts the card border or bleeds.
       const childLineW = Math.max(20, innerW - 14);
       const childTitleLines = wrapTextLines(ctx, titleText, childLineW, 2)
         .map(line => truncateToFit(ctx, line, childLineW));
       ctx.fillStyle = textColor;
       ctx.textBaseline = 'middle';
-      const titleY = screenY + (childTitleLines.length > 1 ? -8 : 0);
+
+      const titleAreaTop    = showKind ? kindLabelY + KIND_RESERVE : screenY - screenH / 2;
+      const titleAreaBottom = screenY + screenH / 2;
+      const titleAreaCenter = (titleAreaTop + titleAreaBottom) / 2;
+      const titleBlockH     = childTitleLines.length * 17;
+      const titleStartY     = titleAreaCenter - titleBlockH / 2 + 17 / 2;
+
       childTitleLines.forEach((line, i) => {{
-        ctx.fillText(line, screenX, titleY + i * 17);
+        ctx.fillText(line, screenX, titleStartY + i * 17);
       }});
       ctx.restore();
       continue;
@@ -4215,9 +4242,57 @@ function draw() {{
       const posMap = {{}};
       for (const item of layout.items) posMap[item.node.id] = item;
 
-      // Check if a child in this group is selected
       const childIds = new Set((g.childIds || []).filter(id => posMap[id]));
-      const focusChild = selectedNode && childIds.has(selectedNode.id) ? selectedNode.id : null;
+
+      // Determine which children are "in focus" based on selection state:
+      //   (a) This group is selected → ALL children focused → light up all edges
+      //   (b) A child of this group is selected → that child + its direct (or
+      //       transitive in e2eMode) intra-group neighbors are focused
+      //   (c) Another node/group is selected → children in highlightSet focused
+      //   (d) Nothing selected → no focus (default 0.7 alpha)
+      //
+      // An edge is "touched" only when BOTH its endpoints are in focusChildIds —
+      // this keeps arrows and node highlights in visual sync: a lit arrow always
+      // connects two lit nodes.
+      let focusChildIds = new Set();
+      const groupIsSelected = selectedNode && selectedNode.id === g.id;
+      if (groupIsSelected) {{
+        focusChildIds = childIds;                              // (a) all children
+      }} else if (selectedNode && childIds.has(selectedNode.id)) {{
+        // (b) selected child + its intra-group neighbors at the configured depth
+        focusChildIds = new Set([selectedNode.id]);
+        if (e2eMode) {{
+          // Transitive closure through intra-group edges (BFS, both directions)
+          let frontier = [selectedNode.id];
+          while (frontier.length > 0) {{
+            const next = [];
+            for (const fid of frontier) {{
+              for (const ie of iEdges) {{
+                const isid = ie._srcId || ie.source.id, itid = ie._tgtId || ie.target.id;
+                if (isid === fid && childIds.has(itid) && !focusChildIds.has(itid)) {{
+                  focusChildIds.add(itid); next.push(itid);
+                }}
+                if (itid === fid && childIds.has(isid) && !focusChildIds.has(isid)) {{
+                  focusChildIds.add(isid); next.push(isid);
+                }}
+              }}
+            }}
+            frontier = next;
+          }}
+        }} else {{
+          // Direct intra-group neighbors only
+          for (const ie of iEdges) {{
+            const isid = ie._srcId || ie.source.id, itid = ie._tgtId || ie.target.id;
+            if (isid === selectedNode.id && childIds.has(itid)) focusChildIds.add(itid);
+            if (itid === selectedNode.id && childIds.has(isid)) focusChildIds.add(isid);
+          }}
+        }}
+      }} else if (highlightSet) {{
+        for (const id of childIds) {{
+          if (highlightSet.has(id)) focusChildIds.add(id);  // (c) linked children
+        }}
+      }}
+      const hasFocus = focusChildIds.size > 0;
 
       for (const e of iEdges) {{
         const sid = e._srcId || e.source.id, tid = e._tgtId || e.target.id;
@@ -4226,13 +4301,43 @@ function draw() {{
         const sHw = NODE_W / 2 + 2, sHh = (sp.node.h || NODE_H_BASE) / 2 + 2;
         const tHw = NODE_W / 2 + 2, tHh = (ep.node.h || NODE_H_BASE) / 2 + 2;
         const start = rectEdgePoint(ep.cx, ep.cy, sp.cx, sp.cy, sHw, sHh);
-        const end = rectEdgePoint(sp.cx, sp.cy, ep.cx, ep.cy, tHw, tHh);
-        const touches = focusChild && (sid === focusChild || tid === focusChild);
-        const alpha = focusChild ? (touches ? 0.95 : 0.1) : 0.7;
-        const lw = (touches ? 2.5 : 1.5) / zoom;
-        const aSize = (touches ? 13 : 10) / zoom;
+        const end   = rectEdgePoint(sp.cx, sp.cy, ep.cx, ep.cy, tHw, tHh);
+
+        // Both endpoints must be in focusChildIds for the arrow to light up —
+        // this keeps arrow highlight and node highlight in visual sync.
+        const touches = hasFocus && focusChildIds.has(sid) && focusChildIds.has(tid);
+        const alpha   = hasFocus ? (touches ? 0.95 : 0.1) : 0.7;
+        const lw      = (touches || groupIsSelected ? 2.5 : 1.5) / zoom;
+        const aSize   = (touches || groupIsSelected ? 13 : 10) / zoom;
+
         ctx.globalAlpha = alpha;
         drawArrow(start.x, start.y, end.x, end.y, gc, lw, aSize);
+
+        // Arrow label badge — drawn in screen space at the arrow midpoint.
+        // Hidden when the gap between cells is < 30 screen-px to avoid
+        // badge overflow onto card edges at very low zoom.
+        const labelText = (e.label || e.type || '').toLowerCase();
+        const screenGap = OPEN_GROUP_GAP * zoom;
+        if (labelText && alpha > 0.15 && screenGap > 30) {{
+          const mx = (start.x + end.x) / 2;
+          const my = (start.y + end.y) / 2;
+          ctx.save();
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          const lsx = mx * zoom + pan.x;
+          const lsy = my * zoom + pan.y;
+          ctx.globalAlpha = alpha * 0.92;
+          ctx.font = 'bold 11px -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const tw = ctx.measureText(labelText).width + 10;
+          ctx.fillStyle = '#0d1117dd';
+          ctx.beginPath();
+          ctx.roundRect(lsx - tw / 2, lsy - 9, tw, 18, 4);
+          ctx.fill();
+          ctx.fillStyle = gc + 'ee';
+          ctx.fillText(labelText, lsx, lsy);
+          ctx.restore();
+        }}
       }}
     }}
     ctx.globalAlpha = 1;
@@ -4493,52 +4598,87 @@ canvas.addEventListener('wheel', e => {{
 
 // ── Sidebar ──────────────────────────────────────────────────────────────────
 
-function selectNode(n) {{
-  selectedNode = selectedNode === n ? null : n;
+function syncChainBtn() {{
+  const btn = document.getElementById('btnChain');
+  if (!btn) return;
+  if (e2eMode) {{
+    btn.textContent = 'Chain: E2E';
+    btn.classList.add('active');
+  }} else {{
+    btn.textContent = 'Chain: Direct';
+    btn.classList.remove('active');
+  }}
+}}
+
+function toggleChainMode() {{
+  e2eMode = !e2eMode;
+  syncChainBtn();
   if (selectedNode) {{
-    if (n.isGroup) {{
-      // Clicking a group lights up: the group itself, every child inside it,
-      // every file-level neighbor of any child (i.e. the specific elementary
-      // blocks actually linked across groups), and the parent groups of those
-      // neighbors so the directly-connected group blocks also read as lit.
-      highlightSet = new Set([n.id]);
-      const childIds = (n.childIds || []);
-      childIds.forEach(id => highlightSet.add(id));
-      for (const cid of childIds) {{
-        const nbrs = nhopNeighborhood(cid, 1);
-        for (const id of nbrs) {{
-          highlightSet.add(id);
-          const gid = nodeToGroup[id];
-          if (gid) highlightSet.add(gid);
-        }}
-      }}
-      // Also add groups connected via inter-group visible edges (catches cases
-      // where the group-level edge exists even if no file-level edge survived
-      // the visible-node filter).
-      for (const ve of visibleEdges) {{
-        const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
-        if (sid === n.id) highlightSet.add(tid);
-        if (tid === n.id) highlightSet.add(sid);
-      }}
-      blastRadiusSet = new Set();
-    }} else {{
-      highlightSet = nhopNeighborhood(n.id, 1);
-      // Add parent group IDs so group-level nodes + edges light up
-      for (const id of [...highlightSet]) {{
+    applyHighlight(selectedNode);
+    draw();
+    drawMinimap();
+  }}
+}}
+
+// Compute and assign highlightSet for node n using the current e2eMode.
+// Extracted from selectNode so the 'E' key can re-apply it on mode toggle
+// without repeating the logic.
+function applyHighlight(n) {{
+  if (!n) {{
+    highlightSet = null;
+    blastRadiusSet = new Set();
+    return;
+  }}
+  const hops = e2eMode ? 9999 : 1;
+  if (n.isGroup) {{
+    // Group: light up the group itself, all its children, and every
+    // file-level neighbor of any child (at the configured hop depth).
+    highlightSet = new Set([n.id]);
+    const childIds = (n.childIds || []);
+    childIds.forEach(id => highlightSet.add(id));
+    for (const cid of childIds) {{
+      const nbrs = nhopNeighborhood(cid, hops);
+      for (const id of nbrs) {{
+        highlightSet.add(id);
         const gid = nodeToGroup[id];
         if (gid) highlightSet.add(gid);
       }}
-      // Add groups connected to the focal group via inter-group edges
-      const myGroup = nodeToGroup[n.id];
-      if (myGroup) {{
-        for (const ve of visibleEdges) {{
-          const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
-          if (sid === myGroup) highlightSet.add(tid);
-          if (tid === myGroup) highlightSet.add(sid);
-        }}
-      }}
-      blastRadiusSet = computeBlastRadius(n.id);
     }}
+    // Also sweep inter-group visible edges in case a group-level edge
+    // survived filtering even when no file-level edge did.
+    for (const ve of visibleEdges) {{
+      const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
+      if (sid === n.id) highlightSet.add(tid);
+      if (tid === n.id) highlightSet.add(sid);
+    }}
+    blastRadiusSet = new Set();
+  }} else {{
+    highlightSet = nhopNeighborhood(n.id, hops);
+    // Add parent group IDs so group-level nodes + edges light up.
+    for (const id of [...highlightSet]) {{
+      const gid = nodeToGroup[id];
+      if (gid) highlightSet.add(gid);
+    }}
+    // Add groups connected to the focal group via inter-group edges.
+    const myGroup = nodeToGroup[n.id];
+    if (myGroup) {{
+      for (const ve of visibleEdges) {{
+        const sid = ve._srcId || ve.source.id, tid = ve._tgtId || ve.target.id;
+        if (sid === myGroup) highlightSet.add(tid);
+        if (tid === myGroup) highlightSet.add(sid);
+      }}
+    }}
+    blastRadiusSet = computeBlastRadius(n.id);
+  }}
+}}
+
+function selectNode(n) {{
+  const wasSelected = selectedNode === n;
+  selectedNode = wasSelected ? null : n;
+  e2eMode = false; // reset mode on every new selection
+  syncChainBtn();
+  if (selectedNode) {{
+    applyHighlight(selectedNode);
     if (sidebarEnabled) {{
       if (n.isGroup) {{
         // Singleton groups are drawn as solo file cards — show the child's
@@ -4556,8 +4696,7 @@ function selectNode(n) {{
       }}
     }}
   }} else {{
-    highlightSet = null;
-    blastRadiusSet = new Set();
+    applyHighlight(null);
     if (sidebarEnabled) renderDefaultSidebar();
   }}
   draw();
@@ -5711,13 +5850,38 @@ document.addEventListener('keydown', e => {{
         closeFlowOverlay();
         break;
       }}
-      selectedNode = null; highlightSet = null; blastRadiusSet = new Set(); renderDefaultSidebar(); draw();
+      selectedNode = null; highlightSet = null; e2eMode = false;
+      syncChainBtn(); blastRadiusSet = new Set(); renderDefaultSidebar(); draw();
+      break;
+    case 'e': case 'E':
+      // Toggle E2E (end-to-end) highlight mode: when active, the full
+      // transitive chain — all ancestors and descendants — lights up instead
+      // of just the immediate 1-hop neighbors.
+      if (selectedNode) {{
+        e2eMode = !e2eMode;
+        syncChainBtn();
+        applyHighlight(selectedNode);
+        draw();
+        drawMinimap();
+      }}
       break;
     case 'b': case 'B':
       if (pinnedGroupIds.size > 0) {{ pinnedGroupIds.clear(); draw(); }}
       break;
     case 'f': case 'F':
       zoomToFit();
+      break;
+    case 'g': case 'G':
+      toggleEdgeMode();
+      break;
+    case 'l': case 'L':
+      toggleFlowDirection();
+      break;
+    case 't': case 'T':
+      toggleCodeTheme();
+      break;
+    case 'h': case 'H':
+      toggleHoverTooltip();
       break;
     case '?':
       toggleHelp();

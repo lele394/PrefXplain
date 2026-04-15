@@ -1926,6 +1926,11 @@ function startPanelResize(clientY) {{
   panelResizeStartY = clientY;
   panelResizeStartHeight = topDetailsHeight;
   bodyEl.classList.add('panel-resizing');
+  // Disable the panel's CSS height transition for the duration of the drag.
+  // Without this, a quick release leaves a 200ms animation still running after
+  // mouseup — each RAF frame then fires syncViewport() with panelResizeActive=false
+  // and a still-changing canvas, triggering shouldRefit → zoomToFit().
+  leftPanel.style.transition = 'none';
   // Panel resize is a manual viewport operation — prevent zoomToFit() from
   // running in syncViewport() during or after the drag.
   viewportWasManuallyMoved = true;
@@ -1941,6 +1946,8 @@ function stopPanelResize() {{
   if (!panelResizeActive) return;
   panelResizeActive = false;
   bodyEl.classList.remove('panel-resizing');
+  // Restore the transition so the toggle-button collapse animation works.
+  leftPanel.style.transition = '';
   // Re-sync userZoomScale now that fitZoomLevel reflects the final canvas size,
   // so subsequent wheel/pinch zoom stays relative to the correct baseline.
   if (fitZoomLevel > 0) userZoomScale = zoom / fitZoomLevel;
@@ -3207,12 +3214,18 @@ function draw() {{
         for (const ep of epCands) {{
           if (!_slotAvailable(recB, ep.side + ':' + ep.slot, epAngle)) continue;
           const crossings = _countCrossings(sp.x, sp.y, ep.x, ep.y);
-          const score = crossings * 1000 + sp.priority + ep.priority;
-          if (!best || score < best.score) best = {{ sp, ep, score, crossings }};
-          // Early exit on a perfect no-cross slot-0 pair.
-          if (crossings === 0 && sp.priority === 0 && ep.priority === 0) break;
+          // Penalise perfectly axis-aligned segments — a straight horizontal
+          // arrow into a left/right side reads as "stuck on the wall" and
+          // looks flat. Adding a slight vertical offset gives the arrowhead
+          // some slope, which matches how the user reads the direction.
+          const axisAligned = Math.abs(sp.y - ep.y) < 1 || Math.abs(sp.x - ep.x) < 1;
+          const axisPenalty = axisAligned ? 500 : 0;
+          const score = crossings * 1000 + axisPenalty + sp.priority + ep.priority;
+          if (!best || score < best.score) best = {{ sp, ep, score, crossings, axisAligned }};
+          // Early exit: zero crossings, both at slot 0, and not axis-aligned.
+          if (crossings === 0 && sp.priority === 0 && ep.priority === 0 && !axisAligned) break;
         }}
-        if (best && best.crossings === 0 && best.sp.priority === 0) break;
+        if (best && best.crossings === 0 && best.sp.priority === 0 && !best.axisAligned) break;
       }}
       if (!best) {{
         // Angle conflicts everywhere — fall back to the reservation helper.

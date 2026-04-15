@@ -144,6 +144,7 @@ class SemanticDiagramNode:
     role: str = ""
     level: int = 0
     detail: dict | None = None
+    highlights: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         data = {
@@ -160,6 +161,8 @@ class SemanticDiagramNode:
             data["role"] = self.role
         if self.detail:
             data["detail"] = self.detail
+        if self.highlights:
+            data["highlights"] = self.highlights
         return data
 
 
@@ -199,15 +202,18 @@ class SemanticDiagram:
 
 def build_node_semantics(graph: Graph) -> dict[str, dict]:
     """Return per-file semantic metadata used by the renderer."""
-    return {
-        node.id: {
+    result: dict[str, dict] = {}
+    for node in graph.nodes:
+        entry: dict = {
             "kind": infer_node_kind(node),
             "shape": KIND_TO_SHAPE[infer_node_kind(node)],
             "summary": first_sentence(node.description) or display_node_name(node),
             "role": node.role or "",
         }
-        for node in graph.nodes
-    }
+        if node.highlights:
+            entry["highlights"] = list(node.highlights)
+        result[node.id] = entry
+    return result
 
 
 def build_semantic_diagram(graph: Graph) -> SemanticDiagram:
@@ -238,6 +244,8 @@ def build_semantic_diagram(graph: Graph) -> SemanticDiagram:
         summary = summarize_group(graph, source_kind, group_key, label, child_nodes, pagerank)
         group_id = f"semantic:{source_kind}:{slugify(group_key or label)}:{index}"
         detail = build_group_detail(graph, child_nodes, label)
+        group_highlights_map = getattr(graph.metadata, "group_highlights", {}) or {}
+        group_highlights = list(group_highlights_map.get(label) or group_highlights_map.get(group_key) or [])
         semantic_node = SemanticDiagramNode(
             id=group_id,
             label=label,
@@ -247,6 +255,7 @@ def build_semantic_diagram(graph: Graph) -> SemanticDiagram:
             members=[node.id for node in child_nodes],
             role=role,
             detail=detail,
+            highlights=group_highlights,
         )
         diagram_nodes.append(semantic_node)
         for node in child_nodes:

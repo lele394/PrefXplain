@@ -49,6 +49,7 @@ class Node:
     group: str = ""  # AI-assigned architectural group, e.g. "Analysis Pipeline"
     preview: str = ""  # first ~50 lines of the file content (for sidebar code panel)
     flowchart: dict | None = None  # AI-generated flowchart: {nodes: [...], edges: [...]}
+    highlights: list[str] = field(default_factory=list)  # concrete, codebase-specific facts (e.g. integrations, model names, hyperparameters)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -68,6 +69,8 @@ class Node:
             d["preview"] = self.preview
         if self.flowchart:
             d["flowchart"] = self.flowchart
+        if self.highlights:
+            d["highlights"] = self.highlights
         return d
 
     @classmethod
@@ -84,6 +87,7 @@ class Node:
             group=d.get("group", ""),
             preview=d.get("preview", ""),
             flowchart=d.get("flowchart"),
+            highlights=list(d.get("highlights") or []),
         )
 
 
@@ -123,6 +127,7 @@ class GraphMetadata:
     health_score: int = 0   # 1-10 architecture health rating
     health_notes: str = ""  # plain-English health interpretation
     groups: dict[str, str] = field(default_factory=dict)  # AI group name → description
+    group_highlights: dict[str, list[str]] = field(default_factory=dict)  # AI group name → concrete facts
 
     def to_dict(self) -> dict:
         d = {
@@ -140,6 +145,8 @@ class GraphMetadata:
             d["health_notes"] = self.health_notes
         if self.groups:
             d["groups"] = self.groups
+        if self.group_highlights:
+            d["group_highlights"] = self.group_highlights
         return d
 
     @classmethod
@@ -154,6 +161,7 @@ class GraphMetadata:
             health_score=d.get("health_score", 0),
             health_notes=d.get("health_notes", ""),
             groups=d.get("groups", {}),
+            group_highlights=dict(d.get("group_highlights") or {}),
         )
 
 

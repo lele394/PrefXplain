@@ -3,7 +3,7 @@
 Generates natural-language descriptions for each file node AND its symbols
 (functions, classes). Caches by (file_path, SHA-256 of file content).
 
-Default model: claude-haiku-4-5-20251001 (fast, cheap).
+Default model: claude-sonnet-4-6 (strong descriptions out of the box).
 Requires ANTHROPIC_API_KEY or OPENAI_API_KEY (or --api-key flag).
 """
 
@@ -26,9 +26,24 @@ console = Console()
 CACHE_DIR = Path.home() / ".prefxplain"
 CACHE_DB = CACHE_DIR / "cache.db"
 
-# Default: Claude Haiku (fast + cheap for codebase analysis)
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+# Default: Claude Sonnet 4.6 — better descriptions than Haiku with acceptable latency/cost
+DEFAULT_MODEL = "claude-sonnet-4-6"
 ANTHROPIC_BASE = "https://api.anthropic.com/v1"
+
+
+def _resolve_model(model: str | None) -> str:
+    """Pick the model to use for a describe call.
+
+    Priority: explicit argument > $ANTHROPIC_MODEL env var > DEFAULT_MODEL.
+    This lets Claude Code sessions (which set ANTHROPIC_MODEL) flow their
+    currently-selected model into the describer without extra config.
+    """
+    if model:
+        return model
+    env_model = os.environ.get("ANTHROPIC_MODEL")
+    if env_model:
+        return env_model
+    return DEFAULT_MODEL
 
 # v2 system prompt — returns JSON with file description + per-symbol descriptions
 SYSTEM_PROMPT_V2 = """\
@@ -40,6 +55,13 @@ Start with a verb (e.g. "Handles...", "Reads...", "Manages..."). Do not mention 
 - "symbols": for each symbol name, write 3-6 words saying what it does \
 (e.g. "run": "starts the web server", "User": "stores user account data"). \
 Only include functions and classes, not imports or variables.
+- "highlights": up to 3 CONCRETE, codebase-specific facts that make this file \
+interesting. List proper nouns: named integrations, third-party tools, model names, \
+hyperparameters, cloud providers, protocols, file formats, CLI tools, exact thresholds. \
+NOT adjectives or architectural platitudes. If nothing concrete exists, return []. \
+GOOD: ["Claude Code integration", "Codex CLI support", "SQLite cache"]. \
+BAD: ["handles user commands", "entry point for CLI", "well-structured module"]. \
+Empty is better than generic.
 - "flowchart": a flowchart showing the main logic of the file. \
 Use 3-7 nodes. Each node has "id" (string "1","2"...), "label" (3-6 words describing the step), \
 "type" ("start", "end", "decision", or "step"), and "description" (1 plain-English sentence \
@@ -50,6 +72,7 @@ Decision nodes MUST have at least 2 outgoing edges with meaningful condition lab
 Start with one "start" node and end with one "end" node.
 Respond with valid JSON only, no markdown fences.
 Example: {"file": "Manages database connections.", "symbols": {"connect": "opens a database connection"}, \
+"highlights": ["PostgreSQL driver", "connection pooling via pgbouncer", "SSL required"], \
 "flowchart": {"nodes": [{"id": "1", "label": "Receive query request", "type": "start", \
 "description": "Someone wants to run a database query."}, \
 {"id": "2", "label": "Connection pool available?", "type": "decision", \
@@ -122,6 +145,15 @@ def _init_cache() -> sqlite3.Connection:
             content_hash TEXT NOT NULL,
             data TEXT NOT NULL,
             PRIMARY KEY (file_path, content_hash)
+        )
+    """)
+    # group_highlights: cached synthesis per group keyed by content signature
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_highlights (
+            group_label TEXT NOT NULL,
+            signature TEXT NOT NULL,
+            data TEXT NOT NULL,
+            PRIMARY KEY (group_label, signature)
         )
     """)
     conn.commit()
@@ -215,12 +247,203 @@ def _set_cached_v2(conn: sqlite3.Connection, file_path: str, content_hash: str, 
     conn.commit()
 
 
+SYSTEM_PROMPT_GROUP = """\
+You are a senior software engineer summarizing a group of related files for a \
+first-year CS student.
+Given the group name and a list of its files (with short descriptions and any \
+highlights extracted from each file), output JSON: {"highlights": [...]}.
+The highlights list contains up to 3 CONCRETE, group-wide facts that a user would \
+find genuinely interesting about THIS group in THIS codebase.
+Rules:
+- Look for patterns that span multiple files: integrations, supported tools, model \
+names, hyperparameters, cloud providers, protocols, file formats, exact versions.
+- Prefer proper nouns over adjectives. GOOD: ["supports Claude Code + Codex", \
+"SQLite-backed cache", "ANTHROPIC_API_KEY env var"]. BAD: ["handles CLI commands", \
+"well-organized", "modular design"].
+- If nothing concrete and group-worthy is visible, return []. Empty is better than generic.
+- Each highlight must be ≤60 characters.
+- Respond with valid JSON only, no markdown fences.
+"""
+
+
+def _group_signature(label: str, children: list[dict]) -> str:
+    """Build a content-hash signature for a group so we can cache its highlights."""
+    payload = json.dumps(
+        {"label": label, "children": sorted((c.get("id", ""), c.get("hash", "")) for c in children)},
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _get_cached_group(
+    conn: sqlite3.Connection, label: str, signature: str,
+) -> list[str] | None:
+    row = conn.execute(
+        "SELECT data FROM group_highlights WHERE group_label = ? AND signature = ?",
+        (label, signature),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        parsed = json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, list) else None
+
+
+def _set_cached_group(
+    conn: sqlite3.Connection, label: str, signature: str, highlights: list[str],
+) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO group_highlights (group_label, signature, data) VALUES (?, ?, ?)",
+        (label, signature, json.dumps(highlights, ensure_ascii=False)),
+    )
+    conn.commit()
+
+
+def describe_groups(
+    graph: Graph,
+    root: Path,
+    api_key: str | None = None,
+    api_base: str | None = None,
+    model: str | None = None,
+    force: bool = False,
+) -> Graph:
+    """Synthesize group-level highlights by reading child file descriptions.
+
+    Groups with fewer than 2 member files are skipped — not enough signal.
+    Results are written to graph.metadata.group_highlights and cached in sqlite
+    keyed by group label + hash of child file contents.
+    """
+    model = _resolve_model(model)
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return graph
+
+    graph.infer_groups()
+
+    # Collect members per group label
+    members_by_group: dict[str, list[Node]] = {}
+    for node in graph.nodes:
+        if not node.group:
+            continue
+        members_by_group.setdefault(node.group, []).append(node)
+
+    eligible = {label: nodes for label, nodes in members_by_group.items() if len(nodes) >= 2}
+    if not eligible:
+        return graph
+
+    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    resolved_base = api_base
+    if not resolved_base and (api_key or os.environ.get("ANTHROPIC_API_KEY")):
+        resolved_base = ANTHROPIC_BASE
+
+    client_kwargs: dict = {}
+    if resolved_key:
+        client_kwargs["api_key"] = resolved_key
+    if resolved_base:
+        client_kwargs["base_url"] = resolved_base
+
+    try:
+        client = OpenAI(**client_kwargs)
+    except Exception as e:
+        console.print(f"[yellow]Could not initialize LLM client for group highlights: {e}[/yellow]")
+        return graph
+
+    conn = _init_cache()
+    try:
+        if not getattr(graph.metadata, "group_highlights", None):
+            graph.metadata.group_highlights = {}
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task("Synthesizing group highlights...", total=len(eligible))
+
+            for label, nodes in sorted(eligible.items()):
+                children_payload = []
+                for n in nodes:
+                    children_payload.append(
+                        {
+                            "id": n.id,
+                            "hash": _content_hash(root / n.id),
+                            "description": n.description,
+                            "highlights": n.highlights,
+                        }
+                    )
+                signature = _group_signature(label, children_payload)
+
+                if not force:
+                    cached = _get_cached_group(conn, label, signature)
+                    if cached is not None:
+                        graph.metadata.group_highlights[label] = cached
+                        progress.advance(task)
+                        continue
+
+                # Trim payload for prompt: top 12 files, description + highlights only
+                trimmed = [
+                    {
+                        "file": c["id"],
+                        "description": c["description"],
+                        "highlights": c["highlights"],
+                    }
+                    for c in children_payload[:12]
+                ]
+                user_prompt = (
+                    f'Group name: "{label}"\n'
+                    f"Files in group: {len(nodes)}\n\n"
+                    f"Children (JSON):\n{json.dumps(trimmed, ensure_ascii=False, indent=2)}\n\n"
+                    'Respond with {"highlights": [...]} as described.'
+                )
+
+                highlights: list[str] = []
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": SYSTEM_PROMPT_GROUP},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        max_tokens=200,
+                        temperature=0.2,
+                    )
+                    content = response.choices[0].message.content if response.choices else None
+                    raw = content.strip() if content else "{}"
+                    if raw.startswith("```"):
+                        raw = raw.split("```", 2)[1]
+                        if raw.startswith("json"):
+                            raw = raw[4:]
+                        raw = raw.strip()
+                    try:
+                        parsed = json.loads(raw)
+                    except (json.JSONDecodeError, ValueError):
+                        parsed = {}
+                    highlights = _clean_highlights(parsed.get("highlights") if isinstance(parsed, dict) else None)
+                except Exception as e:
+                    console.print(f"[yellow]  Warning: group highlight call failed for {label}: {e}[/yellow]")
+                    highlights = []
+
+                graph.metadata.group_highlights[label] = highlights
+                _set_cached_group(conn, label, signature, highlights)
+                progress.advance(task)
+    finally:
+        conn.close()
+
+    return graph
+
+
 def describe(
     graph: Graph,
     root: Path,
     api_key: str | None = None,
     api_base: str | None = None,
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
     force: bool = False,
     detail: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
@@ -228,14 +451,14 @@ def describe(
     """Fill in descriptions for all nodes and their symbols.
 
     Uses SQLite cache — only calls the LLM for files that changed since last run.
-    Defaults to claude-haiku-4-5-20251001 via Anthropic API (fast and cheap).
+    Defaults to claude-sonnet-4-6 via Anthropic API.
 
     Args:
         graph: Graph with nodes to describe.
         root: Repo root path (for reading file content).
         api_key: API key. Falls back to ANTHROPIC_API_KEY then OPENAI_API_KEY env vars.
         api_base: Optional API base URL. Defaults to Anthropic's endpoint.
-        model: LLM model name. Default: claude-haiku-4-5-20251001.
+        model: LLM model name. Default: claude-sonnet-4-6.
         force: Re-generate all descriptions, ignoring cache.
         detail: If True, generate paragraph-length file descriptions (no symbol descriptions).
         progress_callback: Called with (current, total) for custom progress reporting.
@@ -271,10 +494,11 @@ def describe(
         console.print("[yellow]Skipping descriptions. Set ANTHROPIC_API_KEY or use --no-descriptions.[/yellow]")
         return graph
 
+    resolved_model = _resolve_model(model)
     conn = _init_cache()
     try:
         return _describe_with_conn(
-            conn, graph, root, client, model, force, detail, progress_callback,
+            conn, graph, root, client, resolved_model, force, detail, progress_callback,
         )
     finally:
         conn.close()
@@ -326,6 +550,46 @@ def _validate_flowchart(fc: dict | None) -> dict | None:
     return {"nodes": clean_nodes, "edges": clean_edges}
 
 
+MAX_HIGHLIGHTS = 3
+HIGHLIGHT_MAX_LEN = 60
+
+_GENERIC_HIGHLIGHT_TOKENS = (
+    "handles ", "manages ", "provides ", "implements ", "contains ",
+    "well-", "clean ", "modular ", "robust ", "comprehensive",
+    "entry point", "main module", "core module", "utility module",
+)
+
+
+def _clean_highlights(raw: object) -> list[str]:
+    """Validate and sanitize an AI-generated highlights list.
+
+    Drops non-strings, strips, caps length, filters empty/generic entries,
+    and truncates to MAX_HIGHLIGHTS.
+    """
+    if not isinstance(raw, list):
+        return []
+    cleaned: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        text = item.strip().strip("-•*·").strip()
+        if not text:
+            continue
+        if len(text) > HIGHLIGHT_MAX_LEN:
+            text = text[: HIGHLIGHT_MAX_LEN - 1].rstrip() + "\u2026"
+        lowered = text.lower()
+        if any(tok in lowered for tok in _GENERIC_HIGHLIGHT_TOKENS):
+            continue
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        cleaned.append(text)
+        if len(cleaned) >= MAX_HIGHLIGHTS:
+            break
+    return cleaned
+
+
 def _apply_v2_data(node: Node, data: dict) -> None:
     """Apply a v2 JSON response (file desc + symbol descs + flowchart) to a node."""
     node.description = data.get("file", "").strip()
@@ -336,6 +600,7 @@ def _apply_v2_data(node: Node, data: dict) -> None:
     flowchart = _validate_flowchart(data.get("flowchart"))
     if flowchart:
         node.flowchart = flowchart
+    node.highlights = _clean_highlights(data.get("highlights"))
 
 
 def _describe_with_conn(

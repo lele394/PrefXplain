@@ -31,7 +31,7 @@ from rich.text import Text
 
 from . import __version__
 from .analyzer import analyze
-from .describer import describe
+from .describer import describe, describe_groups
 from .renderer import render, render_matrix
 
 app = typer.Typer(
@@ -157,10 +157,10 @@ def create(
         "--api-base",
         help="Custom API base URL (for Ollama, Groq, etc.).",
     ),
-    model: str = typer.Option(
-        "claude-haiku-4-5-20251001",
+    model: Optional[str] = typer.Option(
+        None,
         "--model",
-        help="LLM model for descriptions.",
+        help="LLM model for descriptions. Defaults to $ANTHROPIC_MODEL, then claude-sonnet-4-6.",
     ),
     max_files: int = typer.Option(
         500,
@@ -260,9 +260,10 @@ def update(
         None,
         "--api-base",
     ),
-    model: str = typer.Option(
-        "claude-haiku-4-5-20251001",
+    model: Optional[str] = typer.Option(
+        None,
         "--model",
+        help="LLM model for descriptions. Defaults to $ANTHROPIC_MODEL, then claude-sonnet-4-6.",
     ),
     max_files: int = typer.Option(
         500,
@@ -407,7 +408,7 @@ def mcp_cmd(
 def setup_cmd(
     tool: Optional[str] = typer.Argument(
         None,
-        help="AI tool to set up: claude-code, cursor, codex. Auto-detects if omitted.",
+        help="AI tool to set up: claude-code, cursor, codex, copilot. Auto-detects if omitted.",
     ),
     project: bool = typer.Option(
         False,
@@ -418,18 +419,23 @@ def setup_cmd(
 ) -> None:
     """Install the /prefxplain slash command for your AI coding tool.
 
-    Auto-detects Claude Code, Cursor, and Codex. Use --project to install
-    for the current repo only instead of globally.
+    Auto-detects Claude Code, Cursor, Codex, and Copilot CLI. Use --project
+    to install for the current repo only instead of globally.
     """
-    import importlib.resources
+    package_root = Path(__file__).parent
+    cmd_source = package_root / "commands" / "prefxplain.md"
+    cmd_content: Optional[str] = None
+    copilot_plugin_dir = package_root / "copilot_plugin"
+    copilot_plugin_manifest = copilot_plugin_dir / "plugin.json"
 
-    # Load the bundled command file
-    cmd_source = Path(__file__).parent / "commands" / "prefxplain.md"
-    if not cmd_source.exists():
-        console.print("[red]Command template not found in package. Reinstall prefxplain.[/red]")
-        raise typer.Exit(1)
-
-    cmd_content = cmd_source.read_text(encoding="utf-8")
+    def _load_cmd_content() -> str:
+        nonlocal cmd_content
+        if cmd_content is None:
+            if not cmd_source.exists():
+                console.print("[red]Command template not found in package. Reinstall prefxplain.[/red]")
+                raise typer.Exit(1)
+            cmd_content = cmd_source.read_text(encoding="utf-8")
+        return cmd_content
 
     # Detect available tools
     detected: list[str] = []
@@ -440,15 +446,18 @@ def setup_cmd(
         detected.append("cursor")
     if shutil.which("codex"):
         detected.append("codex")
+    if shutil.which("copilot"):
+        detected.append("copilot")
 
     targets = [tool] if tool else detected
     if not targets:
         console.print("[yellow]No AI coding tools detected.[/yellow]")
-        console.print("Supported: claude-code, cursor, codex")
-        console.print("Run: [bold]prefxplain setup claude-code[/bold] to install manually.")
+        console.print("Supported: claude-code, cursor, codex, copilot")
+        console.print("Run: [bold]prefxplain setup copilot[/bold] to install manually.")
         raise typer.Exit(1)
 
     installed: list[str] = []
+    failed = False
     for t in targets:
         if t == "claude-code":
             if project:
@@ -456,7 +465,7 @@ def setup_cmd(
             else:
                 dest = home / ".claude" / "commands" / "prefxplain.md"
             dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(cmd_content, encoding="utf-8")
+            dest.write_text(_load_cmd_content(), encoding="utf-8")
             scope = "project" if project else "global"
             installed.append(f"Claude Code ({scope}): {dest}")
 
@@ -474,7 +483,7 @@ def setup_cmd(
                 "globs: \n"
                 "alwaysApply: false\n"
                 "---\n\n"
-                + cmd_content
+                + _load_cmd_content()
             )
             dest.write_text(cursor_content, encoding="utf-8")
             scope = "project" if project else "global"
@@ -499,6 +508,60 @@ def setup_cmd(
                 dest.write_text(f"# Agent Instructions{section}", encoding="utf-8")
                 installed.append(f"Codex: created {dest}")
 
+        elif t == "copilot":
+            if not copilot_plugin_manifest.exists():
+                console.print(
+                    "[red]Copilot plugin assets missing from package. Reinstall prefxplain.[/red]"
+                )
+                failed = True
+                if tool == "copilot":
+                    raise typer.Exit(1)
+                console.print("[yellow]Skipping Copilot setup.[/yellow]")
+                continue
+
+            copilot_bin = shutil.which("copilot")
+            if not copilot_bin:
+                console.print("[red]copilot CLI not found on PATH.[/red]")
+                console.print(
+                    "Install GitHub Copilot CLI, then run: [bold]prefxplain setup copilot[/bold]."
+                )
+                failed = True
+                if tool == "copilot":
+                    raise typer.Exit(1)
+                console.print("[yellow]Skipping Copilot setup.[/yellow]")
+                continue
+
+            if project:
+                console.print(
+                    "[yellow]Copilot setup uses global plugins; ignoring --project.[/yellow]"
+                )
+
+            try:
+                result = subprocess.run(
+                    [copilot_bin, "plugin", "install", str(copilot_plugin_dir)],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            except subprocess.TimeoutExpired:
+                console.print("[red]Copilot plugin install timed out.[/red]")
+                failed = True
+                if tool == "copilot":
+                    raise typer.Exit(1)
+                console.print("[yellow]Skipping Copilot setup.[/yellow]")
+                continue
+            if result.returncode != 0:
+                console.print("[red]Failed to install Copilot plugin.[/red]")
+                if result.stderr.strip():
+                    console.print(f"[dim]{result.stderr.strip()}[/dim]")
+                failed = True
+                if tool == "copilot":
+                    raise typer.Exit(1)
+                console.print("[yellow]Skipping Copilot setup.[/yellow]")
+                continue
+
+            installed.append(f"Copilot CLI (global plugin): {copilot_plugin_manifest}")
+
         else:
             console.print(f"[yellow]Unknown tool: {t}. Skipping.[/yellow]")
 
@@ -510,6 +573,8 @@ def setup_cmd(
         console.print("Now type [bold]/prefxplain[/bold] in your AI tool to generate a codebase map.")
     else:
         console.print("[yellow]Nothing to install.[/yellow]")
+        if failed:
+            raise typer.Exit(1)
 
 
 def _run(
@@ -597,8 +662,8 @@ def _run(
     prior_json_path = (output or (root / f"prefxplain{ext}")).with_suffix(".json")
     if prior_json_path.exists():
         try:
-            from .graph import Graph as _Graph
             from .diagram import is_generated_group_label
+            from .graph import Graph as _Graph
 
             prior_graph = _Graph.load(prior_json_path)
             prior_descs = {n.id: n for n in prior_graph.nodes if n.description}
@@ -635,6 +700,15 @@ def _run(
             force=force,
             detail=detail,
         )
+        if not detail:
+            graph = describe_groups(
+                graph,
+                root=root,
+                api_key=api_key,
+                api_base=api_base,
+                model=model,
+                force=force,
+            )
 
     # Step 3: Render output
     console.print(f"[bold blue]3/3[/bold blue] Rendering {fmt} output...")

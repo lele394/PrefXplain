@@ -90,6 +90,152 @@ class TestVersion:
 
 
 # ---------------------------------------------------------------------------
+# Setup command
+# ---------------------------------------------------------------------------
+
+
+class TestSetupCommand:
+    def test_setup_copilot_installs_plugin(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        package_root = tmp_path / "prefxplain"
+        plugin_dir = package_root / "copilot_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text('{"name":"prefxplain-copilot"}', encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda name: "/usr/bin/copilot" if name == "copilot" else None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        calls: list[list[str]] = []
+
+        class _Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake_run(cmd: list[str], **_: object) -> _Result:
+            calls.append(cmd)
+            return _Result()
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", fake_run)
+
+        result = runner.invoke(app, ["setup", "copilot"])
+        assert result.exit_code == 0, result.output
+        assert "Copilot CLI (global plugin):" in result.output
+        assert calls == [[
+            "/usr/bin/copilot",
+            "plugin",
+            "install",
+            str(plugin_dir),
+        ]]
+
+    def test_setup_copilot_missing_cli_fails(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        package_root = tmp_path / "prefxplain"
+        plugin_dir = package_root / "copilot_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text('{"name":"prefxplain-copilot"}', encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup", "copilot"])
+        assert result.exit_code == 1
+        assert "copilot CLI not found on PATH." in result.output
+
+    def test_setup_autodetect_includes_copilot(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        package_root = tmp_path / "prefxplain"
+        plugin_dir = package_root / "copilot_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text('{"name":"prefxplain-copilot"}', encoding="utf-8")
+        cmd_dir = package_root / "commands"
+        cmd_dir.mkdir(parents=True)
+        (cmd_dir / "prefxplain.md").write_text("prefxplain", encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+
+        def fake_which(name: str):
+            if name == "copilot":
+                return "/usr/bin/copilot"
+            return None
+
+        monkeypatch.setattr(cli_mod.shutil, "which", fake_which)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        class _Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *_args, **_kwargs: _Result())
+
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0, result.output
+        assert "Copilot CLI (global plugin):" in result.output
+
+    def test_setup_autodetect_ignores_copilot_home_without_binary(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        cmd_dir = package_root / "commands"
+        cmd_dir.mkdir(parents=True)
+        (cmd_dir / "prefxplain.md").write_text("prefxplain", encoding="utf-8")
+
+        # Home has .copilot, but no executable => should not auto-detect copilot.
+        (tmp_path / ".copilot").mkdir(parents=True)
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 1
+        assert "No AI coding tools detected." in result.output
+
+    def test_setup_copilot_install_failure_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        plugin_dir = package_root / "copilot_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text('{"name":"prefxplain-copilot"}', encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda name: "/usr/bin/copilot" if name == "copilot" else None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        class _Result:
+            returncode = 2
+            stdout = ""
+            stderr = "install failed"
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *_args, **_kwargs: _Result())
+
+        result = runner.invoke(app, ["setup", "copilot"])
+        assert result.exit_code == 1
+        assert "Failed to install Copilot plugin." in result.output
+
+    def test_setup_copilot_install_timeout_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        plugin_dir = package_root / "copilot_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text('{"name":"prefxplain-copilot"}', encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda name: "/usr/bin/copilot" if name == "copilot" else None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        def _timeout(*_args: object, **_kwargs: object):
+            raise cli_mod.subprocess.TimeoutExpired(cmd="copilot plugin install", timeout=60)
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", _timeout)
+
+        result = runner.invoke(app, ["setup", "copilot"])
+        assert result.exit_code == 1
+        assert "Copilot plugin install timed out." in result.output
+
+
+# ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
 

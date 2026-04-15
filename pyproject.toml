@@ -59,7 +59,12 @@ where = ["."]
 include = ["prefxplain*"]
 
 [tool.setuptools.package-data]
-prefxplain = ["commands/*.md"]
+prefxplain = [
+    "commands/*.md",
+    "copilot_plugin/plugin.json",
+    "copilot_plugin/commands/*.md",
+    "copilot_plugin/skills/*/SKILL.md",
+]
 
 [tool.ruff]
 line-length = 100

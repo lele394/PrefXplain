@@ -1,0 +1,8 @@
+{
+  "name": "prefxplain-copilot",
+  "description": "Generate and refresh PrefXplain architecture maps from Copilot CLI.",
+  "version": "0.1.0",
+  "license": "MIT",
+  "commands": "commands/",
+  "skills": "skills/"
+}

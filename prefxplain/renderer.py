@@ -162,6 +162,11 @@ _HTML_TEMPLATE = """\
   #sidebar .role-tag {{ display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }}
   #sidebar .cycle-flag {{ color: #f85149; font-size: 10px; flex-shrink: 0; }}
   #sidebar .more {{ color: #6e7681; font-size: 11px; flex-shrink: 0; }}
+  #sidebar .sb-highlights-row {{ display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; border-top: 1px solid #21262d; flex-shrink: 0; flex-wrap: wrap; }}
+  #sidebar .highlight-pill {{ display: inline-flex; align-items: center; background: #1f2d3d; border: 1px solid #2b4764; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 500; color: #79c0ff; flex-shrink: 0; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  #sidebar .sb-highlights-list {{ display: block; margin: 4px 0 0; padding: 0 0 0 16px; list-style: disc; color: #c9d1d9; font-size: 11.5px; line-height: 1.55; }}
+  #sidebar .sb-highlights-list li {{ margin: 1px 0; }}
+  #sidebar .sb-highlights-list li::marker {{ color: #58a6ff; }}
   #sidebar .sb-code {{ flex: 1; min-height: 0; overflow-y: auto; margin: 0 -12px -2px; background: var(--code-bg); }}
   #sidebar .sb-code pre {{ font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 11px; line-height: 1.6; color: var(--code-fg); white-space: pre; margin: 0; padding: 8px 0; background: var(--code-bg); }}
   #sidebar .sb-code code {{ display: block; background: var(--code-bg); color: var(--code-fg); }}
@@ -560,6 +565,7 @@ function buildGroups() {{
         shape: semanticNode.shape || semanticNode.kind || 'process',
         level: semanticNode.level || 0,
         detailDiagram: semanticNode.detail || null,
+        highlights: Array.isArray(semanticNode.highlights) ? semanticNode.highlights : [],
       }};
 
       // Groups in semantic mode read as architecture blocks, not as fat file
@@ -4861,6 +4867,14 @@ function renderGroupSidebar(g) {{
   const moreFiles = ranked.length > MAX_FILES
     ? `<span class="more">+${{ranked.length - MAX_FILES}} more</span>` : '';
 
+  // Group highlights: LLM-extracted codebase-specific facts (pills)
+  const highlights = Array.isArray(g.highlights) ? g.highlights : [];
+  const highlightPills = highlights.length
+    ? `<div class="sb-highlights-row"><span class="sb-label">Highlights</span><span class="sb-vdiv"></span>`
+      + highlights.map(h => `<span class="highlight-pill">${{esc(h)}}</span>`).join('')
+      + `</div>`
+    : '';
+
   sidebar.innerHTML = `
     <div class="sb-row">
       <span class="sb-title">${{esc(g.label)}}</span>
@@ -4868,6 +4882,7 @@ function renderGroupSidebar(g) {{
       <span class="sb-meta">${{metaParts.join(' \u00b7 ')}}</span>
     </div>
     ${{descSnippet ? `<div class="sb-desc-row"><span class="sb-desc">${{esc(descSnippet)}}</span></div>` : ''}}
+    ${{highlightPills}}
     <div class="sb-row sb-row--scroll">
       <span class="sb-label">Files</span>
       <span class="sb-vdiv"></span>
@@ -4940,6 +4955,14 @@ function renderSidebar(n) {{
     applyViewportHeight();
   }}
 
+  // File highlights: LLM-extracted codebase-specific facts (bullet list)
+  const fileHighlights = Array.isArray(n.highlights) ? n.highlights : [];
+  const highlightsBlock = fileHighlights.length
+    ? `<ul class="sb-highlights-list">`
+      + fileHighlights.map(h => `<li>${{esc(h)}}</li>`).join('')
+      + `</ul>`
+    : '';
+
   sidebar.innerHTML = `
     <div class="sb-row">
       <span class="sb-title">${{esc(nodeTitleText(n))}}</span>
@@ -4949,7 +4972,7 @@ function renderSidebar(n) {{
       <span class="sb-meta">${{metaParts.join(' \u00b7 ')}}</span>
       ${{rolePill}}${{kindPill}}${{cycleFlag}}
     </div>
-    ${{descSnippet ? `<div class="sb-desc-row"><span class="sb-desc">${{esc(descSnippet)}}</span></div>` : ''}}
+    ${{descSnippet ? `<div class="sb-desc-row"><span class="sb-desc">${{esc(descSnippet)}}${{highlightsBlock}}</span></div>` : (highlightsBlock ? `<div class="sb-desc-row"><span class="sb-desc">${{highlightsBlock}}</span></div>` : '')}}
     <div class="sb-row sb-row--scroll">
       <span class="sb-label">Imported by (${{importedBy.length}})</span>
       <span class="sb-vdiv"></span>

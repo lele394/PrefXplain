@@ -51,7 +51,10 @@ thing is one HTML file — offline, shareable, safe to send.
 
 ## Install — 30 seconds
 
-**Requirements:** Python 3.10+, and [Claude Code](https://docs.anthropic.com/en/docs/claude-code) or [Codex CLI](https://github.com/openai/codex) (any one).
+**Requirements:** Python 3.10+, and one of:
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+- [Codex CLI](https://github.com/openai/codex)
+- [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli)
 
 ```bash
 pipx install prefxplain && prefxplain setup
@@ -59,15 +62,15 @@ pipx install prefxplain && prefxplain setup
 
 That's it. One command, installed globally, works from every project
 forever. `pipx` keeps it in its own isolated environment so it never
-conflicts with your project venvs. `prefxplain setup` registers the
-`/prefxplain` slash-command in Claude Code, Codex, Cursor and Windsurf —
-whichever ones you have installed.
+conflicts with your project venvs. `prefxplain setup` registers PrefXplain
+for Claude Code, Codex, Cursor/Windsurf, and Copilot CLI — whichever ones
+you have installed.
 
 > Don't have pipx? `brew install pipx` (macOS) or `python -m pip install --user pipx` (everywhere else). Or use plain `pip install prefxplain` inside a venv — you'll just have to repeat it per project.
 
 ## Use it — 1 line
 
-Open Claude Code (or Codex) inside any repo and type:
+Open your AI coding CLI (Claude Code, Codex, or Copilot) inside any repo and type:
 
 ```
 /prefxplain
@@ -80,7 +83,7 @@ a short description for each, and opens an interactive diagram in an IDE
 preview tab. First run on a medium repo: ~2 minutes. Re-runs: seconds
 (descriptions are cached).
 
-**No API key.** The agent runs inside your existing Claude Code or Codex
+**No API key.** The agent runs inside your existing Claude Code, Codex, or Copilot
 session, so you pay nothing extra — your subscription already covers it.
 If you'd rather call a model directly (CI, automation, headless), set
 `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and use the `prefxplain` CLI.
@@ -119,6 +122,16 @@ prefxplain create . --no-descriptions  # offline, no LLM, still useful
 prefxplain check .                     # CI: fail on circular deps
 prefxplain mcp .                       # MCP server for AI agents
 ```
+
+For Copilot CLI specifically, you can force setup with:
+
+```bash
+prefxplain setup copilot
+```
+
+This installs a global Copilot plugin that provides both:
+- a `/prefxplain` command
+- a natural-language trigger for prompts like "map this codebase architecture".
 
 <details>
 <summary>Full flag reference</summary>

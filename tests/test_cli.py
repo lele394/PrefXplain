@@ -234,6 +234,108 @@ class TestSetupCommand:
         assert result.exit_code == 1
         assert "Copilot plugin install timed out." in result.output
 
+    # --- Gemini CLI ---
+
+    def _make_gemini_fixture(self, tmp_path: Path):
+        """Create a fake package layout with a valid SKILL.md and return the package_root."""
+        package_root = tmp_path / "prefxplain"
+        skill_dir = package_root / "copilot_plugin" / "skills" / "prefxplain"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: prefxplain\ndescription: test\n---\n\nbody\n",
+            encoding="utf-8",
+        )
+        return package_root
+
+    def test_setup_gemini_installs_skill_global(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = self._make_gemini_fixture(tmp_path)
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil, "which",
+            lambda name: "/usr/bin/gemini" if name == "gemini" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup", "gemini"])
+        assert result.exit_code == 0, result.output
+        assert "Gemini CLI (global):" in result.output
+
+        dest = tmp_path / ".gemini" / "skills" / "prefxplain" / "SKILL.md"
+        assert dest.exists()
+        assert "name: prefxplain" in dest.read_text()
+
+    def test_setup_gemini_project_scope(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = self._make_gemini_fixture(tmp_path)
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil, "which",
+            lambda name: "/usr/bin/gemini" if name == "gemini" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup", "gemini", "--project"])
+        assert result.exit_code == 0, result.output
+        assert "Gemini CLI (project):" in result.output
+
+        dest = project_dir / ".gemini" / "skills" / "prefxplain" / "SKILL.md"
+        assert dest.exists()
+
+    def test_setup_autodetect_includes_gemini(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = self._make_gemini_fixture(tmp_path)
+        cmd_dir = package_root / "commands"
+        cmd_dir.mkdir(parents=True)
+        (cmd_dir / "prefxplain.md").write_text("prefxplain", encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil, "which",
+            lambda name: "/usr/bin/gemini" if name == "gemini" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0, result.output
+        assert "Gemini CLI (global):" in result.output
+
+    def test_setup_autodetect_includes_gemini_via_home_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = self._make_gemini_fixture(tmp_path)
+        (tmp_path / ".gemini").mkdir()
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0, result.output
+        assert "Gemini CLI (global):" in result.output
+
+    def test_setup_gemini_missing_skill_asset_fails(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # No SKILL.md in the fake package.
+        package_root = tmp_path / "prefxplain"
+        package_root.mkdir()
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil, "which",
+            lambda name: "/usr/bin/gemini" if name == "gemini" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup", "gemini"])
+        assert result.exit_code == 1
+        assert "Agent skill asset missing" in result.output
+
 
 # ---------------------------------------------------------------------------
 # Edge cases

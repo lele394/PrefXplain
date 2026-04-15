@@ -408,7 +408,7 @@ def mcp_cmd(
 def setup_cmd(
     tool: Optional[str] = typer.Argument(
         None,
-        help="AI tool to set up: claude-code, cursor, codex, copilot. Auto-detects if omitted.",
+        help="AI tool to set up: claude-code, cursor, codex, copilot, gemini. Auto-detects if omitted.",
     ),
     project: bool = typer.Option(
         False,
@@ -419,14 +419,17 @@ def setup_cmd(
 ) -> None:
     """Install the /prefxplain slash command for your AI coding tool.
 
-    Auto-detects Claude Code, Cursor, Codex, and Copilot CLI. Use --project
-    to install for the current repo only instead of globally.
+    Auto-detects Claude Code, Cursor, Codex, Copilot CLI, and Gemini CLI. Use
+    --project to install for the current repo only instead of globally.
     """
     package_root = Path(__file__).parent
     cmd_source = package_root / "commands" / "prefxplain.md"
     cmd_content: Optional[str] = None
     copilot_plugin_dir = package_root / "copilot_plugin"
     copilot_plugin_manifest = copilot_plugin_dir / "plugin.json"
+    # The Copilot plugin's SKILL.md is a plain Anthropic-style Agent Skill
+    # (universal format — also works for Gemini CLI, Cursor, and future tools).
+    agent_skill_source = copilot_plugin_dir / "skills" / "prefxplain" / "SKILL.md"
 
     def _load_cmd_content() -> str:
         nonlocal cmd_content
@@ -448,12 +451,14 @@ def setup_cmd(
         detected.append("codex")
     if shutil.which("copilot"):
         detected.append("copilot")
+    if (home / ".gemini").is_dir() or shutil.which("gemini"):
+        detected.append("gemini")
 
     targets = [tool] if tool else detected
     if not targets:
         console.print("[yellow]No AI coding tools detected.[/yellow]")
-        console.print("Supported: claude-code, cursor, codex, copilot")
-        console.print("Run: [bold]prefxplain setup copilot[/bold] to install manually.")
+        console.print("Supported: claude-code, cursor, codex, copilot, gemini")
+        console.print("Run: [bold]prefxplain setup gemini[/bold] (or copilot, claude-code, ...) to install manually.")
         raise typer.Exit(1)
 
     installed: list[str] = []
@@ -561,6 +566,26 @@ def setup_cmd(
                 continue
 
             installed.append(f"Copilot CLI (global plugin): {copilot_plugin_manifest}")
+
+        elif t == "gemini":
+            if not agent_skill_source.exists():
+                console.print(
+                    "[red]Agent skill asset missing from package. Reinstall prefxplain.[/red]"
+                )
+                failed = True
+                if tool == "gemini":
+                    raise typer.Exit(1)
+                console.print("[yellow]Skipping Gemini setup.[/yellow]")
+                continue
+
+            if project:
+                dest = Path.cwd() / ".gemini" / "skills" / "prefxplain" / "SKILL.md"
+            else:
+                dest = home / ".gemini" / "skills" / "prefxplain" / "SKILL.md"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(agent_skill_source.read_text(encoding="utf-8"), encoding="utf-8")
+            scope = "project" if project else "global"
+            installed.append(f"Gemini CLI ({scope}): {dest}")
 
         else:
             console.print(f"[yellow]Unknown tool: {t}. Skipping.[/yellow]")

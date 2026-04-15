@@ -55,6 +55,7 @@ thing is one HTML file — offline, shareable, safe to send.
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Codex CLI](https://github.com/openai/codex)
 - [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli)
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 
 ```bash
 pipx install prefxplain && prefxplain setup
@@ -63,14 +64,14 @@ pipx install prefxplain && prefxplain setup
 That's it. One command, installed globally, works from every project
 forever. `pipx` keeps it in its own isolated environment so it never
 conflicts with your project venvs. `prefxplain setup` registers PrefXplain
-for Claude Code, Codex, Cursor/Windsurf, and Copilot CLI — whichever ones
-you have installed.
+for Claude Code, Codex, Cursor/Windsurf, Copilot CLI, and Gemini CLI —
+whichever ones you have installed.
 
 > Don't have pipx? `brew install pipx` (macOS) or `python -m pip install --user pipx` (everywhere else). Or use plain `pip install prefxplain` inside a venv — you'll just have to repeat it per project.
 
 ## Use it — 1 line
 
-Open your AI coding CLI (Claude Code, Codex, or Copilot) inside any repo and type:
+Open your AI coding CLI (Claude Code, Codex, Copilot, or Gemini) inside any repo and type:
 
 ```
 /prefxplain
@@ -83,8 +84,9 @@ a short description for each, and opens an interactive diagram in an IDE
 preview tab. First run on a medium repo: ~2 minutes. Re-runs: seconds
 (descriptions are cached).
 
-**No API key.** The agent runs inside your existing Claude Code, Codex, or Copilot
-session, so you pay nothing extra — your subscription already covers it.
+**No API key.** The agent runs inside your existing Claude Code, Codex,
+Copilot, or Gemini session, so you pay nothing extra — your subscription
+already covers it.
 If you'd rather call a model directly (CI, automation, headless), set
 `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and use the `prefxplain` CLI.
 
@@ -123,15 +125,19 @@ prefxplain check .                     # CI: fail on circular deps
 prefxplain mcp .                       # MCP server for AI agents
 ```
 
-For Copilot CLI specifically, you can force setup with:
+You can also force setup for a specific tool:
 
 ```bash
-prefxplain setup copilot
+prefxplain setup copilot   # installs a global Copilot CLI plugin
+prefxplain setup gemini    # installs an Agent Skill in ~/.gemini/skills/prefxplain/
+prefxplain setup claude-code
+prefxplain setup cursor
+prefxplain setup codex
 ```
 
-This installs a global Copilot plugin that provides both:
-- a `/prefxplain` command
-- a natural-language trigger for prompts like "map this codebase architecture".
+Each variant installs the same `/prefxplain` slash command — plus a
+natural-language trigger ("map this codebase architecture") for agents
+that use the Anthropic Agent Skill format (Copilot, Gemini, Claude Code).
 
 <details>
 <summary>Full flag reference</summary>

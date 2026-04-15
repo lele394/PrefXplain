@@ -1,7 +1,7 @@
 {
   "name": "prefxplain-copilot",
   "description": "Generate and refresh PrefXplain architecture maps from Copilot CLI. Provides the /prefxplain skill.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "MIT",
   "keywords": ["prefxplain", "architecture", "dependency-graph", "codebase-map"],
   "skills": "skills/"

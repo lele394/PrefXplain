@@ -4,15 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefxplain"
-version = "0.2.0"
-description = "Explain your codebase in 30 seconds. Interactive architecture diagrams with AI descriptions, health scoring, and blast radius analysis."
+version = "0.3.0"
+description = "Explain your codebase in 30 seconds. Interactive architecture diagrams with AI descriptions, health scoring, and blast radius analysis. Works with Claude Code, Codex, Copilot CLI, and Gemini CLI."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 authors = [{ name = "PrefXplain Contributors" }]
 keywords = [
     "codebase-visualization", "dependency-graph", "architecture-diagram",
-    "code-review", "claude-code", "ai-documentation", "code-understanding",
+    "code-review", "claude-code", "codex", "copilot-cli", "gemini-cli",
+    "agent-skill", "ai-documentation", "code-understanding",
     "technical-debt", "cycle-detection", "import-analysis",
     "vscode-extension", "interactive-graph", "code-map", "onboarding",
     "developer-tools", "static-analysis", "mcp-server",

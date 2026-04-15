@@ -62,7 +62,6 @@ include = ["prefxplain*"]
 prefxplain = [
     "commands/*.md",
     "copilot_plugin/plugin.json",
-    "copilot_plugin/commands/*.md",
     "copilot_plugin/skills/*/SKILL.md",
 ]
 

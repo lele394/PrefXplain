@@ -4,6 +4,24 @@ All notable changes to PrefXplain are documented here.
 
 ---
 
+## [0.1.0.2] - 2026-04-15
+
+### Fixed
+- **Arrow overlap in vertical flow**: arrows sharing the same routing corridor now exit/enter at staggered Y positions proportional to lane index, eliminating collinear horizontal segments that caused visual stacking
+- **Arrow overlap at low zoom**: lane stagger is zoom-aware (`max(LANE_SPREAD × 0.7, lw × 3.5)`) so parallel arrows stay visually distinct regardless of zoom level
+- **Fallback routing overlap**: when all 32 routing attempts are exhausted, the fallback now prefers the alt side if the primary corridor would overlap an already-drawn edge, preventing last-resort routes from stacking on top of earlier arrows
+- **Solo block visual weight**: solo (ungrouped) blocks now have a thicker border, matching the visual prominence of grouped blocks
+- **Arrow margin near blocks**: edge routing corridor margin increased so arrows can't graze the edges of neighboring blocks in tight layouts
+- **Open group inner padding**: added breathing room (`OPEN_GROUP_INNER_TOP`) between the separator line and the first child row inside open groups
+- **Open group cell width**: cell width inside open groups now dynamically widens to fit the longest title without truncation (capped at 2× `NODE_W`)
+- **Group block width**: closed group block width scales with label length to prevent title truncation
+
+### Changed
+- **Lane corridor spacing** (`LANE_SPREAD`): increased from 18 → 65 world units so parallel arrow corridors are visually well-separated at all zoom levels
+- Hover tooltip button added to toolbar (`Hover: On/Off`); details sidebar button removed
+
+---
+
 ## [0.1.0.1] - 2026-04-12
 
 ### Fixed

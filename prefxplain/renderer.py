@@ -170,7 +170,7 @@ _HTML_TEMPLATE = """\
     <span class="ph-spacer"></span>
     <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
     <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
-    <button id="btnSidebar" onclick="toggleSidebarEnabled()">Details: On</button>
+    <button id="btnHover" onclick="toggleHoverTooltip()" class="active">Hover: On</button>
     <button onclick="zoomToFit()">Fit</button>
     <button onclick="toggleHelp()">?</button>
   </div>
@@ -526,7 +526,7 @@ function buildGroups() {{
         size: totalSize,
         fileCount: childNodes.length,
         x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0, pinned: false,
-        w: NODE_W + 56, h: NODE_H_BASE + 28,
+        w: Math.max(NODE_W + 56, Math.ceil(semanticNode.label.length * 10 + 80)), h: NODE_H_BASE + 28,
         indegree: 0, outdegree: 0, pagerank: 0,
         symbols: [], role, preview: '', inCycle: false,
         kind: semanticNode.kind || 'process',
@@ -538,8 +538,8 @@ function buildGroups() {{
       // Groups in semantic mode read as architecture blocks, not as fat file
       // cards. Size them so there's room for title + description + a row of
       // child sub-block hints rendered inside.
-      group.w = 360;
-      group.h = 210;
+      group.w = Math.max(420, Math.ceil(semanticNode.label.length * 10 + 80));
+      group.h = 230;
 
       groupMap[group.id] = group;
       for (const id of ids) nodeToGroup[id] = group.id;
@@ -594,7 +594,7 @@ function buildGroups() {{
       size: totalSize,
       fileCount: childNodes.length,
       x: 0, y: 0, vx: 0, vy: 0, fx: 0, fy: 0, pinned: false,
-      w: NODE_W + 56, h: NODE_H_BASE + 28, // temporary, replaced below
+      w: Math.max(NODE_W + 56, Math.ceil(label.length * 10 + 80)), h: NODE_H_BASE + 28, // temporary, replaced below
       indegree: 0, outdegree: 0, pagerank: 0,
       symbols: [], role, preview: '', inCycle: false,
     }};
@@ -822,6 +822,7 @@ function collapseGroups() {{
 const OPEN_GROUP_HEADER = 120;
 const OPEN_GROUP_PAD = 36;
 const OPEN_GROUP_GAP = 48;
+const OPEN_GROUP_INNER_TOP = 20; // breathing room between separator line and first child row
 
 function layoutOpenGroupChildren(group) {{
   const children = (group.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
@@ -866,10 +867,21 @@ function layoutOpenGroupChildren(group) {{
   // "two blocks inside a container" rather than a tall single-column stack.
   const cols = n <= 1 ? 1 : (n <= 4 ? 2 : 3);
   const rows = Math.ceil(n / cols);
-  const cellW = NODE_W;
+  // Dynamically widen cells to fit the longest title without truncation.
+  // Bold 14px font is drawn in screen space; target reference zoom ~0.65 so
+  // titles stay readable at typical view distances. ~9px per char + chrome
+  // (left bar + both-side padding + inner margin ≈ 52px). Cap at 2× NODE_W.
+  const REF_ZOOM = 0.65;
+  const CHAR_PX = 9;
+  const CHROME_PX = 52;
+  const longestTitleScreenW = sorted.reduce((mx, c) => {{
+    const len = nodeTitleText(c).length;
+    return Math.max(mx, len * CHAR_PX + CHROME_PX);
+  }}, 0);
+  const cellW = Math.min(Math.max(NODE_W, Math.ceil(longestTitleScreenW / REF_ZOOM)), NODE_W * 2);
   const cellH = Math.max(...sorted.map(c => c.h || NODE_H_BASE));
   const openW = cols * cellW + (cols - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD * 2;
-  const openH = OPEN_GROUP_HEADER + rows * cellH + (rows - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD;
+  const openH = OPEN_GROUP_HEADER + OPEN_GROUP_INNER_TOP + rows * cellH + (rows - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD;
   const topY = group.y - group.h / 2;
   const leftX = group.x - openW / 2;
 
@@ -877,10 +889,10 @@ function layoutOpenGroupChildren(group) {{
     const col = i % cols;
     const row = Math.floor(i / cols);
     const cx = leftX + OPEN_GROUP_PAD + col * (cellW + OPEN_GROUP_GAP) + cellW / 2;
-    const cy = topY + OPEN_GROUP_HEADER + row * (cellH + OPEN_GROUP_GAP) + cellH / 2;
+    const cy = topY + OPEN_GROUP_HEADER + OPEN_GROUP_INNER_TOP + row * (cellH + OPEN_GROUP_GAP) + cellH / 2;
     return {{ node, cx, cy }};
   }});
-  return {{ items, openW, openH, cols, rows, internalEdges: gEdges }};
+  return {{ items, openW, openH, cols, rows, cellW, internalEdges: gEdges }};
 }}
 
 function openGroupVisualHeight(group) {{
@@ -923,22 +935,17 @@ function toggleFlowDirection() {{
 }}
 
 let sidebarEnabled = true;
-function toggleSidebarEnabled() {{
-  sidebarEnabled = !sidebarEnabled;
-  const btn = document.getElementById('btnSidebar');
-  if (btn) btn.textContent = sidebarEnabled ? 'Details: On' : 'Details: Off';
-  if (!sidebarEnabled) {{
-    sidebar.classList.add('hidden');
-    sidebar.innerHTML = '';
-  }} else {{
-    sidebar.classList.remove('hidden');
-    if (selectedNode) {{
-      renderSidebar(selectedNode);
-    }} else if (hoveredNode) {{
-      hoveredNode.isGroup ? renderGroupSidebar(hoveredNode) : renderSidebar(hoveredNode);
-    }} else {{
-      sidebar.innerHTML = '<div class="placeholder">Hover or click a block to see details.</div>';
-    }}
+let hoverTooltipEnabled = true;
+function toggleHoverTooltip() {{
+  hoverTooltipEnabled = !hoverTooltipEnabled;
+  const btn = document.getElementById('btnHover');
+  if (btn) {{
+    btn.textContent = hoverTooltipEnabled ? 'Hover: On' : 'Hover: Off';
+    btn.classList.toggle('active', hoverTooltipEnabled);
+  }}
+  if (!hoverTooltipEnabled) {{
+    const gtt = document.getElementById('group-tooltip');
+    if (gtt) gtt.style.display = 'none';
   }}
 }}
 
@@ -1014,8 +1021,8 @@ function layoutBlockRows(rows) {{
   const nonEmpty = rows.filter(r => r.length > 0);
   if (nonEmpty.length === 0) return;
 
-  const ROW_GAP = Math.max(140, 140 * spreadFactor);
-  const COL_GAP = Math.max(80, 80 * spreadFactor);
+  const ROW_GAP = Math.max(280, 280 * spreadFactor);
+  const COL_GAP = Math.max(180, 180 * spreadFactor);
   const rowHeights = nonEmpty.map(row => Math.max(...row.map(n => n.h)));
   const rowWidths = nonEmpty.map(row =>
     row.reduce((sum, n) => sum + n.w, 0) + Math.max(0, row.length - 1) * COL_GAP
@@ -1042,8 +1049,8 @@ function layoutBlockColumns(columns) {{
   const nonEmpty = columns.filter(col => col.length > 0);
   if (nonEmpty.length === 0) return;
 
-  const COLUMN_GAP = Math.max(180, 180 * spreadFactor);
-  const ROW_GAP = Math.max(80, 80 * spreadFactor);
+  const COLUMN_GAP = Math.max(320, 320 * spreadFactor);
+  const ROW_GAP = Math.max(180, 180 * spreadFactor);
   const widths = nonEmpty.map(col => Math.max(...col.map(n => n.w)));
   const heights = nonEmpty.map(col => col.reduce((sum, n) => sum + n.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
   const totalWidth = widths.reduce((sum, width) => sum + width, 0) + Math.max(0, widths.length - 1) * COLUMN_GAP;
@@ -1266,6 +1273,134 @@ function layoutExpandedBlock(nodeList) {{
   }});
 }}
 
+
+// Post-layout pass: iteratively push nodes apart until every edge-label bbox
+// (and every node bbox) has sufficient clearance from its neighbours.
+// Calibrated for zoom ~0.7 (typical fit-view). A per-node displacement cap
+// prevents the algorithm from exploding on dense fan-in graphs.
+//
+// Per iteration:
+//   1. Accumulate push vectors for all label-label overlaps (non-shared nodes only).
+//   2. Apply accumulated vectors, capped to MAX_DISP per node per iteration.
+//   3. Fix any resulting node-node collisions.
+// Repeat until stable or MAX_ITERS reached.
+function resolveEdgeLabelOverlaps(nodeList, edgeList) {{
+  // Constants calibrated for zoom ~0.7 (comfortable fit-view).
+  // Label text is drawn at 14px bold screen space; at zoom 0.7 that maps to
+  // ~20px world units per pixel, so we use slightly enlarged values.
+  const LABEL_H   = 32;   // ~22px screen / 0.7 zoom
+  const CHAR_W    = 13;   // ~8.5px screen / 0.7 zoom
+  const H_PAD     = 23;   // ~16px screen / 0.7 zoom
+  const LABEL_CLR = 30;   // clearance between label bboxes (world units)
+  const NODE_CLR  = 18;   // clearance between node bboxes (world units)
+  const MAX_ITERS = 15;
+  const MIN_PUSH  = 10;   // minimum push per overlap (world units)
+  const MAX_DISP  = 60;   // max displacement per node per iteration — prevents explosion
+
+  const nIdx = {{}};
+  for (const n of nodeList) nIdx[n.id] = n;
+
+  function edgeLabelText(e) {{
+    const w = e.weight || 1;
+    const lbl = (typeof e.label === 'string') ? e.label : '';
+    if (lbl && w > 1) return lbl + ' · ×' + w;
+    if (lbl) return lbl;
+    if (w > 1) return '×' + w;
+    return '';
+  }}
+
+  // Label bbox — cx/cy are live getters so they recompute after node moves.
+  function makeLabelBox(e) {{
+    const sId = (e.source && e.source.id != null) ? e.source.id : e.source;
+    const tId = (e.target && e.target.id != null) ? e.target.id : e.target;
+    const src = nIdx[sId], tgt = nIdx[tId];
+    if (!src || !tgt || src === tgt) return null;
+    const text = edgeLabelText(e);
+    if (!text) return null;
+    const hw = (text.length * CHAR_W + H_PAD) / 2;
+    const hh = LABEL_H / 2;
+    const box = {{ src, tgt, hw, hh }};
+    Object.defineProperty(box, 'cx', {{ get() {{ return (this.src.x + this.tgt.x) / 2; }} }});
+    Object.defineProperty(box, 'cy', {{ get() {{ return (this.src.y + this.tgt.y) / 2; }} }});
+    return box;
+  }}
+
+  for (let iter = 0; iter < MAX_ITERS; iter++) {{
+    let moved = false;
+    const boxes = edgeList.map(makeLabelBox).filter(Boolean);
+
+    // ── 1. Accumulate label-label push vectors ────────────────────────────
+    // Collect all pushes into a displacement map before applying them.
+    // This prevents cascade: a node pushed by pair A doesn't immediately
+    // affect pair B's overlap calculation within the same iteration.
+    const disp = {{}}; // nodeId -> {{dx, dy}}
+    const ensureDisp = id => {{ if (!disp[id]) disp[id] = {{dx: 0, dy: 0}}; }};
+
+    for (let i = 0; i < boxes.length; i++) {{
+      for (let j = i + 1; j < boxes.length; j++) {{
+        const a = boxes[i], b = boxes[j];
+        const overX = (a.hw + b.hw + LABEL_CLR) - Math.abs(a.cx - b.cx);
+        const overY = (a.hh + b.hh + LABEL_CLR) - Math.abs(a.cy - b.cy);
+        if (overX <= 0 || overY <= 0) continue;
+
+        const sharedIds = new Set(
+          [a.src.id, a.tgt.id].filter(id => id === b.src.id || id === b.tgt.id)
+        );
+        const aNonShared = [a.src, a.tgt].filter(n => !sharedIds.has(n.id));
+        const bNonShared = [b.src, b.tgt].filter(n => !sharedIds.has(n.id));
+        if (!aNonShared.length && !bNonShared.length) continue;
+
+        const axis = overY <= overX ? 'y' : 'x';
+        const overlap = axis === 'y' ? overY : overX;
+        const push = Math.max(MIN_PUSH, overlap) / 2;
+
+        const aFirst = axis === 'y' ? (a.cy <= b.cy) : (a.cx <= b.cx);
+        const [loNodes, hiNodes] = aFirst ? [aNonShared, bNonShared] : [bNonShared, aNonShared];
+        const key = axis === 'x' ? 'dx' : 'dy';
+        for (const n of loNodes) {{ ensureDisp(n.id); disp[n.id][key] -= push; }}
+        for (const n of hiNodes) {{ ensureDisp(n.id); disp[n.id][key] += push; }}
+        moved = true;
+      }}
+    }}
+
+    // Apply accumulated displacements, capped at MAX_DISP per node per iteration.
+    for (const [id, d] of Object.entries(disp)) {{
+      const n = nIdx[id];
+      if (!n) continue;
+      const mag = Math.hypot(d.dx, d.dy);
+      const scale = mag > MAX_DISP ? MAX_DISP / mag : 1;
+      n.x += d.dx * scale;
+      n.y += d.dy * scale;
+    }}
+
+    // ── 2. Node-node overlaps (fix collisions introduced by the label pass) ──
+    for (let i = 0; i < nodeList.length; i++) {{
+      for (let j = i + 1; j < nodeList.length; j++) {{
+        const a = nodeList[i], b = nodeList[j];
+        const aw = (a.w || NODE_W), ah = (a.h || NODE_H_BASE);
+        const bw = (b.w || NODE_W), bh = (b.h || NODE_H_BASE);
+        const overX = (aw + bw) / 2 + NODE_CLR - Math.abs(a.x - b.x);
+        const overY = (ah + bh) / 2 + NODE_CLR - Math.abs(a.y - b.y);
+        if (overX <= 0 || overY <= 0) continue;
+
+        const axis = overY <= overX ? 'y' : 'x';
+        const overlap = axis === 'y' ? overY : overX;
+        const push = Math.max(MIN_PUSH, overlap) / 2;
+        if (axis === 'y') {{
+          if (a.y <= b.y) {{ a.y -= push; b.y += push; }}
+          else             {{ a.y += push; b.y -= push; }}
+        }} else {{
+          if (a.x <= b.x) {{ a.x -= push; b.x += push; }}
+          else             {{ a.x += push; b.x -= push; }}
+        }}
+        moved = true;
+      }}
+    }}
+
+    if (!moved) break;
+  }}
+}}
+
 function layoutBlocks(nodeList, edgeList) {{
   nodeList = nodeList || visibleNodes || nodes;
   edgeList = edgeList || visibleEdges || edges;
@@ -1276,10 +1411,12 @@ function layoutBlocks(nodeList, edgeList) {{
   if (groupingState === 'flat') {{
     layoutLayered(nodeList, edgeList);
     window.__layerBands = null;
+    resolveEdgeLabelOverlaps(nodeList, edgeList);
     return;
   }}
 
   layoutGroupedBlocks(nodeList, edgeList);
+  resolveEdgeLabelOverlaps(nodeList, edgeList);
 }}
 
 // One-shot grid layout when Clusters mode is enabled.
@@ -1616,13 +1753,22 @@ function computeFitZoom(width, height, nodeList) {{
   // ("tests · xN") and group chrome extend beyond. Reserve slack so content
   // doesn't clip on the edges of the viewport.
   const pad = 48;
-  const labelMarginX = 90;
-  const labelMarginY = 40;
+  // Edges routing around blocks extend well beyond node bboxes on the axis
+  // perpendicular to the flow direction (edges detour sideways in vertical
+  // flow, vertically in horizontal flow). Reserve generous slack on that axis.
+  const dirForMargin = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
+  const labelMarginX = dirForMargin === 'horizontal' ? 160 : 700;
+  const labelMarginY = dirForMargin === 'horizontal' ? 700 : 120;
   const spanX = Math.max(bounds.wx1 - bounds.wx0 + labelMarginX * 2, 1);
   const spanY = Math.max(bounds.wy1 - bounds.wy0 + labelMarginY * 2, 1);
   const zx = Math.max(0.01, (width - pad * 2) / spanX);
   const zy = Math.max(0.01, (height - pad * 2) / spanY);
-  return Math.max(0.3, Math.min(zx, zy, 2.5));
+  // Axis-locked fit: in vertical flow the user scrolls vertically, so content
+  // must never overflow horizontally (fit width). In horizontal flow, fit
+  // height instead so content stays inside vertically.
+  const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
+  const axisFit = dir === 'horizontal' ? zy : zx;
+  return Math.max(0.3, Math.min(axisFit, 2.5));
 }}
 
 function syncZoomScale(width, height) {{
@@ -1771,17 +1917,49 @@ function clampPan() {{
   const maxPanY = -(wy0 * zoom) + canvasH() * (1 - margin);
   pan.x = Math.max(minPanX, Math.min(maxPanX, pan.x));
   pan.y = Math.max(minPanY, Math.min(maxPanY, pan.y));
+  // When zoomed out to (or past) the axis-fit level, the perpendicular axis
+  // already fits entirely in the viewport — lock pan on that axis so the user
+  // can only scroll along the flow axis.
+  if (fitZoomLevel && zoom <= fitZoomLevel + 1e-3) {{
+    const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
+    if (dir === 'vertical') {{
+      pan.x = (canvasW() - (wx0 + wx1) * zoom) / 2;
+    }} else {{
+      pan.y = (canvasH() - (wy0 + wy1) * zoom) / 2;
+    }}
+  }}
 }}
 
 // ── Force simulation ─────────────────────────────────────────────────────────
 
-const NODE_W = 220, NODE_H_BASE = 76, NODE_R = 6;
+// Declared here (before nodes.forEach) so nodeTitleText → derivedNodeTitle can
+// use them during initial node-width computation without hitting the TDZ.
+const WHITESPACE_RE = new RegExp('\\\\s+', 'g');
+const JS_EXT_RE = new RegExp('\\\\.(py|js|ts)$');
+
+const NODE_W = 540, NODE_H_BASE = 160, NODE_R = 6;
 // Taller nodes need more space — bump repulsion and spring length
 const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
 // Fixed height sized to fit a short explanation under each node title.
 function nodeHeight(n) {{
-  return NODE_H_BASE;
+  if (n.isGroup) return NODE_H_BASE;
+  // Dynamically size the card to fit its title + description without clipping.
+  // Uses character-count estimation (no canvas needed at init time):
+  //   bold 16px  ≈ 9.5 px/char  (title)
+  //   regular 13px ≈ 6.5 px/char (summary)
+  const w = (n.w || NODE_W) - 16;   // inner width (8 px padding each side)
+  const titleText   = nodeTitleText(n);
+  const summaryText = nodeSummaryText(n);
+  const titleCharsPerLine   = Math.max(1, Math.floor(w / 9.5));
+  const summaryCharsPerLine = Math.max(1, Math.floor(w / 6.5));
+  const titleLines   = Math.min(2, Math.max(1, Math.ceil(titleText.length   / titleCharsPerLine)));
+  const summaryLines = summaryText
+    ? Math.max(1, Math.ceil(summaryText.length / summaryCharsPerLine))
+    : 0;
+  // Layout: topPad(12) + title(lines×18) + gap(6) + summary(lines×15) + margin(11) + footer(22)
+  const needed = 12 + titleLines * 18 + 6 + summaryLines * 15 + 11 + 22;
+  return Math.max(NODE_H_BASE, needed);
 }}
 
 // ── Topology-aware initial placement ─────────────────────────────────────────
@@ -1850,7 +2028,9 @@ nodes.forEach(n => {{ nodeIndex[n.id] = n; }});
 const maxIndegree = Math.max(1, ...nodes.map(n => NODE_METRICS[n.id]?.indegree || 0));
 nodes.forEach(n => {{
   const m = NODE_METRICS[n.id] || {{}};
-  n.w = NODE_W;
+  // Width adapts to the title length so text never truncates.
+  // Bold 16px ≈ 9px/char; add 70px chrome (left bar + padding).
+  n.w = Math.max(NODE_W, Math.ceil(nodeTitleText(n).length * 9 + 70));
   n.h = nodeHeight(n); // dynamic: base + symbols
   n.indegree = m.indegree || 0;
   n.outdegree = m.outdegree || 0;
@@ -1938,9 +2118,6 @@ for (const e of GRAPH.edges) {{
   if (importsByNode[e.source]) importsByNode[e.source].push({{ id: e.target, dir: 'out' }});
   if (importedByNode[e.target]) importedByNode[e.target].push({{ id: e.source, dir: 'in' }});
 }}
-
-const WHITESPACE_RE = new RegExp('\\\\s+', 'g');
-const JS_EXT_RE = new RegExp('\\\\.(py|js|ts)$');
 
 let simRunning = true;
 let simTicks = 0;
@@ -2699,6 +2876,56 @@ function draw() {{
     return {{ x: pt.x, y: box.y + Math.max(-hh, Math.min(hh, (pt.y - box.y) + offset)) }};
   }}
 
+  // Segments already drawn for previous edges, in world coordinates.
+  // Used so the current edge can avoid sharing a collinear run with an
+  // earlier edge — perpendicular crossings are fine, parallel overlap
+  // beyond a few pixels is not. Reset right before the edge draw loop.
+  let _drawnSegments = [];
+  let _drawnLabels = []; // world-space bboxes of edge labels already placed
+  const _OVERLAP_TOL = 6; // world units of collinear overlap we accept
+  // True if segment (ax,ay)->(bx,by) shares a collinear run longer than tol
+  // with any previously drawn segment. Non-axis-aligned legs are ignored
+  // (diagonals cross without stacking).
+  function _segmentOverlapsDrawn(ax, ay, bx, by) {{
+    const horiz = Math.abs(ay - by) < 0.5;
+    const vert  = Math.abs(ax - bx) < 0.5;
+    if (!horiz && !vert) return false;
+    for (const s of _drawnSegments) {{
+      if (horiz && s.horiz && Math.abs(s.y - ay) < 2) {{
+        const lo1 = Math.min(ax, bx), hi1 = Math.max(ax, bx);
+        const lo2 = s.lo, hi2 = s.hi;
+        const ov = Math.min(hi1, hi2) - Math.max(lo1, lo2);
+        if (ov > _OVERLAP_TOL) return true;
+      }} else if (vert && s.vert && Math.abs(s.x - ax) < 2) {{
+        const lo1 = Math.min(ay, by), hi1 = Math.max(ay, by);
+        const lo2 = s.lo, hi2 = s.hi;
+        const ov = Math.min(hi1, hi2) - Math.max(lo1, lo2);
+        if (ov > _OVERLAP_TOL) return true;
+      }}
+    }}
+    return false;
+  }}
+  function _pushDrawnSegments(wps) {{
+    for (let i = 0; i < wps.length - 1; i++) {{
+      const p = wps[i], q = wps[i + 1];
+      const horiz = Math.abs(p.y - q.y) < 0.5;
+      const vert  = Math.abs(p.x - q.x) < 0.5;
+      if (horiz) {{
+        _drawnSegments.push({{ horiz: true, vert: false, y: p.y,
+          lo: Math.min(p.x, q.x), hi: Math.max(p.x, q.x) }});
+      }} else if (vert) {{
+        _drawnSegments.push({{ horiz: false, vert: true, x: p.x,
+          lo: Math.min(p.y, q.y), hi: Math.max(p.y, q.y) }});
+      }}
+    }}
+  }}
+  function _waypointsOverlapDrawn(wps) {{
+    for (let i = 0; i < wps.length - 1; i++) {{
+      if (_segmentOverlapsDrawn(wps[i].x, wps[i].y, wps[i+1].x, wps[i+1].y)) return true;
+    }}
+    return false;
+  }}
+
   // Draw arrow from a→b, routing around any blocking nodes
   // laneIdx = unique index for this edge, used to offset routing lanes
   function drawEdgeArrow(a, b, color, lw, arrowSize, weight, bidi, laneIdx, labelText) {{
@@ -2708,20 +2935,31 @@ function draw() {{
     // world positions shift with zoom — close enough at high zoom that
     // lineHitsRect (fixed 4-unit pad) would flag the route as blocked and
     // flip to the alt side. Result: edges visibly jumped as the user zoomed.
-    const LANE_SPREAD = 18;
+    const LANE_SPREAD = 65;
     const laneOffset = (laneIdx - (totalLanes - 1) / 2) * LANE_SPREAD;
     const obstacles = getObstacles(a, b);
 
-    // Check if straight line hits any obstacle
+    // Check if straight line hits any obstacle — pad matches waypointsHit so
+    // straight-line clearance is consistent with routed-edge clearance.
     const blockers = [];
     for (const ob of obstacles) {{
-      if (lineHitsRect(aBox.x, aBox.y, bBox.x, bBox.y, ob.x, ob.y, ob.w, ob.h, 12)) {{
+      if (lineHitsRect(aBox.x, aBox.y, bBox.x, bBox.y, ob.x, ob.y, ob.w, ob.h, 120)) {{
         blockers.push(ob);
       }}
     }}
 
     // Build waypoints
     let waypoints;
+    // Helper: does a segment list graze any obstacle?
+    const _segmentsHit = (wps) => {{
+      for (const ob of obstacles) {{
+        for (let i = 0; i < wps.length - 1; i++) {{
+          if (lineHitsRect(wps[i].x, wps[i].y, wps[i+1].x, wps[i+1].y,
+              ob.x, ob.y, ob.w, ob.h, 4)) return true;
+        }}
+      }}
+      return false;
+    }};
     if (blockers.length === 0) {{
       // Straight: compute edge points on borders, then shift along the border
       let sp = rectEdgePoint(bBox.x, bBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
@@ -2729,7 +2967,22 @@ function draw() {{
       sp = shiftAlongBorder(sp, aBox, laneOffset);
       ep = shiftAlongBorder(ep, bBox, laneOffset);
       waypoints = [sp, ep];
-    }} else {{
+      // Re-verify: the lane shift may have pushed the line across a block,
+      // or the straight run may sit on top of a previously drawn edge.
+      // Either way, fall through to corridor routing so the rules
+      // (no arrow over/under a block, no long parallel overlap) hold.
+      if (_segmentsHit(waypoints) || _waypointsOverlapDrawn(waypoints)) {{
+        for (const ob of obstacles) {{
+          if (lineHitsRect(aBox.x, aBox.y, bBox.x, bBox.y, ob.x, ob.y, ob.w, ob.h, 4)
+              || lineHitsRect(sp.x, sp.y, ep.x, ep.y, ob.x, ob.y, ob.w, ob.h, 4)) {{
+            blockers.push(ob);
+          }}
+        }}
+        if (blockers.length === 0) blockers.push(...obstacles);
+        waypoints = null;
+      }}
+    }}
+    if (!waypoints) {{
       // Route around ALL blockers with per-edge lane offset.
       // Corridor axis depends on the flow direction:
       //   vertical flow   → corridor is a vertical line (constant X, vary Y)
@@ -2737,7 +2990,7 @@ function draw() {{
       const routeOffset = laneIdx * LANE_SPREAD;
       // Zoom-invariant corridor margin (world units). See LANE_SPREAD note
       // above — any /zoom here makes routing non-deterministic.
-      const margin = 24;
+      const margin = 192;
       const dir = resolvedFlowDirection(); // 'horizontal' | 'vertical'
 
       // Rule: arrows must never pass through blocks. Build candidate
@@ -2762,9 +3015,16 @@ function draw() {{
             for (const ob of blockers) sideY = Math.min(sideY, ob.y - ob.h / 2);
             sideY -= off;
           }}
-          const sp = rectEdgePoint(aBox.x, sideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-          const ep = rectEdgePoint(bBox.x, sideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-          return [sp, {{ x: sp.x, y: sideY }}, {{ x: ep.x, y: sideY }}, ep];
+          const sp0h = rectEdgePoint(aBox.x, sideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+          const ep0h = rectEdgePoint(bBox.x, sideY, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+          // Stagger vertical exit/entry X by laneIdx to prevent collinear vertical segments.
+          // minVSep: at least 3.5× line width so arrows stay visually distinct when zoomed out.
+          const minVSep = Math.max(LANE_SPREAD * 0.7, lw * 3.5);
+          const vStagger = (laneIdx - (totalLanes - 1) / 2) * minVSep;
+          const clampV = (x, box) => Math.max(box.x - box.w / 2 + 8, Math.min(box.x + box.w / 2 - 8, x));
+          const spX = clampV(sp0h.x + vStagger, aBox);
+          const epX = clampV(ep0h.x + vStagger, bBox);
+          return [{{ x: spX, y: sp0h.y }}, {{ x: spX, y: sideY }}, {{ x: epX, y: sideY }}, {{ x: epX, y: ep0h.y }}];
         }} else {{
           const goRight = aBox.x <= bBox.x;
           const pickSide = primarySide === 'primary' ? goRight : !goRight;
@@ -2778,9 +3038,17 @@ function draw() {{
             for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
             sideX -= off;
           }}
-          const sp = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-          const ep = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-          return [sp, {{ x: sideX, y: sp.y }}, {{ x: sideX, y: ep.y }}, ep];
+          const sp0 = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
+          const ep0 = rectEdgePoint(sideX, bBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
+          // Rule: stagger horizontal exit/entry Y by laneIdx so arrows sharing
+          // the same side corridor never produce collinear horizontal segments.
+          // minHSep: at least 3.5× line width so arrows stay visually distinct when zoomed out.
+          const minHSep = Math.max(LANE_SPREAD * 0.7, lw * 3.5);
+          const hStagger = (laneIdx - (totalLanes - 1) / 2) * minHSep;
+          const clampH = (y, box) => Math.max(box.y - box.h / 2 + 8, Math.min(box.y + box.h / 2 - 8, y));
+          const spY = clampH(sp0.y + hStagger, aBox);
+          const epY = clampH(ep0.y + hStagger, bBox);
+          return [{{ x: sp0.x, y: spY }}, {{ x: sideX, y: spY }}, {{ x: sideX, y: epY }}, {{ x: ep0.x, y: epY }}];
         }}
       }};
 
@@ -2788,7 +3056,7 @@ function draw() {{
         for (const ob of obstacles) {{
           for (let i = 0; i < wps.length - 1; i++) {{
             if (lineHitsRect(wps[i].x, wps[i].y, wps[i+1].x, wps[i+1].y,
-                ob.x, ob.y, ob.w, ob.h, 4)) return true;
+                ob.x, ob.y, ob.w, ob.h, 120)) return true;
           }}
         }}
         return false;
@@ -2798,14 +3066,23 @@ function draw() {{
       for (let push = 0; push < MAX_PUSHES && !chosen; push++) {{
         const extra = push * LANE_SPREAD;
         const primary = routeWaypoints('primary', extra);
-        if (!waypointsHit(primary)) {{ chosen = primary; break; }}
+        if (!waypointsHit(primary) && !_waypointsOverlapDrawn(primary)) {{ chosen = primary; break; }}
         const alt = routeWaypoints('alt', extra);
-        if (!waypointsHit(alt)) {{ chosen = alt; break; }}
+        if (!waypointsHit(alt) && !_waypointsOverlapDrawn(alt)) {{ chosen = alt; break; }}
       }}
-      // Fall back to the furthest-pushed primary if nothing was clear,
-      // so we still render a route instead of a broken edge.
-      waypoints = chosen || routeWaypoints('primary', MAX_PUSHES * LANE_SPREAD);
+      // Fall back: prefer the side that doesn't overlap a drawn segment.
+      // Try alt before accepting primary, so two arrows from the same source
+      // land on opposite sides rather than stacking on the same corridor.
+      if (!chosen) {{
+        const fbPrimary = routeWaypoints('primary', MAX_PUSHES * LANE_SPREAD);
+        const fbAlt     = routeWaypoints('alt',     MAX_PUSHES * LANE_SPREAD);
+        chosen = _waypointsOverlapDrawn(fbPrimary) && !_waypointsOverlapDrawn(fbAlt)
+          ? fbAlt : fbPrimary;
+      }}
+      waypoints = chosen;
     }}
+
+    _pushDrawnSegments(waypoints);
 
     // Shorten endpoints so the line stops at the arrowhead base (not the tip)
     const tipLen = arrowSize * 0.7;
@@ -2866,25 +3143,102 @@ function draw() {{
     }}
 
     // Semantic label / edge weight
+    // Layout guarantees no overlap at any zoom via resolveEdgeLabelOverlaps.
     const edgeBadgeText = labelText
       ? (weight > 1 ? `${{labelText}} · ×${{weight}}` : labelText)
       : (weight > 1 ? '×' + weight : '');
     if (edgeBadgeText) {{
-      const midIdx = Math.floor(waypoints.length / 2);
-      const lx = (waypoints[midIdx - 1].x + waypoints[midIdx].x) / 2;
-      const ly = (waypoints[midIdx - 1].y + waypoints[midIdx].y) / 2;
       ctx.save();
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const lsx = lx * zoom + pan.x, lsy = ly * zoom + pan.y;
-      ctx.font = 'bold 14px -apple-system, sans-serif';
+      ctx.font = 'bold 16px -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       const text = edgeBadgeText;
       const tw = ctx.measureText(text).width + 8;
+      const th = 22;
+      // Label box in world units (used for obstacle collision)
+      const twWorld = tw / zoom;
+      const thWorld = th / zoom;
+      const labelHitsBlock = (cx, cy) => {{
+        const left = cx - twWorld / 2, right = cx + twWorld / 2;
+        const top = cy - thWorld / 2, bottom = cy + thWorld / 2;
+        for (const ob of obstacles) {{
+          const obL = ob.x - ob.w / 2 - 2, obR = ob.x + ob.w / 2 + 2;
+          const obT = ob.y - ob.h / 2 - 2, obB = ob.y + ob.h / 2 + 2;
+          if (right > obL && left < obR && bottom > obT && top < obB) return true;
+        }}
+        return false;
+      }};
+      const labelHitsLabel = (cx, cy) => {{
+        const left = cx - twWorld / 2, right = cx + twWorld / 2;
+        const top = cy - thWorld / 2, bottom = cy + thWorld / 2;
+        for (const lb of _drawnLabels) {{
+          if (right > lb.left && left < lb.right && bottom > lb.top && top < lb.bottom) return true;
+        }}
+        return false;
+      }};
+      const labelBad = (cx, cy) => labelHitsBlock(cx, cy) || labelHitsLabel(cx, cy);
+      // Preferred anchor = midpoint of middle segment
+      const midIdx = Math.floor(waypoints.length / 2);
+      const preferred = {{
+        x: (waypoints[midIdx - 1].x + waypoints[midIdx].x) / 2,
+        y: (waypoints[midIdx - 1].y + waypoints[midIdx].y) / 2,
+      }};
+      // Candidate positions sampled along every segment
+      const cands = [];
+      for (let i = 0; i < waypoints.length - 1; i++) {{
+        const p0 = waypoints[i], p1 = waypoints[i + 1];
+        for (let t = 0.15; t <= 0.85; t += 0.1) {{
+          cands.push({{
+            x: p0.x + (p1.x - p0.x) * t,
+            y: p0.y + (p1.y - p0.y) * t,
+          }});
+        }}
+      }}
+      cands.sort((p, q) => {{
+        const dp = (p.x - preferred.x) ** 2 + (p.y - preferred.y) ** 2;
+        const dq = (q.x - preferred.x) ** 2 + (q.y - preferred.y) ** 2;
+        return dp - dq;
+      }});
+      let lxw = preferred.x, lyw = preferred.y;
+      let picked = !labelBad(lxw, lyw); // true if preferred position is already clear
+      if (!picked) {{
+        for (const c of cands) {{
+          if (!labelBad(c.x, c.y)) {{ lxw = c.x; lyw = c.y; picked = true; break; }}
+        }}
+        // If every candidate along the edge overlaps something, nudge the
+        // preferred anchor perpendicular to the local segment until clear.
+        if (!picked) {{
+          const p0 = waypoints[midIdx - 1], p1 = waypoints[midIdx];
+          const sx = p1.x - p0.x, sy = p1.y - p0.y;
+          const len = Math.hypot(sx, sy) || 1;
+          const nxp = -sy / len, nyp = sx / len;
+          const step = Math.max(thWorld, 14 / zoom);
+          for (let k = 1; k <= 8 && !picked; k++) {{
+            for (const sign of [1, -1]) {{
+              const cx = preferred.x + nxp * step * k * sign;
+              const cy = preferred.y + nyp * step * k * sign;
+              if (!labelBad(cx, cy)) {{ lxw = cx; lyw = cy; picked = true; break; }}
+            }}
+          }}
+        }}
+      }}
+      _drawnLabels.push({{
+        left: lxw - twWorld / 2,
+        right: lxw + twWorld / 2,
+        top: lyw - thWorld / 2,
+        bottom: lyw + thWorld / 2,
+      }});
+      const lsx = lxw * zoom + pan.x, lsy = lyw * zoom + pan.y;
       ctx.fillStyle = '#0d1117cc';
       ctx.beginPath();
-      ctx.roundRect(lsx - tw / 2, lsy - 10, tw, 20, 5);
+      ctx.roundRect(lsx - tw / 2, lsy - 11, tw, 22, 5);
       ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#000000';
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.strokeText(text, lsx, lsy);
       ctx.fillStyle = color;
       ctx.fillText(text, lsx, lsy);
       ctx.restore();
@@ -2947,6 +3301,8 @@ function draw() {{
     }}
   }}
   const totalLanes = _laneCounter || 1;
+  _drawnSegments = [];
+  _drawnLabels = [];
 
   for (const e of drawEdges) {{
     const a = e.source, b = e.target;
@@ -3000,6 +3356,10 @@ function draw() {{
 
   // Nodes (use visibleNodes when grouping is active)
   // Build draw list: closed groups first, then open groups + children on top
+  // Reset any group-child width overrides from the previous frame so standalone
+  // elementary blocks (not inside any open group) always use their base NODE_W.
+  // Reset group-child width overrides; keep title-based min width for standalone nodes.
+  for (const n of nodes) {{ if (!n.isGroup) {{ n.w = Math.max(NODE_W, Math.ceil(nodeTitleText(n).length * 9 + 70)); n.h = nodeHeight(n); }} }}
   let drawNodes;
   const openGroupChildSet = new Set();
   if (groupingState !== 'flat') {{
@@ -3010,6 +3370,7 @@ function draw() {{
         openGroups.push(g);
         const layout = layoutOpenGroupChildren(g);
         for (const item of layout.items) {{
+          item.node.w = layout.cellW; // widen card to fit title (only while inside open group)
           openGroups.push(item.node);
           openGroupChildSet.add(item.node.id);
         }}
@@ -3201,9 +3562,13 @@ function draw() {{
       ctx.shadowColor = inBlast ? '#f59e0b' : color;
       ctx.shadowBlur = (isSelected ? 14 : inBlast ? 10 : 6) / zoom;
     }}
-    ctx.fillStyle = isSelected ? color : (inBlast ? '#2d2008' : (isGroupChild ? '#1a212b' : (isHovered ? '#21262d' : '#161b22')));
-    ctx.strokeStyle = inCycle ? '#f85149' : (inBlast ? '#f59e0b' : (isSelected ? color : (isGroupChild && parentGc ? parentGc + '70' : (isHovered ? color : '#30363d'))));
-    ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : inBlast ? 1.5 : isGroupChild ? 0.8 : 1) / zoom;
+    // Solo blocks (not group children) get a colored border like group blocks —
+    // same visual weight, same color-coding. Only the stroke alpha differs.
+    // Singleton groups (1 child) render as regular file cards — include them.
+    const soloBlock = !isGroupChild && (!n.isGroup || isSingletonGroup);
+    ctx.fillStyle = isSelected ? color : (inBlast ? '#2d2008' : (isGroupChild ? '#1a212b' : (isHovered ? '#21262d' : (soloBlock ? color + '10' : '#161b22'))));
+    ctx.strokeStyle = inCycle ? '#f85149' : (inBlast ? '#f59e0b' : (isSelected ? color : (isGroupChild && parentGc ? parentGc + '70' : (isHovered ? color : (soloBlock ? color + '80' : '#30363d')))));
+    ctx.lineWidth = (inCycle ? 2 : isSelected ? 2 : inBlast ? 1.5 : isGroupChild ? 0.8 : soloBlock ? 4 : 1) / zoom;
     if (nodeShape === 'external' || nodeShape === 'test') ctx.setLineDash([8 / zoom, 6 / zoom]);
     traceBlockShape(ctx, x, y, nw, nh, nodeShape, NODE_R);
     ctx.fill();
@@ -3213,7 +3578,7 @@ function draw() {{
     // Left accent bar — group color for group children, language color otherwise
     if (!isSelected && (nodeShape === 'process' || nodeShape === 'entry' || nodeShape === 'external' || nodeShape === 'test')) {{
       ctx.fillStyle = isGroupChild && parentGc ? parentGc : color;
-      roundRect(ctx, x, y, isGroupChild ? 3 : 4, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }});
+      roundRect(ctx, x, y, isGroupChild ? 3 : 6, nh, {{ tl: NODE_R, bl: NODE_R, tr: 0, br: 0 }});
       ctx.fill();
     }}
     // Cycle indicator (right bar, red)
@@ -3284,7 +3649,7 @@ function draw() {{
       ctx.fillStyle = parentGc ? parentGc + 'cc' : mutedColor;
       ctx.textBaseline = 'top';
       ctx.textAlign = 'center';
-      ctx.fillText(kindLabel, screenX, screenY - screenH / 2 + 5);
+      ctx.fillText(kindLabel, screenX, screenY - screenH / 2 + 10);
 
       // Re-measure title wrap at the actual draw font (14px) so truncation
       // matches what gets rendered. The outer titleLines above were computed
@@ -3552,9 +3917,12 @@ canvas.addEventListener('mousemove', e => {{
     hoveredNode = nodeAt(wx, wy);
     if (prev !== hoveredNode) {{
       draw();
-      // Group tooltip — only for closed (non-open) groups
+      // Description tooltip — for any hovered node with a description.
+      // For groups, only when the group is closed (not expanded in place).
       const gtt = document.getElementById('group-tooltip');
-      if (hoveredNode && hoveredNode.isGroup && hoveredNode.description && !isGroupOpen(hoveredNode)) {{
+      const showTip = hoverTooltipEnabled && hoveredNode && hoveredNode.description &&
+        (!hoveredNode.isGroup || !isGroupOpen(hoveredNode));
+      if (showTip) {{
         gtt.innerHTML = `<div class="gt-detail">${{esc(hoveredNode.description)}}</div>`;
         gtt.style.display = 'block';
       }} else {{
@@ -3571,8 +3939,8 @@ canvas.addEventListener('mousemove', e => {{
         }}
       }}
     }}
-    // Position group tooltip near cursor
-    if (hoveredNode && hoveredNode.isGroup) {{
+    // Position description tooltip near cursor
+    if (hoveredNode) {{
       const gtt = document.getElementById('group-tooltip');
       if (gtt.style.display === 'block') {{
         const pad = 16;
@@ -3617,7 +3985,9 @@ canvas.addEventListener('wheel', e => {{
     const factor = e.deltaY < 0 ? 1.08 : 0.93;
     const wx = (e.offsetX - pan.x) / zoom;
     const wy = (e.offsetY - pan.y) / zoom;
-    const minZoom = Math.max(0.3, (fitZoomLevel || 0.5) * 0.8);
+    // Clamp min zoom to the axis-fit level so content can't shrink past the
+    // width (vertical flow) or height (horizontal flow) of the viewport.
+    const minZoom = Math.max(0.3, fitZoomLevel || 0.5);
     zoom = Math.max(minZoom, Math.min(3.0, zoom * factor));
     pan.x = e.offsetX - wx * zoom;
     pan.y = e.offsetY - wy * zoom;

@@ -115,7 +115,7 @@ class TestRenderer:
 
     def test_layout_supports_vertical_shrink(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
-        assert ":root { --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 68px; }" in html
+        assert ":root { --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 68px;" in html
         assert "body { font-family:" in html
         assert "display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height);" in html
         assert "#left-panel { width: 100%; height: calc(var(--top-panel-header-height) + var(--top-details-height)); max-height: calc(var(--top-panel-header-height) + var(--top-details-height));" in html

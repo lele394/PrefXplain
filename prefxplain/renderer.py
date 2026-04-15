@@ -50,7 +50,11 @@ _HTML_TEMPLATE = """\
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PrefXplain — {repo}</title>
 <style>
-  :root {{ --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 68px; }}
+  :root {{ --viewport-height: 100vh; --top-panel-header-height: 32px; --top-details-height: 68px;
+    --code-bg: #1e1e1e; --code-gutter: #252526; --code-fg: #d4d4d4;
+    --code-ln: #636d83; --code-ln-border: #333333; color-scheme: dark; }}
+  body.code-light {{ --code-bg: #ffffff; --code-gutter: #f3f3f3; --code-fg: #1f1f1f;
+    --code-ln: #6e7781; --code-ln-border: #d0d7de; color-scheme: light; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   html, body {{ height: var(--viewport-height); min-height: var(--viewport-height); max-height: var(--viewport-height); width: 100%; overflow: hidden; }}
   body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #0d1117; color: #c9d1d9; display: flex; flex-direction: column; min-height: 0; max-height: var(--viewport-height); }}
@@ -146,9 +150,10 @@ _HTML_TEMPLATE = """\
   #sidebar .role-tag {{ display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0; }}
   #sidebar .cycle-flag {{ color: #f85149; font-size: 10px; flex-shrink: 0; }}
   #sidebar .more {{ color: #6e7681; font-size: 11px; flex-shrink: 0; }}
-  #sidebar .sb-code {{ flex: 1; min-height: 0; overflow-y: auto; margin: 0 -12px 0; background: #1e1e1e; }}
-  #sidebar .sb-code pre {{ font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 11px; line-height: 1.6; color: #d4d4d4; white-space: pre; padding: 8px 0; background: #1e1e1e; }}
-  #sidebar .sb-code .ln {{ color: #3c3c3c; user-select: none; display: inline-block; min-width: 40px; text-align: right; padding-right: 16px; border-right: 1px solid #2d2d2d; margin-right: 14px; }}
+  #sidebar .sb-code {{ flex: 1; min-height: 0; overflow-y: auto; margin: 0 -12px -2px; background: var(--code-bg); }}
+  #sidebar .sb-code pre {{ font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 11px; line-height: 1.6; color: var(--code-fg); white-space: pre; margin: 0; padding: 8px 0; background: var(--code-bg); }}
+  #sidebar .sb-code code {{ display: block; background: var(--code-bg); color: var(--code-fg); }}
+  #sidebar .sb-code .ln {{ color: var(--code-ln); background: var(--code-gutter); user-select: none; display: inline-block; min-width: 40px; text-align: right; padding-right: 12px; border-right: 1px solid var(--code-ln-border); margin-right: 12px; }}
   body.panel-resizing {{ cursor: ns-resize; }}
 </style>
 </head>
@@ -168,6 +173,7 @@ _HTML_TEMPLATE = """\
     <button id="btnEdges" class="active" onclick="toggleEdgeMode()">Edges: All</button>
     <button id="btnFlow" onclick="toggleFlowDirection()">Flow: Auto</button>
     <button id="btnHover" onclick="toggleHoverTooltip()" class="active">Hover: On</button>
+    <button id="btnCodeTheme" onclick="toggleCodeTheme()">Code: Dark</button>
     <button onclick="zoomToFit()">Fit</button>
     <button onclick="toggleHelp()">?</button>
   </div>
@@ -939,6 +945,20 @@ function toggleFlowDirection() {{
 
 let sidebarEnabled = true;
 let hoverTooltipEnabled = true;
+let codeLightMode = (function() {{
+  try {{ return localStorage.getItem('prefxplain-code-light') === '1'; }} catch(e) {{ return false; }}
+}})();
+function applyCodeTheme() {{
+  document.body.classList.toggle('code-light', codeLightMode);
+  const btn = document.getElementById('btnCodeTheme');
+  if (btn) btn.textContent = codeLightMode ? 'Code: Light' : 'Code: Dark';
+}}
+function toggleCodeTheme() {{
+  codeLightMode = !codeLightMode;
+  try {{ localStorage.setItem('prefxplain-code-light', codeLightMode ? '1' : '0'); }} catch(e) {{}}
+  applyCodeTheme();
+}}
+applyCodeTheme();
 function toggleHoverTooltip() {{
   hoverTooltipEnabled = !hoverTooltipEnabled;
   const btn = document.getElementById('btnHover');

@@ -122,7 +122,7 @@ class TestRenderer:
         assert "#panel-resizer { position: relative; z-index: 15; display: flex; align-items: center;" in html
         assert "#center { flex: 1; display: flex; position: relative; min-width: 0; min-height: 0; height: 0; overflow: hidden; }" in html
         assert "#graph-area { flex: 1; display: flex; flex-direction: column; position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }" in html
-        assert "#sidebar { flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height);" in html
+        assert "#sidebar { flex: 1; min-height: 0; overflow: hidden;" in html
         assert "#sidebar .sb-row { display: flex; align-items: center;" in html
         assert "body.panel-resizing { cursor: ns-resize; }" in html
         assert "max-height: calc(var(--viewport-height) - 72px);" in html

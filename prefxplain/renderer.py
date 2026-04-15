@@ -127,7 +127,7 @@ _HTML_TEMPLATE = """\
   }}
 
   /* ── Detail section — 2-line horizontal info bar ─────────────────── */
-  #sidebar {{ flex: 0 0 var(--top-details-height); min-height: 0; max-height: var(--top-details-height); overflow: hidden; padding: 2px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 0; }}
+  #sidebar {{ flex: 1; min-height: 0; overflow: hidden; padding: 2px 12px; font-size: 12px; display: flex; flex-direction: column; gap: 0; }}
   #sidebar.hidden {{ display: none; }}
   #sidebar .sb-row {{ display: flex; align-items: center; gap: 5px; height: 32px; overflow: hidden; white-space: nowrap; flex-shrink: 0; }}
   #sidebar .sb-row + .sb-row {{ border-top: 1px solid #21262d; }}
@@ -161,7 +161,7 @@ _HTML_TEMPLATE = """\
 <!-- Top panel: compact header bar + detail section -->
 <div id="left-panel">
   <div id="panel-header">
-    <span class="ph-brand">{repo}</span>
+    <span class="ph-brand">PrefXplain — {repo}</span>
     <span class="ph-sep"></span>
     <span class="ph-stat"><b>{total_files}</b> files</span>
     <span class="ph-stat"><b>{total_edges}</b> edges</span>
@@ -4302,8 +4302,6 @@ function renderGroupSidebar(g) {{
   const moreFiles = ranked.length > MAX_FILES
     ? `<span class="more">+${{ranked.length - MAX_FILES}} more</span>` : '';
 
-  sidebar.style.flexBasis = '68px';
-  sidebar.style.maxHeight = '68px';
   sidebar.innerHTML = `
     <div class="sb-row">
       <span class="sb-title">${{esc(g.label)}}</span>
@@ -4320,8 +4318,6 @@ function renderGroupSidebar(g) {{
 }}
 
 function renderDefaultSidebar() {{
-  sidebar.style.flexBasis = '68px';
-  sidebar.style.maxHeight = '68px';
   sidebar.classList.remove('hidden');
   sidebar.innerHTML = '<div class="sb-row"><span class="placeholder">Hover or click a block to see details.</span></div>';
 }}
@@ -4376,10 +4372,14 @@ function renderSidebar(n) {{
     codeBlockHtml = `<div class="sb-code"><pre><code>${{numbered}}</code></pre></div>`;
   }}
 
-  // Expand bar height to fit code preview, collapse back to compact when none
-  const expandedH = n.preview ? '260px' : '68px';
-  sidebar.style.flexBasis = expandedH;
-  sidebar.style.maxHeight = expandedH;
+  // If there's a code preview and the panel is too short to show it, expand it.
+  // Use topDetailsHeight / applyViewportHeight — the same path the resizer uses —
+  // so dragging afterwards keeps working correctly.
+  const MIN_CODE_PANEL_H = 220;
+  if (n.preview && topDetailsHeight < MIN_CODE_PANEL_H) {{
+    topDetailsHeight = MIN_CODE_PANEL_H;
+    applyViewportHeight();
+  }}
 
   sidebar.innerHTML = `
     <div class="sb-row">

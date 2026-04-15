@@ -1874,9 +1874,14 @@ function syncViewport() {{
     }}
 
     if (centerWorld) {{
+      // During panel resize the canvas changes size but the user's zoom intent
+      // hasn't changed. fitZoomLevel was just recomputed for the new canvas, so
+      // fitZoomLevel * userZoomScale drifts from the actual current zoom.
+      // Keep zoom unchanged during the drag; re-sync userZoomScale on mouseup.
+      const nextZoom = panelResizeActive ? zoom : fitZoomLevel * userZoomScale;
       setViewportForWorldCenter(
         centerWorld,
-        fitZoomLevel * userZoomScale,
+        nextZoom,
         size.width,
         size.height,
       );
@@ -1933,6 +1938,9 @@ function stopPanelResize() {{
   if (!panelResizeActive) return;
   panelResizeActive = false;
   bodyEl.classList.remove('panel-resizing');
+  // Re-sync userZoomScale now that fitZoomLevel reflects the final canvas size,
+  // so subsequent wheel/pinch zoom stays relative to the correct baseline.
+  if (fitZoomLevel > 0) userZoomScale = zoom / fitZoomLevel;
 }}
 
 panelResizer.addEventListener('mousedown', e => {{

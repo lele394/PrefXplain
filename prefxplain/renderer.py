@@ -1851,40 +1851,40 @@ function syncViewport() {{
     ? viewportCenterWorld(size.prevWidth, size.prevHeight)
     : null;
   if (size.changed) {{
-    // Re-layout if auto flow direction changed due to aspect ratio
-    if (flowDirection === 'auto' && groupingState !== 'flat' && !panelResizeActive) {{
-      const newDir = resolvedFlowDirection();
-      if (newDir !== _lastFlowDir) {{
-        _lastFlowDir = newDir;
-        relayout();
-      }}
-    }}
     fitZoomLevel = computeFitZoom(size.width, size.height, fitNodesForViewport());
-    const shouldRefit =
-      !panelResizeActive &&
-      !viewportWasManuallyMoved &&
-      !selectedNode &&
-      !hoveredNode &&
-      !searchQuery;
 
-    if (shouldRefit) {{
-      zoomToFit();
-      drawMinimap();
-      return;
-    }}
+    if (panelResizeActive) {{
+      // Panel drag: canvas resized but zoom and pan are intentionally
+      // untouched — clampPan() below keeps content in bounds.
+    }} else {{
+      // Re-layout if auto flow direction changed due to aspect ratio
+      if (flowDirection === 'auto' && groupingState !== 'flat') {{
+        const newDir = resolvedFlowDirection();
+        if (newDir !== _lastFlowDir) {{
+          _lastFlowDir = newDir;
+          relayout();
+        }}
+      }}
+      const shouldRefit =
+        !viewportWasManuallyMoved &&
+        !selectedNode &&
+        !hoveredNode &&
+        !searchQuery;
 
-    if (centerWorld) {{
-      // During panel resize the canvas changes size but the user's zoom intent
-      // hasn't changed. fitZoomLevel was just recomputed for the new canvas, so
-      // fitZoomLevel * userZoomScale drifts from the actual current zoom.
-      // Keep zoom unchanged during the drag; re-sync userZoomScale on mouseup.
-      const nextZoom = panelResizeActive ? zoom : fitZoomLevel * userZoomScale;
-      setViewportForWorldCenter(
-        centerWorld,
-        nextZoom,
-        size.width,
-        size.height,
-      );
+      if (shouldRefit) {{
+        zoomToFit();
+        drawMinimap();
+        return;
+      }}
+
+      if (centerWorld) {{
+        setViewportForWorldCenter(
+          centerWorld,
+          fitZoomLevel * userZoomScale,
+          size.width,
+          size.height,
+        );
+      }}
     }}
   }}
   clampPan();
@@ -1944,6 +1944,12 @@ function stopPanelResize() {{
   // Re-sync userZoomScale now that fitZoomLevel reflects the final canvas size,
   // so subsequent wheel/pinch zoom stays relative to the correct baseline.
   if (fitZoomLevel > 0) userZoomScale = zoom / fitZoomLevel;
+  // Sync _lastFlowDir to the current direction so the next syncViewport call
+  // (from the watchViewport RAF) does not see a direction change and trigger
+  // relayout() with its zoomToFit timeout.
+  if (flowDirection === 'auto') {{
+    _lastFlowDir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : _lastFlowDir;
+  }}
 }}
 
 panelResizer.addEventListener('mousedown', e => {{
@@ -2960,6 +2966,50 @@ function draw() {{
   // beyond a few pixels is not. Reset right before the edge draw loop.
   let _drawnSegments = [];
   let _drawnLabels = []; // world-space bboxes of edge labels already placed
+  // All committed edge segments from prior edges (any orientation, including
+  // diagonals), used so a new edge label can dodge pre-existing strokes.
+  let _drawnEdgeSegmentsAll = [];
+
+  // Per-frame side-slot reservations: blockId -> side -> Set of integer
+  // slot offsets. Slot 0 = midpoint of the side, plus/minus N fan out
+  // along the side. Used by the straight-line routing so the default anchor
+  // is the side midpoint, with a deterministic fallback when a previous edge
+  // already claimed that slot.
+  let _sideSlotReservations = new Map();
+  const _SIDE_SLOT_SPACING = 65;
+  function _sideSlots(blockId) {{
+    let rec = _sideSlotReservations.get(blockId);
+    if (!rec) {{
+      rec = {{ top: new Set(), bottom: new Set(), left: new Set(), right: new Set() }};
+      _sideSlotReservations.set(blockId, rec);
+    }}
+    return rec;
+  }}
+  // Return side/slot/point — midpoint of the facing side, with slot 0
+  // as first choice and alternating fallback. Marks the slot used.
+  function reserveMidpointAnchor(box, otherCX, otherCY, blockId) {{
+    const dx = otherCX - box.x, dy = otherCY - box.y;
+    const adx = Math.abs(dx), ady = Math.abs(dy);
+    let side;
+    if (adx * box.h > ady * box.w) side = dx >= 0 ? 'right' : 'left';
+    else side = dy >= 0 ? 'bottom' : 'top';
+    const slots = _sideSlots(blockId)[side];
+    let slot = 0;
+    if (slots.has(0)) {{
+      for (let k = 1; k < 16; k++) {{
+        if (!slots.has(k)) {{ slot = k; break; }}
+        if (!slots.has(-k)) {{ slot = -k; break; }}
+      }}
+    }}
+    slots.add(slot);
+    const off = slot * _SIDE_SLOT_SPACING;
+    const hw = box.w / 2 - 10;
+    const hh = box.h / 2 - 10;
+    if (side === 'right') return {{ side, slot, x: box.x + box.w / 2 + 2, y: box.y + Math.max(-hh, Math.min(hh, off)) }};
+    if (side === 'left')  return {{ side, slot, x: box.x - box.w / 2 - 2, y: box.y + Math.max(-hh, Math.min(hh, off)) }};
+    if (side === 'bottom') return {{ side, slot, x: box.x + Math.max(-hw, Math.min(hw, off)), y: box.y + box.h / 2 + 2 }};
+    return {{ side, slot, x: box.x + Math.max(-hw, Math.min(hw, off)), y: box.y - box.h / 2 - 2 }};
+  }}
   // Frame-scoped visual extent tracker: grows to include every waypoint and
   // label bbox we touch, so the next fit computation can honour the real
   // drawn rectangle rather than just the raw node bboxes.
@@ -3055,12 +3105,13 @@ function draw() {{
       return false;
     }};
     if (blockers.length === 0) {{
-      // Straight: compute edge points on borders, then shift along the border
-      let sp = rectEdgePoint(bBox.x, bBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
-      let ep = rectEdgePoint(aBox.x, aBox.y, bBox.x, bBox.y, bBox.w / 2 + 2, bBox.h / 2 + 2);
-      sp = shiftAlongBorder(sp, aBox, laneOffset);
-      ep = shiftAlongBorder(ep, bBox, laneOffset);
-      waypoints = [sp, ep];
+      // Straight: anchor at the midpoint of the side facing the peer, with
+      // slot-based fallback when the midpoint is already claimed by an
+      // earlier edge this frame. Guarantees no two arrows exit/enter a
+      // block at the exact same point.
+      const sAnchor = reserveMidpointAnchor(aBox, bBox.x, bBox.y, a.id);
+      const tAnchor = reserveMidpointAnchor(bBox, aBox.x, aBox.y, b.id);
+      waypoints = [{{ x: sAnchor.x, y: sAnchor.y }}, {{ x: tAnchor.x, y: tAnchor.y }}];
       // Re-verify: the lane shift may have pushed the line across a block,
       // or the straight run may sit on top of a previously drawn edge.
       // Either way, fall through to corridor routing so the rules
@@ -3274,7 +3325,19 @@ function draw() {{
         }}
         return false;
       }};
-      const labelBad = (cx, cy) => labelHitsBlock(cx, cy) || labelHitsLabel(cx, cy);
+      // Does the label box intersect any previously drawn edge stroke? Uses
+      // lineHitsRect with a small pad so the text has breathing room away
+      // from neighboring arrows (prevents the "label sliced by another edge"
+      // case visible in the screenshot).
+      const labelHitsEdge = (cx, cy) => {{
+        const rw = twWorld, rh = thWorld;
+        const pad = 3 / zoom;
+        for (const s of _drawnEdgeSegmentsAll) {{
+          if (lineHitsRect(s.x1, s.y1, s.x2, s.y2, cx, cy, rw, rh, pad)) return true;
+        }}
+        return false;
+      }};
+      const labelBad = (cx, cy) => labelHitsBlock(cx, cy) || labelHitsLabel(cx, cy) || labelHitsEdge(cx, cy);
       // Preferred anchor = midpoint of middle segment
       const midIdx = Math.floor(waypoints.length / 2);
       const preferred = {{
@@ -3341,6 +3404,15 @@ function draw() {{
       ctx.fillText(text, lsx, lsy);
       ctx.restore();
     }}
+    // Commit this edge's segments AFTER label placement so subsequent edges
+    // can avoid covering this one's text — but this edge itself was free to
+    // pick a label slot without being blocked by its own stroke.
+    for (let i = 0; i < waypoints.length - 1; i++) {{
+      _drawnEdgeSegmentsAll.push({{
+        x1: waypoints[i].x, y1: waypoints[i].y,
+        x2: waypoints[i + 1].x, y2: waypoints[i + 1].y,
+      }});
+    }}
   }}
 
   // Deferred arrowheads: drawn AFTER nodes so they're always visible on top
@@ -3401,6 +3473,8 @@ function draw() {{
   const totalLanes = _laneCounter || 1;
   _drawnSegments = [];
   _drawnLabels = [];
+  _drawnEdgeSegmentsAll = [];
+  _sideSlotReservations = new Map();
 
   for (const e of drawEdges) {{
     const a = e.source, b = e.target;

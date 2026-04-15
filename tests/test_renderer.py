@@ -153,7 +153,7 @@ class TestRenderer:
         assert "centerPane and graphArea use flexbox" in html
         assert "const rect = graphArea.getBoundingClientRect();" in html
         assert "function syncViewport() {" in html
-        assert "!panelResizeActive &&" in html
+        assert "if (panelResizeActive) {" in html
         assert "let fitZoomLevel = 1;" in html
         assert "let userZoomScale = 1;" in html
         assert "function computeFitZoom(width, height, nodeList) {" in html
@@ -213,8 +213,8 @@ class TestRenderer:
         assert "detailDiagram: semanticNode.detail || null," in html
         assert "const edgeLabel = typeof e.label === 'string' ? e.label : '';" in html
         assert "humanizeSemanticKind" in html
-        assert "if (node.isGroup && groupingState !== 'flat') {" in html
-        assert "if (sidebarEnabled) renderGroupSidebar(node);" in html
+        assert "if (n.isGroup) renderGroupSidebar(n);" in html
+        assert "if (sidebarEnabled) {" in html
         assert "const target = (groupingState !== 'flat' && parentGroupId && groupMap[parentGroupId])" in html
 
     def test_renderer_uses_semantic_titles_and_shapes_for_file_cards(self, simple_graph: Graph) -> None:

@@ -151,7 +151,7 @@ roadmap.
 ## Development
 
 ```bash
-git clone https://github.com/remi-ajr/prefxplain.git
+git clone https://github.com/PrefOptimize/PrefXplain.git
 cd prefxplain
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"

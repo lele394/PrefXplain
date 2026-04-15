@@ -47,8 +47,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/remi-ajr/prefxplain"
-Repository = "https://github.com/remi-ajr/prefxplain"
+Homepage = "https://github.com/PrefOptimize/PrefXplain"
+Repository = "https://github.com/PrefOptimize/PrefXplain"
+Issues = "https://github.com/PrefOptimize/PrefXplain/issues"
 
 [project.scripts]
 prefxplain = "prefxplain.cli:entry_point"

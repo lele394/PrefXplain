@@ -4030,6 +4030,7 @@ canvas.addEventListener('mousemove', e => {{
     viewportWasManuallyMoved = true;
     clampPan();
     draw();
+    drawMinimap();
   }} else {{
     const prev = hoveredNode;
     hoveredNode = nodeAt(wx, wy);
@@ -4112,6 +4113,7 @@ canvas.addEventListener('wheel', e => {{
     viewportWasManuallyMoved = true;
     clampPan();
     draw();
+    drawMinimap();
   }} else {{
     // Two-finger scroll (trackpad) → pan
     pan.x -= e.deltaX * 1.2;
@@ -4119,6 +4121,7 @@ canvas.addEventListener('wheel', e => {{
     viewportWasManuallyMoved = true;
     clampPan();
     draw();
+    drawMinimap();
   }}
 }}, {{ passive: false }});
 
@@ -5248,7 +5251,9 @@ minimap.addEventListener('click', e => {{
   pan.x = canvasW() / 2 - worldX * zoom;
   pan.y = canvasH() / 2 - worldY * zoom;
   viewportWasManuallyMoved = true;
+  clampPan();
   draw();
+  drawMinimap();
 }});
 
 // ── Neighbor highlight ────────────────────────────────────────────────────────

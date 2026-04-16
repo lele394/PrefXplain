@@ -51,23 +51,31 @@ thing is one HTML file — offline, shareable, safe to send.
 
 ## Install — 30 seconds
 
-**Requirements:** Python 3.10+, and one of:
+**Requirements:** `git`, `python3` (3.9+), optionally `npm` (for the in-IDE preview extension — if you installed Claude Code or Codex via npm, you already have it), and one of:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Codex CLI](https://github.com/openai/codex)
 - [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli)
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
 
-```bash
-pipx install prefxplain && prefxplain setup
+**Paste this inside your AI coding tool (Claude Code / Codex / Copilot / Gemini):**
+
+```
+Install prefxplain: run git clone --single-branch --depth 1 https://github.com/PrefOptimize/PrefXplain.git ~/.prefxplain && cd ~/.prefxplain && ./setup
 ```
 
-That's it. One command, installed globally, works from every project
-forever. `pipx` keeps it in its own isolated environment so it never
-conflicts with your project venvs. `prefxplain setup` registers PrefXplain
-for Claude Code, Codex, Cursor/Windsurf, Copilot CLI, and Gemini CLI —
-whichever ones you have installed.
+The agent clones the repo and runs `./setup`. One line, done. The setup
+script builds an isolated Python venv, drops a `prefxplain` command on
+your PATH, registers the `/prefxplain` slash command for every AI tool it
+finds (Claude Code, Codex, Cursor/Windsurf, Copilot CLI, Gemini CLI), and
+auto-installs the bundled VS Code / Cursor / Windsurf preview extension.
+No `pipx`, no `npm`, no global Python pollution.
 
-> Don't have pipx? `brew install pipx` (macOS) or `python -m pip install --user pipx` (everywhere else). Or use plain `pip install prefxplain` inside a venv — you'll just have to repeat it per project.
+> Prefer to run it yourself? Same one line in a regular terminal:
+> ```bash
+> git clone --single-branch --depth 1 https://github.com/PrefOptimize/PrefXplain.git ~/.prefxplain && cd ~/.prefxplain && ./setup
+> ```
+>
+> Already on pipx or uv? `pipx install prefxplain && prefxplain setup` (or `uv tool install prefxplain && prefxplain setup`) still works — the pip flow just misses the IDE preview extension on some setups.
 
 ## Use it — 1 line
 

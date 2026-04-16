@@ -590,6 +590,13 @@ def setup_cmd(
         else:
             console.print(f"[yellow]Unknown tool: {t}. Skipping.[/yellow]")
 
+    # Auto-install the VS Code/Cursor/Windsurf preview extension if a pre-built
+    # .vsix exists nearby. Best-effort — silently skipped if no .vsix or IDE CLI.
+    if not tool:
+        ext_result = _install_vscode_extension(package_root)
+        if ext_result:
+            installed.append(ext_result)
+
     if installed:
         console.print("[bold green]Setup complete![/bold green]")
         for item in installed:
@@ -600,6 +607,62 @@ def setup_cmd(
         console.print("[yellow]Nothing to install.[/yellow]")
         if failed:
             raise typer.Exit(1)
+
+
+def _install_vscode_extension(package_root: Path) -> Optional[str]:
+    """Install the PrefXplain preview extension into VS Code/Cursor/Windsurf.
+
+    Looks for a pre-built `.vsix` in two places (in order):
+      1. <package_root>/vscode_extension/*.vsix        (shipped in the wheel)
+      2. <repo_root>/prefxplain-vscode/*.vsix          (editable install from
+         a git clone, produced by `./setup` or `make install-extension`)
+
+    Returns a human-readable status line on success, or None if skipped.
+    Best-effort: any failure (no .vsix, no IDE CLI, install error) is silent
+    so `setup` never fails because of the optional extension.
+    """
+    candidates = [
+        package_root / "vscode_extension",
+        package_root.parent / "prefxplain-vscode",
+    ]
+    vsix_path: Optional[Path] = None
+    for d in candidates:
+        if d.is_dir():
+            matches = sorted(d.glob("*.vsix"))
+            if matches:
+                vsix_path = matches[-1]
+                break
+    if vsix_path is None:
+        return None
+
+    vscode_mac = Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
+    cursor_mac = Path("/Applications/Cursor.app/Contents/Resources/app/bin/cursor")
+    candidates = [
+        ("VS Code", shutil.which("code") or (str(vscode_mac) if vscode_mac.exists() else None)),
+        ("Cursor", shutil.which("cursor") or (str(cursor_mac) if cursor_mac.exists() else None)),
+        ("Windsurf", shutil.which("windsurf")),
+    ]
+    targets = [(name, path) for name, path in candidates if path]
+    if not targets:
+        return None
+
+    installed_in: list[str] = []
+    for name, path in targets:
+        try:
+            result = subprocess.run(
+                [path, "--install-extension", str(vsix_path), "--force"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            continue
+        if result.returncode == 0:
+            installed_in.append(name)
+
+    if not installed_in:
+        return None
+    return f"Preview extension ({', '.join(installed_in)}): {vsix_path.name}"
 
 
 def _run(

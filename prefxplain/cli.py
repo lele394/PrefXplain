@@ -548,22 +548,29 @@ def setup_cmd(
             # entirely when stdin isn't a TTY (e.g. an LLM driving ./setup
             # via the Bash tool can't answer prompts).
             if tool != "copilot":
+                # Visual separation + header so the prompt is anchored to the
+                # Copilot step, not floating with no context.
+                console.print()
+                console.print(
+                    "[bold]\u25b8 Copilot CLI plugin[/bold]"
+                    " [dim](optional, slow on a fresh machine)[/dim]"
+                )
                 if not _stdin_is_interactive():
                     console.print(
-                        "[dim]Skipping Copilot plugin install (non-interactive shell)."
+                        "  [dim]Non-interactive shell — skipped."
                         " Run [bold]prefxplain setup copilot[/bold] later to enable it.[/dim]"
                     )
                     continue
                 if not typer.confirm(
-                    "Copilot CLI detected. Installing the plugin can take 3-4 min"
-                    " on a fresh machine. Install now?",
+                    "  Installing the plugin can take 3-4 min. Install now?",
                     default=False,
                 ):
                     console.print(
-                        "[dim]Skipped. Run [bold]prefxplain setup copilot[/bold]"
+                        "  [dim]Skipped. Run [bold]prefxplain setup copilot[/bold]"
                         " later to enable it.[/dim]"
                     )
                     continue
+                console.print("  [dim]Installing… (may take a few minutes)[/dim]")
 
             try:
                 result = subprocess.run(

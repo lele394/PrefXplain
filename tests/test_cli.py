@@ -177,7 +177,7 @@ class TestSetupCommand:
         result = runner.invoke(app, ["setup"])
         assert result.exit_code == 0, result.output
         assert "Copilot CLI (global plugin):" not in result.output
-        assert "non-interactive" in result.output
+        assert "non-interactive" in result.output.lower()
 
     def test_setup_autodetect_installs_copilot_when_user_confirms(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

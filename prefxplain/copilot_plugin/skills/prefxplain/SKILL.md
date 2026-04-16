@@ -61,11 +61,25 @@ in the workflow below.
 **2. Check the IDE preview extension.**
 
 ```bash
-IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null \
-  || ([ -x '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' ] && echo '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code') \
-  || echo "")"
+_term="$(printf '%s' "${TERM_PROGRAM:-}" | tr '[:upper:]' '[:lower:]')"
+IDE_CLI=""
+for _cli in "$_term" code-insiders cursor windsurf antigravity trae void vscodium codium positron code; do
+  [ -z "$_cli" ] && continue
+  _path="$(command -v "$_cli" 2>/dev/null || true)"
+  if [ -n "$_path" ]; then IDE_CLI="$_path"; break; fi
+done
+if [ -z "$IDE_CLI" ]; then
+  for _app in \
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+    "/Applications/Cursor.app/Contents/Resources/app/bin/cursor" \
+    "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf" \
+    "/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity" \
+    "/Applications/Trae.app/Contents/Resources/app/bin/trae"; do
+    if [ -x "$_app" ]; then IDE_CLI="$_app"; break; fi
+  done
+fi
 if [ -n "$IDE_CLI" ]; then
-  $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
+  "$IDE_CLI" --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
 else
   echo "NO_IDE_CLI"
 fi
@@ -530,7 +544,15 @@ Open the generated HTML in the installed PrefXplain IDE preview:
 
 ```bash
 HTML_PATH="$(cd "$REPO" && python3 -c "from pathlib import Path; print(Path('${OUTPUT:-prefxplain.html}').resolve())")"
-IDE_SCHEME="$(python3 -c "import os; term=(os.environ.get('TERM_PROGRAM') or '').lower(); print('cursor' if term=='cursor' else 'windsurf' if term=='windsurf' else 'vscode-insiders' if term=='vscode-insiders' else 'vscode')")"
+# All VS Code family IDEs (Cursor, Windsurf, Antigravity, Trae, Void,
+# VSCodium, Positron, …) follow Microsoft's convention: the URI scheme is
+# literally the IDE name. So `TERM_PROGRAM` is usually the right scheme.
+IDE_SCHEME="$(python3 -c "
+import os
+term = (os.environ.get('TERM_PROGRAM') or '').lower().strip()
+generic = {'', 'apple_terminal', 'iterm.app', 'hyper', 'tmux', 'rxvt', 'xterm', 'xterm-256color', 'alacritty', 'kitty', 'ghostty', 'warp', 'wezterm'}
+print('vscode' if term in generic else term)
+")"
 PREVIEW_URI="$(HTML_PATH="$HTML_PATH" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_PATH'])}\")")"
 
 # Dispatch the vscode:// URI to the local IDE. Strategy per platform:

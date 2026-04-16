@@ -681,14 +681,32 @@ def _install_vscode_extension(package_root: Path) -> Optional[str]:
     if vsix_path is None:
         return None
 
-    vscode_mac = Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")
-    cursor_mac = Path("/Applications/Cursor.app/Contents/Resources/app/bin/cursor")
-    candidates = [
-        ("VS Code", shutil.which("code") or (str(vscode_mac) if vscode_mac.exists() else None)),
-        ("Cursor", shutil.which("cursor") or (str(cursor_mac) if cursor_mac.exists() else None)),
-        ("Windsurf", shutil.which("windsurf")),
+    # VS Code family: the extension is the same `.vsix` for all forks, since
+    # Cursor/Windsurf/Antigravity/Trae/Void/VSCodium/Positron all inherit
+    # VS Code's extension API. Key: CLI binary name (used by
+    # `<cli> --install-extension`). Value: (display name, macOS app-bundle
+    # fallback path for when the CLI isn't shimmed onto PATH).
+    ide_catalog: list[tuple[str, str, Optional[Path]]] = [
+        ("code",          "VS Code",          Path("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code")),
+        ("code-insiders", "VS Code Insiders", Path("/Applications/Visual Studio Code - Insiders.app/Contents/Resources/app/bin/code")),
+        ("cursor",        "Cursor",           Path("/Applications/Cursor.app/Contents/Resources/app/bin/cursor")),
+        ("windsurf",      "Windsurf",         Path("/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf")),
+        ("antigravity",   "Antigravity",      Path("/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity")),
+        ("trae",          "Trae",             Path("/Applications/Trae.app/Contents/Resources/app/bin/trae")),
+        ("void",          "Void",             Path("/Applications/Void.app/Contents/Resources/app/bin/void")),
+        ("vscodium",      "VSCodium",         Path("/Applications/VSCodium.app/Contents/Resources/app/bin/codium")),
+        ("codium",        "VSCodium",         None),
+        ("positron",      "Positron",         Path("/Applications/Positron.app/Contents/Resources/app/bin/positron")),
     ]
-    targets = [(name, path) for name, path in candidates if path]
+    targets: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+    for cli_name, display, mac_bundle in ide_catalog:
+        path = shutil.which(cli_name)
+        if not path and mac_bundle is not None and mac_bundle.exists():
+            path = str(mac_bundle)
+        if path and path not in seen_paths:
+            seen_paths.add(path)
+            targets.append((display, path))
     if not targets:
         return None
 

@@ -107,16 +107,11 @@ class TestSetupCommand:
 
         calls: list[list[str]] = []
 
-        class _Result:
-            returncode = 0
-            stdout = "ok"
-            stderr = ""
-
-        def fake_run(cmd: list[str], **_: object) -> _Result:
+        def fake_call(cmd: list[str], **_: object) -> int:
             calls.append(cmd)
-            return _Result()
+            return 0
 
-        monkeypatch.setattr(cli_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(cli_mod.subprocess, "call", fake_call)
 
         result = runner.invoke(app, ["setup", "copilot"])
         assert result.exit_code == 0, result.output
@@ -168,11 +163,11 @@ class TestSetupCommand:
 
         monkeypatch.setattr(cli_mod, "_stdin_is_interactive", lambda: False)
 
-        # subprocess.run must NOT be invoked — we should bail before reaching it.
+        # subprocess.call must NOT be invoked — we should bail before reaching it.
         def _should_not_be_called(*_a: object, **_kw: object) -> object:
             raise AssertionError("copilot plugin install must not run when prompt is skipped")
 
-        monkeypatch.setattr(cli_mod.subprocess, "run", _should_not_be_called)
+        monkeypatch.setattr(cli_mod.subprocess, "call", _should_not_be_called)
 
         result = runner.invoke(app, ["setup"])
         assert result.exit_code == 0, result.output
@@ -202,12 +197,7 @@ class TestSetupCommand:
         monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
         monkeypatch.setattr(cli_mod, "_stdin_is_interactive", lambda: True)
 
-        class _Result:
-            returncode = 0
-            stdout = "ok"
-            stderr = ""
-
-        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *_a, **_kw: _Result())
+        monkeypatch.setattr(cli_mod.subprocess, "call", lambda *_a, **_kw: 0)
 
         result = runner.invoke(app, ["setup"], input="y\n")
         assert result.exit_code == 0, result.output
@@ -243,20 +233,20 @@ class TestSetupCommand:
         monkeypatch.setattr(cli_mod.shutil, "which", lambda name: "/usr/bin/copilot" if name == "copilot" else None)
         monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
 
-        class _Result:
-            returncode = 2
-            stdout = ""
-            stderr = "install failed"
-
-        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *_args, **_kwargs: _Result())
+        monkeypatch.setattr(cli_mod.subprocess, "call", lambda *_args, **_kwargs: 2)
 
         result = runner.invoke(app, ["setup", "copilot"])
         assert result.exit_code == 1
         assert "Failed to install Copilot plugin." in result.output
 
-    def test_setup_copilot_install_timeout_exits_nonzero(
+    def test_setup_copilot_install_cancelled_by_ctrl_c(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        """Ctrl-C during the (now-untimed) Copilot install must be a clean exit
+        with a clear message, not a Python traceback. Replaces the obsolete
+        timeout test — we deliberately removed the timeout because npm-backed
+        plugin installs can legitimately take 10+ minutes on slow VMs.
+        """
         package_root = tmp_path / "prefxplain"
         plugin_dir = package_root / "copilot_plugin"
         plugin_dir.mkdir(parents=True)
@@ -266,14 +256,14 @@ class TestSetupCommand:
         monkeypatch.setattr(cli_mod.shutil, "which", lambda name: "/usr/bin/copilot" if name == "copilot" else None)
         monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
 
-        def _timeout(*_args: object, **_kwargs: object):
-            raise cli_mod.subprocess.TimeoutExpired(cmd="copilot plugin install", timeout=60)
+        def _interrupt(*_args: object, **_kwargs: object):
+            raise KeyboardInterrupt
 
-        monkeypatch.setattr(cli_mod.subprocess, "run", _timeout)
+        monkeypatch.setattr(cli_mod.subprocess, "call", _interrupt)
 
         result = runner.invoke(app, ["setup", "copilot"])
-        assert result.exit_code == 1
-        assert "Copilot plugin install timed out" in result.output
+        assert result.exit_code == 130
+        assert "cancelled" in result.output.lower()
 
     # --- Gemini CLI ---
 

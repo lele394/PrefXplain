@@ -490,7 +490,23 @@ Open the generated HTML in the installed PrefXplain IDE preview:
 HTML_PATH="$(cd "$REPO" && python3 -c "from pathlib import Path; print(Path('${OUTPUT:-prefxplain.html}').resolve())")"
 IDE_SCHEME="$(python3 -c "import os; term=(os.environ.get('TERM_PROGRAM') or '').lower(); print('cursor' if term=='cursor' else 'windsurf' if term=='windsurf' else 'vscode-insiders' if term=='vscode-insiders' else 'vscode')")"
 PREVIEW_URI="$(HTML_PATH="$HTML_PATH" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_PATH'])}\")")"
-open "$PREVIEW_URI" 2>/dev/null || true
+
+# Trigger the IDE's URI handler. Order matters:
+#   1. `code --open-external` is the Remote-SSH/devcontainer/codespace path.
+#      The remote `code` shim forwards the URI to the user's LOCAL VS Code,
+#      which then activates the prefxplain extension. This is the only thing
+#      that works inside a headless SSH session.
+#   2. `xdg-open` is the standard Linux desktop fallback (when the user is
+#      on a real GUI Linux box, not SSH).
+#   3. `open` is macOS.
+# We try them in order and stop at the first one that exists.
+if command -v code >/dev/null 2>&1; then
+  code --open-external "$PREVIEW_URI" 2>/dev/null || true
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$PREVIEW_URI" 2>/dev/null || true
+elif command -v open >/dev/null 2>&1; then
+  open "$PREVIEW_URI" 2>/dev/null || true
+fi
 ```
 
 Then report the path clearly:

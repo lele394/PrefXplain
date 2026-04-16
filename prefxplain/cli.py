@@ -570,28 +570,28 @@ def setup_cmd(
                         " later to enable it.[/dim]"
                     )
                     continue
-                console.print("  [dim]Installing… (may take a few minutes)[/dim]")
+                console.print("  [dim]Installing… streaming Copilot CLI output below.[/dim]")
 
+            # The user has explicitly opted in (either via the y/N prompt or
+            # by running `prefxplain setup copilot` directly). Don't impose an
+            # artificial timeout — `copilot plugin install` can legitimately
+            # take 5-15 min on slow VMs while npm fetches dependencies. Stream
+            # stdout/stderr live so they see actual progress instead of a
+            # silent "is it stuck?" wait.
             try:
-                result = subprocess.run(
+                returncode = subprocess.call(
                     [copilot_bin, "plugin", "install", str(copilot_plugin_dir)],
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
                 )
-            except subprocess.TimeoutExpired:
-                if tool == "copilot":
-                    console.print("[red]Copilot plugin install timed out (>5 min).[/red]")
-                    raise typer.Exit(1)
+            except KeyboardInterrupt:
                 console.print(
-                    "[yellow]\u26a0[/yellow] Copilot plugin install timed out — skipped."
+                    "[yellow]\u26a0[/yellow] Copilot plugin install cancelled."
                     " Re-run [bold]prefxplain setup copilot[/bold] later."
                 )
+                if tool == "copilot":
+                    raise typer.Exit(130)
                 continue
-            if result.returncode != 0:
+            if returncode != 0:
                 console.print("[red]Failed to install Copilot plugin.[/red]")
-                if result.stderr.strip():
-                    console.print(f"[dim]{result.stderr.strip()}[/dim]")
                 failed = True
                 if tool == "copilot":
                     raise typer.Exit(1)

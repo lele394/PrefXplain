@@ -142,7 +142,14 @@ class TestSetupCommand:
         assert result.exit_code == 1
         assert "copilot CLI not found on PATH." in result.output
 
-    def test_setup_autodetect_includes_copilot(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def test_setup_autodetect_skips_copilot_when_non_interactive(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Auto-detect must NOT silently install Copilot — the npm-backed
+        plugin install can take 3-4 min, so we ask first. When stdin is not a
+        TTY (LLM-driven `./setup` runs through the Bash tool), skip silently
+        and tell the user how to opt in later.
+        """
         package_root = tmp_path / "prefxplain"
         plugin_dir = package_root / "copilot_plugin"
         plugin_dir.mkdir(parents=True)
@@ -152,23 +159,57 @@ class TestSetupCommand:
         (cmd_dir / "prefxplain.md").write_text("prefxplain", encoding="utf-8")
 
         monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
-
-        def fake_which(name: str):
-            if name == "copilot":
-                return "/usr/bin/copilot"
-            return None
-
-        monkeypatch.setattr(cli_mod.shutil, "which", fake_which)
+        monkeypatch.setattr(
+            cli_mod.shutil,
+            "which",
+            lambda name: "/usr/bin/copilot" if name == "copilot" else None,
+        )
         monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        monkeypatch.setattr(cli_mod, "_stdin_is_interactive", lambda: False)
+
+        # subprocess.run must NOT be invoked — we should bail before reaching it.
+        def _should_not_be_called(*_a: object, **_kw: object) -> object:
+            raise AssertionError("copilot plugin install must not run when prompt is skipped")
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", _should_not_be_called)
+
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0, result.output
+        assert "Copilot CLI (global plugin):" not in result.output
+        assert "non-interactive" in result.output
+
+    def test_setup_autodetect_installs_copilot_when_user_confirms(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When stdin is a TTY and the user answers 'y', auto-detect proceeds
+        with the (slow) Copilot plugin install.
+        """
+        package_root = tmp_path / "prefxplain"
+        plugin_dir = package_root / "copilot_plugin"
+        plugin_dir.mkdir(parents=True)
+        (plugin_dir / "plugin.json").write_text('{"name":"prefxplain-copilot"}', encoding="utf-8")
+        cmd_dir = package_root / "commands"
+        cmd_dir.mkdir(parents=True)
+        (cmd_dir / "prefxplain.md").write_text("prefxplain", encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil,
+            "which",
+            lambda name: "/usr/bin/copilot" if name == "copilot" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+        monkeypatch.setattr(cli_mod, "_stdin_is_interactive", lambda: True)
 
         class _Result:
             returncode = 0
             stdout = "ok"
             stderr = ""
 
-        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *_args, **_kwargs: _Result())
+        monkeypatch.setattr(cli_mod.subprocess, "run", lambda *_a, **_kw: _Result())
 
-        result = runner.invoke(app, ["setup"])
+        result = runner.invoke(app, ["setup"], input="y\n")
         assert result.exit_code == 0, result.output
         assert "Copilot CLI (global plugin):" in result.output
 

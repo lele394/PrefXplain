@@ -541,23 +541,44 @@ def setup_cmd(
                     "[yellow]Copilot setup uses global plugins; ignoring --project.[/yellow]"
                 )
 
+            # `copilot plugin install` can take 3-4 minutes on a fresh machine
+            # (npm fetch + validation). In auto-detect mode, ask first so the
+            # user can opt out and keep going. In explicit mode (`prefxplain
+            # setup copilot`), assume opt-in and just run it. Skip the prompt
+            # entirely when stdin isn't a TTY (e.g. an LLM driving ./setup
+            # via the Bash tool can't answer prompts).
+            if tool != "copilot":
+                if not _stdin_is_interactive():
+                    console.print(
+                        "[dim]Skipping Copilot plugin install (non-interactive shell)."
+                        " Run [bold]prefxplain setup copilot[/bold] later to enable it.[/dim]"
+                    )
+                    continue
+                if not typer.confirm(
+                    "Copilot CLI detected. Installing the plugin can take 3-4 min"
+                    " on a fresh machine. Install now?",
+                    default=False,
+                ):
+                    console.print(
+                        "[dim]Skipped. Run [bold]prefxplain setup copilot[/bold]"
+                        " later to enable it.[/dim]"
+                    )
+                    continue
+
             try:
                 result = subprocess.run(
                     [copilot_bin, "plugin", "install", str(copilot_plugin_dir)],
                     capture_output=True,
                     text=True,
-                    timeout=240,
+                    timeout=300,
                 )
             except subprocess.TimeoutExpired:
-                # Soft failure: only loud when the user explicitly asked for
-                # Copilot. Otherwise the rest of the setup (extension, Claude
-                # Code, Cursor, …) is unaffected, so don't alarm them.
                 if tool == "copilot":
-                    console.print("[red]Copilot plugin install timed out (>240s).[/red]")
+                    console.print("[red]Copilot plugin install timed out (>5 min).[/red]")
                     raise typer.Exit(1)
                 console.print(
-                    "[yellow]\u26a0[/yellow] Copilot plugin install slow — skipped this run."
-                    " Re-run [bold]prefxplain setup copilot[/bold] later if you use Copilot CLI."
+                    "[yellow]\u26a0[/yellow] Copilot plugin install timed out — skipped."
+                    " Re-run [bold]prefxplain setup copilot[/bold] later."
                 )
                 continue
             if result.returncode != 0:
@@ -612,6 +633,19 @@ def setup_cmd(
         console.print("[yellow]Nothing to install.[/yellow]")
         if failed:
             raise typer.Exit(1)
+
+
+def _stdin_is_interactive() -> bool:
+    """Return True if stdin is a TTY (i.e. a real human can answer prompts).
+
+    Wrapped in a helper so tests can monkeypatch it cleanly — Click's
+    CliRunner swaps `sys.stdin` for a StringIO during `invoke()`, which
+    makes patching `sys.stdin.isatty` directly unreliable.
+    """
+    try:
+        return sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
 
 
 def _install_vscode_extension(package_root: Path) -> Optional[str]:

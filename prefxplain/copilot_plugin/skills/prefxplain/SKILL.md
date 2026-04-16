@@ -579,15 +579,17 @@ case "$(uname -s 2>/dev/null)" in
 esac
 ```
 
-Then report the path with the **clickable URI front-and-center** — this is
-what actually works in Remote-SSH / devcontainer / Codespaces, where the OS
-dispatcher above is a no-op:
+Then report the path. The OSC 8 hyperlink escape binds a **short clickable
+label** to the full URI, so the link stays Cmd/Ctrl-clickable even on narrow
+terminals where a raw URI would wrap across two lines (VS Code only detects
+links that fit on one line). Plain URI is printed right after as a copy-paste
+fallback and for terminals that don't honor OSC 8:
 
 ```bash
+printf '\n\033]8;;%s\033\\%s\033]8;;\033\\\n' \
+  "$PREVIEW_URI" "▶ Open preview in IDE (Cmd/Ctrl+click here)"
 echo ""
-echo "Preview (Cmd/Ctrl+click the URI in VS Code's terminal, or run the command below):"
-echo "  $PREVIEW_URI"
-echo ""
+echo "URI:          $PREVIEW_URI"
 echo "HTML on disk: $HTML_PATH"
 echo "Fallback:     Cmd+Shift+P → PrefXplain: Preview diagram"
 ```

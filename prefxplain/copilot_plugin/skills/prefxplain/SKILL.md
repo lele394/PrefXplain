@@ -20,24 +20,50 @@ This makes re-running cheap.
 
 Run these checks at the very start of every invocation:
 
-**1. Check Python package:**
+**1. Locate the `prefxplain` CLI.**
+
+Try (in order) the PATH, the user-local shim, and the canonical clone venv —
+the `./setup` installer drops the shim at `~/.local/bin/prefxplain` and the
+venv at `~/.prefxplain/.venv/bin/prefxplain`:
 
 ```bash
-python -c "import prefxplain; print('prefxplain', prefxplain.__version__)" 2>/dev/null
+PREFXPLAIN_BIN="$(command -v prefxplain 2>/dev/null \
+  || ([ -x "$HOME/.local/bin/prefxplain" ] && echo "$HOME/.local/bin/prefxplain") \
+  || ([ -x "$HOME/.prefxplain/.venv/bin/prefxplain" ] && echo "$HOME/.prefxplain/.venv/bin/prefxplain") \
+  || echo "")"
+[ -n "$PREFXPLAIN_BIN" ] && "$PREFXPLAIN_BIN" --version
+
+# Resolve the Python that has prefxplain importable. The inline
+# `python -c "from prefxplain... "` snippets later MUST use this interpreter.
+PREFXPLAIN_PYTHON="$(python3 -c 'import prefxplain' 2>/dev/null && echo python3 \
+  || ([ -x "$HOME/.prefxplain/.venv/bin/python" ] && echo "$HOME/.prefxplain/.venv/bin/python") \
+  || ([ -n "$PREFXPLAIN_BIN" ] && grep -m1 -oE '/[^[:space:]]+/bin/prefxplain' "$PREFXPLAIN_BIN" 2>/dev/null | sed 's|/prefxplain$|/python|') \
+  || echo python3)"
 ```
 
-If exit code != 0, tell the user:
+If empty/exit≠0, tell the user (the **git-clone install is canonical**, pip
+flows skip the IDE preview extension):
 
-> prefxplain is not installed in `which python`. I can run `pip install prefxplain` to set it up. OK? [y/N]
+> prefxplain isn't installed. Recommended one-liner:
+>
+>     git clone --single-branch --depth 1 https://github.com/PrefOptimize/PrefXplain.git ~/.prefxplain && cd ~/.prefxplain && ./setup
+>
+> This builds an isolated venv, registers `/prefxplain` for every detected AI
+> tool, and auto-installs the IDE preview extension. Want me to run it? [y/N]
 
-Wait for confirmation. If yes, run `pip install prefxplain`.
-If that also fails, stop and say what went wrong.
+Wait for confirmation. If yes, run the one-liner. If they prefer pip, accept
+`pipx install prefxplain && prefxplain setup` (extension won't auto-install
+in that case — the HTML still works in any browser).
 
-**2. Check IDE extension (for in-IDE preview):**
+Use **`$PREFXPLAIN_PYTHON`** (not `python`) for every `python -c "..."` block
+in the workflow below.
+
+**2. Check the IDE preview extension.**
 
 ```bash
-PREFXPLAIN_ROOT="$(python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null)"
-IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null || echo "")"
+IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null \
+  || ([ -x '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code' ] && echo '/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code') \
+  || echo "")"
 if [ -n "$IDE_CLI" ]; then
   $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
 else
@@ -45,15 +71,17 @@ else
 fi
 ```
 
-If EXTENSION_MISSING and `$PREFXPLAIN_ROOT/prefxplain-vscode/` exists, install it
-silently (no need to ask, it's a 3KB extension with zero overhead):
+If `EXTENSION_MISSING`, re-run `prefxplain setup` silently — its
+`_install_vscode_extension` helper will find a `.vsix` (in the wheel or in
+the clone's `prefxplain-vscode/`) and install it via `code --install-extension`:
 
 ```bash
-cd "$PREFXPLAIN_ROOT" && make install-extension
+"$PREFXPLAIN_BIN" setup 2>&1 | grep -i "preview extension" || true
 ```
 
-If NO_IDE_CLI, skip silently. Keep the HTML on disk; do not start a localhost
-server unless the user explicitly asks for browser preview.
+If still missing afterwards (no `.vsix` reachable, or no Node to build one),
+tell the user once: open the HTML path in a browser. If `NO_IDE_CLI`, skip
+silently. Never start a localhost server unless the user asks.
 
 ## Division of labor
 
@@ -79,7 +107,7 @@ directory. Store as `$REPO`.
 ### 2. Analyze and save JSON (preserving previous descriptions)
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 from pathlib import Path
 from prefxplain.analyzer import analyze
 from prefxplain.graph import Graph
@@ -194,7 +222,7 @@ assigned to a group. Group names should be human-readable, 1-3 words.
 #### 4b. List undescribed nodes
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 for n in g['nodes']:
@@ -353,7 +381,7 @@ Do NOT leave the placeholder comment. Run once per batch. Save after each batch.
 After all batches, verify nothing was missed:
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 missing = [n['id'] for n in g['nodes'] if not n.get('description')]
@@ -399,7 +427,7 @@ and what devs read to understand a project in 30 seconds.
 First, collect the structural signals you need. Run:
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 import json
 from collections import Counter
 g = json.loads(open('prefxplain.json').read())
@@ -481,7 +509,7 @@ any project, rewrite it.
 ### 5. Render the final HTML
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 from pathlib import Path
 from prefxplain.graph import Graph
 from prefxplain.renderer import render

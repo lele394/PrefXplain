@@ -491,32 +491,41 @@ HTML_PATH="$(cd "$REPO" && python3 -c "from pathlib import Path; print(Path('${O
 IDE_SCHEME="$(python3 -c "import os; term=(os.environ.get('TERM_PROGRAM') or '').lower(); print('cursor' if term=='cursor' else 'windsurf' if term=='windsurf' else 'vscode-insiders' if term=='vscode-insiders' else 'vscode')")"
 PREVIEW_URI="$(HTML_PATH="$HTML_PATH" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_PATH'])}\")")"
 
-# Trigger the IDE's URI handler. Order matters:
-#   1. `code --open-external` is the Remote-SSH/devcontainer/codespace path.
-#      The remote `code` shim forwards the URI to the user's LOCAL VS Code,
-#      which then activates the prefxplain extension. This is the only thing
-#      that works inside a headless SSH session.
-#   2. `xdg-open` is the standard Linux desktop fallback (when the user is
-#      on a real GUI Linux box, not SSH).
-#   3. `open` is macOS.
-# We try them in order and stop at the first one that exists.
-if command -v code >/dev/null 2>&1; then
-  code --open-external "$PREVIEW_URI" 2>/dev/null || true
-elif command -v xdg-open >/dev/null 2>&1; then
-  xdg-open "$PREVIEW_URI" 2>/dev/null || true
-elif command -v open >/dev/null 2>&1; then
-  open "$PREVIEW_URI" 2>/dev/null || true
-fi
+# Dispatch the vscode:// URI to the local IDE. Strategy per platform:
+#   - macOS:         `open <URI>` → LaunchServices → VS Code → extension handler
+#   - Linux desktop: `xdg-open <URI>` (needs DISPLAY) → VS Code registered handler
+#   - Windows/WSL:   `start "" <URI>` or `wslview <URI>`
+#   - Headless SSH:  no display — nothing auto-opens. The clickable URI printed
+#                    just below is the guaranteed fallback (VS Code's integrated
+#                    terminal auto-links `vscode://` so the user Cmd/Ctrl+clicks).
+case "$(uname -s 2>/dev/null)" in
+  Darwin*)
+    command -v open >/dev/null 2>&1 && open "$PREVIEW_URI" 2>/dev/null || true
+    ;;
+  Linux*)
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$PREVIEW_URI" 2>/dev/null || true
+    elif command -v wslview >/dev/null 2>&1; then
+      wslview "$PREVIEW_URI" 2>/dev/null || true
+    fi
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    command -v start >/dev/null 2>&1 && start "" "$PREVIEW_URI" 2>/dev/null || true
+    ;;
+esac
 ```
 
-Then report the path clearly:
+Then report the path with the **clickable URI front-and-center** — this is
+what actually works in Remote-SSH / devcontainer / Codespaces, where the OS
+dispatcher above is a no-op:
 
 ```bash
 echo ""
-echo "prefxplain preview target: $HTML_PATH"
+echo "Preview (Cmd/Ctrl+click the URI in VS Code's terminal, or run the command below):"
+echo "  $PREVIEW_URI"
 echo ""
-echo "The PrefXplain Preview webview should open in your IDE. If it does not, run:"
-echo "  Cmd+Shift+P > PrefXplain: Preview diagram"
+echo "HTML on disk: $HTML_PATH"
+echo "Fallback:     Cmd+Shift+P → PrefXplain: Preview diagram"
 ```
 
 Do not start a localhost server by default. The plugin webview is the primary preview path.

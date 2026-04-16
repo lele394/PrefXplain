@@ -45,23 +45,17 @@ for cmd in git python3; do
   fi
 done
 
-# Clone fresh or update in place.
-if [ -d "$TARGET/.git" ]; then
-  echo "${DIM}Existing clone detected — updating…${NC}"
-  git -C "$TARGET" fetch --depth 1 origin main >/dev/null 2>&1 || true
-  git -C "$TARGET" reset --hard origin/main >/dev/null 2>&1 || true
-  echo "${GREEN}✓${NC} Updated $TARGET"
-else
-  # Any non-git directory at the target path is assumed to be a failed
-  # prior install — remove it. We never touch paths outside $TARGET.
-  if [ -e "$TARGET" ]; then
-    echo "${DIM}Removing previous install at ${TARGET}…${NC}"
-    rm -rf "$TARGET"
-  fi
-  echo "${DIM}Cloning ${REPO_URL}…${NC}"
-  git clone --single-branch --depth 1 "$REPO_URL" "$TARGET" >/dev/null 2>&1
-  echo "${GREEN}✓${NC} Cloned into $TARGET"
+# Always wipe and clone fresh — simpler and more predictable than trying
+# to git-reset an existing clone that may be in a weird state (local
+# edits, detached HEAD, missing files, stale .venv from an old Python).
+# The cd to $HOME above guarantees we never rm -rf the shell's own CWD.
+if [ -e "$TARGET" ]; then
+  echo "${DIM}Removing previous install at ${TARGET}…${NC}"
+  rm -rf "$TARGET"
 fi
+echo "${DIM}Cloning ${REPO_URL}…${NC}"
+git clone --single-branch --depth 1 "$REPO_URL" "$TARGET" >/dev/null 2>&1
+echo "${GREEN}✓${NC} Cloned into $TARGET"
 
 echo
 # Hand off to the repo-local setup script. It builds the venv, drops the

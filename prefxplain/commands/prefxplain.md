@@ -568,7 +568,18 @@ Keep this tight. Pull structural insights from the JSON:
 - **Entry points** (in-degree 0, excluding tests) -- where to start reading
 - **Orphans** (no imports in or out) -- if >3, give the count, offer to list
 - **Cycles** if detected -- flag as architectural debt
-- **Preview target** (`prefxplain.html` path and that it was opened in the IDE webview)
+- **Preview — MUST be rendered as a Markdown link**, not as a bare URL, because
+  Claude Code / Codex / Copilot / Gemini chat panes make Markdown links
+  Cmd/Ctrl-clickable regardless of line wrap, whereas a bare URI in a Bash
+  tool result is just text (OSC 8 escape sequences get stripped by the chat
+  UI). Format exactly like this, substituting `$PREVIEW_URI` and `$HTML_PATH`:
+
+  ```
+  Preview: [▶ Open in IDE]($PREVIEW_URI) ([fallback]: `prefxplain.html` at $HTML_PATH, or `Cmd+Shift+P → PrefXplain: Preview diagram`)
+  ```
+
+  Do NOT claim "opened in the IDE webview" — on headless Remote-SSH / devcontainer
+  / Codespaces, nothing auto-opens; the user has to click the link.
 
 Close with: "Happy to walk through any specific file or cluster."
 Don't preempt -- wait for the user to ask.

@@ -19,40 +19,87 @@ or previously-undescribed files need work. This makes re-running cheap.
 
 Run these checks at the very start of every invocation:
 
-**1. Check Python package:**
+**1. Locate the `prefxplain` CLI.**
+
+Try (in order) the PATH, the user-local shim, and the canonical clone venv —
+the `./setup` installer drops the shim at `~/.local/bin/prefxplain` and the
+venv at `~/.prefxplain/.venv/bin/prefxplain`:
 
 ```bash
-python -c "import prefxplain; print('prefxplain', prefxplain.__version__)" 2>/dev/null
+PREFXPLAIN_BIN="$(command -v prefxplain 2>/dev/null \
+  || ([ -x "$HOME/.local/bin/prefxplain" ] && echo "$HOME/.local/bin/prefxplain") \
+  || ([ -x "$HOME/.prefxplain/.venv/bin/prefxplain" ] && echo "$HOME/.prefxplain/.venv/bin/prefxplain") \
+  || echo "")"
+[ -n "$PREFXPLAIN_BIN" ] && "$PREFXPLAIN_BIN" --version
+
+# Also resolve the Python that has prefxplain importable. The inline
+# `python -c "from prefxplain... "` snippets later in this skill MUST use
+# this interpreter — the user's default `python` may not see the package
+# (e.g. when ./setup put prefxplain into ~/.prefxplain/.venv).
+PREFXPLAIN_PYTHON="$(python3 -c 'import prefxplain' 2>/dev/null && echo python3 \
+  || ([ -x "$HOME/.prefxplain/.venv/bin/python" ] && echo "$HOME/.prefxplain/.venv/bin/python") \
+  || ([ -n "$PREFXPLAIN_BIN" ] && grep -m1 -oE '/[^[:space:]]+/bin/prefxplain' "$PREFXPLAIN_BIN" 2>/dev/null | sed 's|/prefxplain$|/python|') \
+  || echo python3)"
 ```
 
-If exit code != 0, tell the user:
+Use **`$PREFXPLAIN_PYTHON`** (not `python`) for every `python -c "..."` block
+in the workflow below.
 
-> prefxplain is not installed in `which python`. I can run `pip install prefxplain` to set it up. OK? [y/N]
+If empty/exit≠0, tell the user (the **git-clone install is canonical**, pip
+flows skip the IDE preview extension):
 
-Wait for confirmation. If yes, run `pip install prefxplain`.
-If that also fails, stop and say what went wrong.
+> prefxplain isn't installed. Recommended one-liner:
+>
+>     git clone --single-branch --depth 1 https://github.com/PrefOptimize/PrefXplain.git ~/.prefxplain && cd ~/.prefxplain && ./setup
+>
+> This builds an isolated venv, registers `/prefxplain` for every detected AI
+> tool, and auto-installs the IDE preview extension. Want me to run it? [y/N]
 
-**2. Check IDE extension (for in-IDE preview):**
+Wait for confirmation. If yes, run the one-liner. If they prefer pip, accept
+`pipx install prefxplain && prefxplain setup` (extension won't auto-install
+in that case — the HTML still works in any browser).
+
+**2. Check the IDE preview extension.**
 
 ```bash
-PREFXPLAIN_ROOT="$(python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null)"
-IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null || echo "")"
+# Prefer the IDE we're actually running in. TERM_PROGRAM names the fork.
+_term="$(printf '%s' "${TERM_PROGRAM:-}" | tr '[:upper:]' '[:lower:]')"
+IDE_CLI=""
+for _cli in "$_term" code-insiders cursor windsurf antigravity trae void vscodium codium positron code; do
+  [ -z "$_cli" ] && continue
+  _path="$(command -v "$_cli" 2>/dev/null || true)"
+  if [ -n "$_path" ]; then IDE_CLI="$_path"; break; fi
+done
+# macOS app-bundle fallback when no CLI is shimmed onto PATH.
+if [ -z "$IDE_CLI" ]; then
+  for _app in \
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
+    "/Applications/Cursor.app/Contents/Resources/app/bin/cursor" \
+    "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf" \
+    "/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity" \
+    "/Applications/Trae.app/Contents/Resources/app/bin/trae"; do
+    if [ -x "$_app" ]; then IDE_CLI="$_app"; break; fi
+  done
+fi
 if [ -n "$IDE_CLI" ]; then
-  $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
+  "$IDE_CLI" --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
 else
   echo "NO_IDE_CLI"
 fi
 ```
 
-If EXTENSION_MISSING and `$PREFXPLAIN_ROOT/prefxplain-vscode/` exists, install it
-silently (no need to ask, it's a 3KB extension with zero overhead):
+If `EXTENSION_MISSING`, re-run `prefxplain setup` silently — its
+`_install_vscode_extension` helper will find the bundled or clone-built
+`.vsix` and install it via `code --install-extension`:
 
 ```bash
-cd "$PREFXPLAIN_ROOT" && make install-extension
+"$PREFXPLAIN_BIN" setup 2>&1 | grep -i "preview extension" || true
 ```
 
-If NO_IDE_CLI, skip silently. Keep the HTML on disk; do not start a localhost
-server unless the user explicitly asks for browser preview.
+If the extension is still missing afterwards (no `.vsix` reachable, or no
+Node to build one), tell the user once: the diagram is at the HTML path
+below, open it in a browser. If `NO_IDE_CLI`, skip silently. Never start a
+localhost server unless the user explicitly asks for browser preview.
 
 ## Division of labor
 
@@ -77,7 +124,7 @@ Store as `$REPO`.
 ### 2. Analyze and save JSON (preserving previous descriptions)
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 from pathlib import Path
 from prefxplain.analyzer import analyze
 from prefxplain.graph import Graph
@@ -190,7 +237,7 @@ assigned to a group. Group names should be human-readable, 1-3 words.
 #### 4b. List undescribed nodes
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 for n in g['nodes']:
@@ -335,7 +382,7 @@ Do NOT leave the placeholder comment. Run once per batch. Save after each batch.
 After all batches, verify nothing was missed:
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 missing = [n['id'] for n in g['nodes'] if not n.get('description')]
@@ -354,7 +401,7 @@ and what devs read to understand a project in 30 seconds.
 First, collect the structural signals you need. Run:
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 import json
 from collections import Counter
 g = json.loads(open('prefxplain.json').read())
@@ -436,7 +483,7 @@ any project, rewrite it.
 ### 5. Render the final HTML
 
 ```bash
-cd $REPO && python -c "
+cd $REPO && "$PREFXPLAIN_PYTHON" -c "
 from pathlib import Path
 from prefxplain.graph import Graph
 from prefxplain.renderer import render
@@ -457,19 +504,54 @@ Open the generated HTML in the installed PrefXplain IDE preview:
 
 ```bash
 HTML_PATH="$(cd "$REPO" && python3 -c "from pathlib import Path; print(Path('${OUTPUT:-prefxplain.html}').resolve())")"
-IDE_SCHEME="$(python3 -c "import os; term=(os.environ.get('TERM_PROGRAM') or '').lower(); print('cursor' if term=='cursor' else 'windsurf' if term=='windsurf' else 'vscode-insiders' if term=='vscode-insiders' else 'vscode')")"
+# All VS Code family IDEs (Cursor, Windsurf, Antigravity, Trae, Void,
+# VSCodium, Positron, …) follow Microsoft's convention: the URI scheme is
+# literally the IDE name. So `TERM_PROGRAM` is usually the right scheme.
+# Fall back to `vscode` only when TERM_PROGRAM isn't set or names a plain
+# terminal emulator (Terminal.app, iTerm, tmux, …).
+IDE_SCHEME="$(python3 -c "
+import os
+term = (os.environ.get('TERM_PROGRAM') or '').lower().strip()
+generic = {'', 'apple_terminal', 'iterm.app', 'hyper', 'tmux', 'rxvt', 'xterm', 'xterm-256color', 'alacritty', 'kitty', 'ghostty', 'warp', 'wezterm'}
+print('vscode' if term in generic else term)
+")"
 PREVIEW_URI="$(HTML_PATH="$HTML_PATH" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_PATH'])}\")")"
-open "$PREVIEW_URI" 2>/dev/null || true
+
+# Dispatch the vscode:// URI to the local IDE. Strategy per platform:
+#   - macOS:         `open <URI>` → LaunchServices → VS Code → extension handler
+#   - Linux desktop: `xdg-open <URI>` (needs DISPLAY) → VS Code registered handler
+#   - Windows/WSL:   `start "" <URI>` or `wslview <URI>`
+#   - Headless SSH:  no display — nothing auto-opens. The clickable URI printed
+#                    just below is the guaranteed fallback (VS Code's integrated
+#                    terminal auto-links `vscode://` so the user Cmd/Ctrl+clicks).
+case "$(uname -s 2>/dev/null)" in
+  Darwin*)
+    command -v open >/dev/null 2>&1 && open "$PREVIEW_URI" 2>/dev/null || true
+    ;;
+  Linux*)
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$PREVIEW_URI" 2>/dev/null || true
+    elif command -v wslview >/dev/null 2>&1; then
+      wslview "$PREVIEW_URI" 2>/dev/null || true
+    fi
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    command -v start >/dev/null 2>&1 && start "" "$PREVIEW_URI" 2>/dev/null || true
+    ;;
+esac
 ```
 
-Then report the path clearly:
+Then report the path with the **clickable URI front-and-center** — this is
+what actually works in Remote-SSH / devcontainer / Codespaces, where the OS
+dispatcher above is a no-op:
 
 ```bash
 echo ""
-echo "prefxplain preview target: $HTML_PATH"
+echo "Preview (Cmd/Ctrl+click the URI in VS Code's terminal, or run the command below):"
+echo "  $PREVIEW_URI"
 echo ""
-echo "The PrefXplain Preview webview should open in your IDE. If it does not, run:"
-echo "  Cmd+Shift+P > PrefXplain: Preview diagram"
+echo "HTML on disk: $HTML_PATH"
+echo "Fallback:     Cmd+Shift+P → PrefXplain: Preview diagram"
 ```
 
 Do not start a localhost server by default. The plugin webview is the primary preview path.

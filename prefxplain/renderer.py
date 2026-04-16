@@ -5025,7 +5025,7 @@ function derivedNodeTitle(node) {{
   const rawLabel = String(node.label || '');
   const stripped = rawLabel
     .replace(JS_EXT_RE, '')
-    .replace(/\.(py|pyi|kt|kts|rb|java|cs|swift|go|rs|c|cc|cpp|h|hpp)$/i, '');
+    .replace(/\\.(py|pyi|kt|kts|rb|java|cs|swift|go|rs|c|cc|cpp|h|hpp)$/i, '');
   if (stripped) {{
     const pretty = titleCaseWords(flowWords(stripped));
     if (pretty) return pretty;
@@ -5740,7 +5740,7 @@ flowBody.addEventListener('mouseout', e => {{
 
 searchInput.addEventListener('input', e => {{
   searchQuery = e.target.value.toLowerCase().trim();
-  searchTokens = searchQuery ? searchQuery.split(/\s+/).filter(Boolean) : [];
+  searchTokens = searchQuery ? searchQuery.split(/\\s+/).filter(Boolean) : [];
   if (!searchQuery) {{
     selectedNode = null;
     highlightSet = null;

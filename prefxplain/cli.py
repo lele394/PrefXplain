@@ -546,14 +546,19 @@ def setup_cmd(
                     [copilot_bin, "plugin", "install", str(copilot_plugin_dir)],
                     capture_output=True,
                     text=True,
-                    timeout=60,
+                    timeout=240,
                 )
             except subprocess.TimeoutExpired:
-                console.print("[red]Copilot plugin install timed out.[/red]")
-                failed = True
+                # Soft failure: only loud when the user explicitly asked for
+                # Copilot. Otherwise the rest of the setup (extension, Claude
+                # Code, Cursor, …) is unaffected, so don't alarm them.
                 if tool == "copilot":
+                    console.print("[red]Copilot plugin install timed out (>240s).[/red]")
                     raise typer.Exit(1)
-                console.print("[yellow]Skipping Copilot setup.[/yellow]")
+                console.print(
+                    "[yellow]\u26a0[/yellow] Copilot plugin install slow — skipped this run."
+                    " Re-run [bold]prefxplain setup copilot[/bold] later if you use Copilot CLI."
+                )
                 continue
             if result.returncode != 0:
                 console.print("[red]Failed to install Copilot plugin.[/red]")

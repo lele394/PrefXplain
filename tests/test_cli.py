@@ -232,7 +232,7 @@ class TestSetupCommand:
 
         result = runner.invoke(app, ["setup", "copilot"])
         assert result.exit_code == 1
-        assert "Copilot plugin install timed out." in result.output
+        assert "Copilot plugin install timed out" in result.output
 
     # --- Gemini CLI ---
 

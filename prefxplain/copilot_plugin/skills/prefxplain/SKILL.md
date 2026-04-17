@@ -14,7 +14,8 @@ natural-language description written by you (the LLM running this skill).
 **Smart re-runs**: if `prefxplain.json` already exists, descriptions, titles,
 flowcharts, groups, and highlights from the previous run are preserved for
 files that still exist. Only new or previously-undescribed files need work.
-This makes re-running cheap.
+This makes re-running cheap. Exception: if the user passes a `$LEVEL` that
+differs from the prior run, descriptions are re-generated in the new voice.
 
 ## Bootstrap
 
@@ -113,15 +114,39 @@ silently. Never start a localhost server unless the user asks.
 
 ## Workflow
 
-### 1. Resolve the repo root
+### 1. Resolve the repo root and audience level
 
-If the user's prompt contains a path, use it. Otherwise use the current working
-directory. Store as `$REPO`.
+Parse the user's prompt into two things: `$LEVEL` (how descriptions sound) and
+`$REPO` (the directory to analyze).
+
+**Level**: if the first token is one of `newbie`, `middle`, `strong`, or
+`expert`, consume it as `$LEVEL`. Otherwise set `$LEVEL=""` — the preservation
+step below will adopt the prior run's level, or fall back to `newbie` on a
+first run.
+
+**Repo**: the next token (if any) is the path. Otherwise use the current
+working directory. Store as `$REPO`.
+
+What each level means (voice used in step 4c):
+- **newbie** — first-year CS student. Zero jargon. Plain verbs, concrete
+  analogies. Explain what an outsider sees happening. *(default when unset)*
+- **middle** — working developer. Standard industry terms without
+  explanation. Skim-friendly one-liners.
+- **strong** — senior engineer. Name patterns (visitor, SCC) without
+  explaining them. Call out non-obvious invariants and trade-offs.
+- **expert** — domain specialist. Skip introductions. Lead with what is
+  unusual or decision-carrying. Precise vocabulary, no padding.
 
 ### 2. Analyze and save JSON (preserving previous descriptions)
 
+`LEVEL` is exported into the environment so the python script can compare it
+against the prior run. If they match (or either side is empty) the prior
+descriptions are preserved; otherwise descriptions are cleared so step 4c
+re-writes them in the new voice.
+
 ```bash
-cd $REPO && "$PREFXPLAIN_PYTHON" -c "
+cd $REPO && LEVEL="$LEVEL" "$PREFXPLAIN_PYTHON" -c "
+import os
 from pathlib import Path
 from prefxplain.analyzer import analyze
 from prefxplain.graph import Graph
@@ -129,25 +154,49 @@ from prefxplain.graph import Graph
 root = Path('.')
 graph = analyze(root, max_files=500)
 
+requested_level = (os.environ.get('LEVEL') or '').strip().lower()
+valid_levels = {'newbie', 'middle', 'strong', 'expert'}
+if requested_level and requested_level not in valid_levels:
+    requested_level = ''
+
 # Preserve descriptions, titles, flowcharts, groups, and highlights from previous run
 prev = root / 'prefxplain.json'
+prior_level = ''
 if prev.exists():
     old = Graph.load(prev)
-    old_map = {n.id: n for n in old.nodes}
-    for node in graph.nodes:
-        old_node = old_map.get(node.id)
-        if old_node:
-            if old_node.description: node.description = old_node.description
-            if old_node.short_title: node.short_title = old_node.short_title
-            if old_node.flowchart: node.flowchart = old_node.flowchart
-            if old_node.group: node.group = old_node.group
-            if old_node.highlights: node.highlights = old_node.highlights
-    # Preserve summary/health/groups/group_highlights if they exist
-    if old.metadata.summary: graph.metadata.summary = old.metadata.summary
-    if old.metadata.health_score: graph.metadata.health_score = old.metadata.health_score
-    if old.metadata.health_notes: graph.metadata.health_notes = old.metadata.health_notes
-    if old.metadata.groups: graph.metadata.groups = old.metadata.groups
-    if old.metadata.group_highlights: graph.metadata.group_highlights = old.metadata.group_highlights
+    prior_level = (getattr(old.metadata, 'level', '') or '').strip().lower()
+    level_changed = bool(requested_level and prior_level and requested_level != prior_level)
+    effective_level = requested_level or prior_level or 'newbie'
+
+    if level_changed:
+        # Drop prior descriptions so step 4c re-writes them in the new voice.
+        # Keep group assignments — architecture doesn't change with level.
+        old_map = {n.id: n for n in old.nodes}
+        for node in graph.nodes:
+            old_node = old_map.get(node.id)
+            if old_node and old_node.group: node.group = old_node.group
+        if old.metadata.groups: graph.metadata.groups = old.metadata.groups
+        print(f'LEVEL_CHANGED: {prior_level} -> {requested_level}')
+    else:
+        old_map = {n.id: n for n in old.nodes}
+        for node in graph.nodes:
+            old_node = old_map.get(node.id)
+            if old_node:
+                if old_node.description: node.description = old_node.description
+                if old_node.short_title: node.short_title = old_node.short_title
+                if old_node.flowchart: node.flowchart = old_node.flowchart
+                if old_node.group: node.group = old_node.group
+                if old_node.highlights: node.highlights = old_node.highlights
+        # Preserve summary/health/groups/group_highlights if they exist
+        if old.metadata.summary: graph.metadata.summary = old.metadata.summary
+        if old.metadata.health_score: graph.metadata.health_score = old.metadata.health_score
+        if old.metadata.health_notes: graph.metadata.health_notes = old.metadata.health_notes
+        if old.metadata.groups: graph.metadata.groups = old.metadata.groups
+        if old.metadata.group_highlights: graph.metadata.group_highlights = dict(old.metadata.group_highlights)
+else:
+    effective_level = requested_level or 'newbie'
+
+graph.metadata.level = effective_level
 
 graph.save(root / 'prefxplain.json')
 described = sum(1 for n in graph.nodes if n.description)
@@ -156,6 +205,7 @@ print(f'EDGES: {len(graph.edges)}')
 print(f'LANGUAGES: {graph.metadata.languages}')
 print(f'DESCRIBED: {described}/{len(graph.nodes)}')
 print(f'TRUNCATED: {len(graph.nodes) >= 500}')
+print(f'LEVEL: {effective_level}')
 "
 ```
 
@@ -259,6 +309,18 @@ Process 10-20 files per batch. For each file:
   docstring. Usually the first 60-120 lines.
 - **Huge files (>500 lines)**: first 150 lines, then grep for `^class `, `^def `,
   `^export `, `^function ` to get the shape.
+
+**Voice for `$LEVEL`** — apply this tone to `short_title`, `description`, and
+the flowchart `label` / `description` fields below:
+
+- **newbie** (default): first-year CS student. Zero jargon, every term glossed. Concrete
+  analogies. Everyday verbs ("picks", "asks", "saves").
+- **middle**: working developer. Standard industry terms used
+  without explanation. Skim-friendly one-liners.
+- **strong**: senior engineer. Name the pattern (visitor, circuit breaker)
+  without explaining. Call out non-obvious invariants and trade-offs.
+- **expert**: domain specialist. Lead with what is unusual or
+  decision-carrying. Precise vocabulary, no padding.
 
 **For each file, generate FOUR things:**
 

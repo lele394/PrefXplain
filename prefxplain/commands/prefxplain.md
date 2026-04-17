@@ -1,7 +1,7 @@
 ---
 name: prefxplain
 description: Generate or update an interactive dependency graph of the current codebase with natural-language descriptions for each file, rendered as a self-contained HTML the user can share. Use this skill whenever the user wants to understand, map, review, present, or explain the architecture of a codebase -- onboarding onto a new repo, preparing a walkthrough for a manager or teammate, pitching the code to an investor or client, or finding the core files vs the orphans. Trigger on indirect phrasings too: "help me understand this repo", "what's the structure here", "I need to present the code to X", "what are the load-bearing files", "draw me a map of this project", "update the diagram", "refresh prefxplain", "show the graph", "open prefxplain".
-argument-hint: [path] [--no-descriptions] [--output path/to/graph.html]
+argument-hint: [level: newbie|middle|strong|expert] [path] [--no-descriptions] [--output path/to/graph.html]
 allowed-tools: Bash, Read, Edit
 ---
 
@@ -11,95 +11,50 @@ Produces `prefxplain.html` -- an interactive, self-contained map of the codebase
 Nodes are files, edges are imports, and each node carries a 1-2 sentence
 natural-language description written by you (the LLM running this skill).
 
-**Smart re-runs**: if `prefxplain.json` already exists, descriptions, titles, and
-flowcharts from the previous run are preserved for files that still exist. Only new
-or previously-undescribed files need work. This makes re-running cheap.
+**Smart re-runs**: if `prefxplain.json` already exists, descriptions, titles,
+flowcharts, groups, and highlights from the previous run are preserved for
+files that still exist. Only new or previously-undescribed files need work.
+This makes re-running cheap. Exception: if `$LEVEL` changes between runs
+(e.g. the user ran `/prefxplain newbie` yesterday and `/prefxplain expert` today),
+descriptions are re-generated in the new voice.
 
 ## Bootstrap
 
 Run these checks at the very start of every invocation:
 
-**1. Locate the `prefxplain` CLI.**
-
-Try (in order) the PATH, the user-local shim, and the canonical clone venv —
-the `./setup` installer drops the shim at `~/.local/bin/prefxplain` and the
-venv at `~/.prefxplain/.venv/bin/prefxplain`:
+**1. Check Python package:**
 
 ```bash
-PREFXPLAIN_BIN="$(command -v prefxplain 2>/dev/null \
-  || ([ -x "$HOME/.local/bin/prefxplain" ] && echo "$HOME/.local/bin/prefxplain") \
-  || ([ -x "$HOME/.prefxplain/.venv/bin/prefxplain" ] && echo "$HOME/.prefxplain/.venv/bin/prefxplain") \
-  || echo "")"
-[ -n "$PREFXPLAIN_BIN" ] && "$PREFXPLAIN_BIN" --version
-
-# Also resolve the Python that has prefxplain importable. The inline
-# `python -c "from prefxplain... "` snippets later in this skill MUST use
-# this interpreter — the user's default `python` may not see the package
-# (e.g. when ./setup put prefxplain into ~/.prefxplain/.venv).
-PREFXPLAIN_PYTHON="$(python3 -c 'import prefxplain' 2>/dev/null && echo python3 \
-  || ([ -x "$HOME/.prefxplain/.venv/bin/python" ] && echo "$HOME/.prefxplain/.venv/bin/python") \
-  || ([ -n "$PREFXPLAIN_BIN" ] && grep -m1 -oE '/[^[:space:]]+/bin/prefxplain' "$PREFXPLAIN_BIN" 2>/dev/null | sed 's|/prefxplain$|/python|') \
-  || echo python3)"
+python -c "import prefxplain; print('prefxplain', prefxplain.__version__)" 2>/dev/null
 ```
 
-Use **`$PREFXPLAIN_PYTHON`** (not `python`) for every `python -c "..."` block
-in the workflow below.
+If exit code != 0, tell the user:
 
-If empty/exit≠0, tell the user (the **git-clone install is canonical**, pip
-flows skip the IDE preview extension):
+> prefxplain is not installed in `which python`. I can run `pip install prefxplain` to set it up. OK? [y/N]
 
-> prefxplain isn't installed. Recommended one-liner:
->
->     git clone --single-branch --depth 1 https://github.com/PrefOptimize/PrefXplain.git ~/.prefxplain && cd ~/.prefxplain && ./setup
->
-> This builds an isolated venv, registers `/prefxplain` for every detected AI
-> tool, and auto-installs the IDE preview extension. Want me to run it? [y/N]
+Wait for confirmation. If yes, run `pip install prefxplain`.
+If that also fails, stop and say what went wrong.
 
-Wait for confirmation. If yes, run the one-liner. If they prefer pip, accept
-`pipx install prefxplain && prefxplain setup` (extension won't auto-install
-in that case — the HTML still works in any browser).
-
-**2. Check the IDE preview extension.**
+**2. Check IDE extension (for in-IDE preview):**
 
 ```bash
-# Prefer the IDE we're actually running in. TERM_PROGRAM names the fork.
-_term="$(printf '%s' "${TERM_PROGRAM:-}" | tr '[:upper:]' '[:lower:]')"
-IDE_CLI=""
-for _cli in "$_term" code-insiders cursor windsurf antigravity trae void vscodium codium positron code; do
-  [ -z "$_cli" ] && continue
-  _path="$(command -v "$_cli" 2>/dev/null || true)"
-  if [ -n "$_path" ]; then IDE_CLI="$_path"; break; fi
-done
-# macOS app-bundle fallback when no CLI is shimmed onto PATH.
-if [ -z "$IDE_CLI" ]; then
-  for _app in \
-    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" \
-    "/Applications/Cursor.app/Contents/Resources/app/bin/cursor" \
-    "/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf" \
-    "/Applications/Antigravity.app/Contents/Resources/app/bin/antigravity" \
-    "/Applications/Trae.app/Contents/Resources/app/bin/trae"; do
-    if [ -x "$_app" ]; then IDE_CLI="$_app"; break; fi
-  done
-fi
+PREFXPLAIN_ROOT="$(python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null)"
+IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null || echo "")"
 if [ -n "$IDE_CLI" ]; then
-  "$IDE_CLI" --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
+  $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.browser" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
 else
   echo "NO_IDE_CLI"
 fi
 ```
 
-If `EXTENSION_MISSING`, re-run `prefxplain setup` silently — its
-`_install_vscode_extension` helper will find the bundled or clone-built
-`.vsix` and install it via `code --install-extension`:
+If EXTENSION_MISSING and `$PREFXPLAIN_ROOT/vscode-extension/` exists, install it
+silently (no need to ask, it's a 3KB extension with zero overhead):
 
 ```bash
-"$PREFXPLAIN_BIN" setup 2>&1 | grep -i "preview extension" || true
+cd "$PREFXPLAIN_ROOT" && make install-extension
 ```
 
-If the extension is still missing afterwards (no `.vsix` reachable, or no
-Node to build one), tell the user once: the diagram is at the HTML path
-below, open it in a browser. If `NO_IDE_CLI`, skip silently. Never start a
-localhost server unless the user explicitly asks for browser preview.
+If NO_IDE_CLI, skip silently. Preview will fall back to the browser.
 
 ## Division of labor
 
@@ -116,15 +71,45 @@ localhost server unless the user explicitly asks for browser preview.
 
 ## Workflow
 
-### 1. Resolve the repo root
+### 1. Resolve the repo root and audience level
 
-If `$ARGUMENTS` contains a path, use it. Otherwise use the current working directory.
-Store as `$REPO`.
+Parse `$ARGUMENTS` into two things: `$LEVEL` (how the descriptions sound) and
+`$REPO` (the directory to analyze).
+
+**Level**: if the first token is one of `newbie`, `middle`, `strong`, or
+`expert`, consume it as `$LEVEL`. Otherwise, set `$LEVEL=""` — the preservation
+step below will adopt the prior run's level, or fall back to `newbie` on a
+first run.
+
+**Repo**: the next token (if any) is the path. Otherwise use the current
+working directory. Store as `$REPO`.
+
+Examples:
+- `/prefxplain` → `$LEVEL=""`, `$REPO=.`
+- `/prefxplain expert` → `$LEVEL=expert`, `$REPO=.`
+- `/prefxplain newbie /path/to/repo` → `$LEVEL=newbie`, `$REPO=/path/to/repo`
+- `/prefxplain /path/to/repo` → `$LEVEL=""`, `$REPO=/path/to/repo`
+
+What each level means (use this for step 4c's voice):
+- **newbie** — first-year CS student. Zero jargon. Plain verbs, concrete
+  analogies. Explain what an outsider sees happening. *(default when unset)*
+- **middle** — working developer. Standard industry terms without
+  explanation. Skim-friendly one-liners.
+- **strong** — senior engineer. Name patterns (visitor, SCC) without
+  explaining them. Call out non-obvious invariants and trade-offs.
+- **expert** — domain specialist. Skip introductions. Lead with what is
+  unusual or decision-carrying. Precise vocabulary, no padding.
 
 ### 2. Analyze and save JSON (preserving previous descriptions)
 
+The `LEVEL` env var carries `$LEVEL` from step 1 into the python script. If it
+matches the prior run's level (or if either side is empty), descriptions are
+preserved. Otherwise, all descriptions/titles/flowcharts/highlights are cleared
+so step 4c re-writes them in the new voice.
+
 ```bash
-cd $REPO && "$PREFXPLAIN_PYTHON" -c "
+cd $REPO && LEVEL="$LEVEL" python -c "
+import os
 from pathlib import Path
 from prefxplain.analyzer import analyze
 from prefxplain.graph import Graph
@@ -132,23 +117,48 @@ from prefxplain.graph import Graph
 root = Path('.')
 graph = analyze(root, max_files=500)
 
-# Preserve descriptions, titles, and flowcharts from previous run
+requested_level = (os.environ.get('LEVEL') or '').strip().lower()
+valid_levels = {'newbie', 'middle', 'strong', 'expert'}
+if requested_level and requested_level not in valid_levels:
+    requested_level = ''
+
+# Preserve descriptions, titles, flowcharts, groups, and highlights from previous run
 prev = root / 'prefxplain.json'
+prior_level = ''
 if prev.exists():
     old = Graph.load(prev)
-    old_map = {n.id: n for n in old.nodes}
-    for node in graph.nodes:
-        old_node = old_map.get(node.id)
-        if old_node:
-            if old_node.description: node.description = old_node.description
-            if old_node.short_title: node.short_title = old_node.short_title
-            if old_node.flowchart: node.flowchart = old_node.flowchart
-            if old_node.group: node.group = old_node.group
-    # Preserve summary/health/groups if they exist
-    if old.metadata.summary: graph.metadata.summary = old.metadata.summary
-    if old.metadata.health_score: graph.metadata.health_score = old.metadata.health_score
-    if old.metadata.health_notes: graph.metadata.health_notes = old.metadata.health_notes
-    if old.metadata.groups: graph.metadata.groups = old.metadata.groups
+    prior_level = (getattr(old.metadata, 'level', '') or '').strip().lower()
+    level_changed = bool(requested_level and prior_level and requested_level != prior_level)
+    effective_level = requested_level or prior_level or 'newbie'
+
+    if level_changed:
+        # Drop prior descriptions so step 4c re-writes them in the new voice.
+        # Keep group assignments — architecture doesn't change with level.
+        for node in graph.nodes:
+            old_node = {n.id: n for n in old.nodes}.get(node.id)
+            if old_node and old_node.group: node.group = old_node.group
+        if old.metadata.groups: graph.metadata.groups = old.metadata.groups
+        print(f'LEVEL_CHANGED: {prior_level} -> {requested_level}')
+    else:
+        old_map = {n.id: n for n in old.nodes}
+        for node in graph.nodes:
+            old_node = old_map.get(node.id)
+            if old_node:
+                if old_node.description: node.description = old_node.description
+                if old_node.short_title: node.short_title = old_node.short_title
+                if old_node.flowchart: node.flowchart = old_node.flowchart
+                if old_node.group: node.group = old_node.group
+                if old_node.highlights: node.highlights = list(old_node.highlights)
+        # Preserve summary/health/groups/group_highlights if they exist
+        if old.metadata.summary: graph.metadata.summary = old.metadata.summary
+        if old.metadata.health_score: graph.metadata.health_score = old.metadata.health_score
+        if old.metadata.health_notes: graph.metadata.health_notes = old.metadata.health_notes
+        if old.metadata.groups: graph.metadata.groups = old.metadata.groups
+        if old.metadata.group_highlights: graph.metadata.group_highlights = dict(old.metadata.group_highlights)
+else:
+    effective_level = requested_level or 'newbie'
+
+graph.metadata.level = effective_level
 
 graph.save(root / 'prefxplain.json')
 described = sum(1 for n in graph.nodes if n.description)
@@ -157,6 +167,7 @@ print(f'EDGES: {len(graph.edges)}')
 print(f'LANGUAGES: {graph.metadata.languages}')
 print(f'DESCRIBED: {described}/{len(graph.nodes)}')
 print(f'TRUNCATED: {len(graph.nodes) >= 500}')
+print(f'LEVEL: {effective_level}')
 "
 ```
 
@@ -237,7 +248,7 @@ assigned to a group. Group names should be human-readable, 1-3 words.
 #### 4b. List undescribed nodes
 
 ```bash
-cd $REPO && "$PREFXPLAIN_PYTHON" -c "
+cd $REPO && python -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 for n in g['nodes']:
@@ -261,7 +272,23 @@ Process 10-20 files per batch. For each file:
 - **Huge files (>500 lines)**: first 150 lines, then grep for `^class `, `^def `,
   `^export `, `^function ` to get the shape.
 
-**For each file, generate THREE things:**
+**Voice for `$LEVEL`** — apply this tone to `short_title`, `description`, and
+the flowchart `label` / `description` fields below:
+
+- **newbie** (default): first-year CS student. Zero jargon. Every term glossed in plain
+  words ("a cache is a box that remembers recent results"). Concrete analogies.
+  Everyday verbs ("picks", "asks", "saves") instead of technical ones ("invokes",
+  "resolves", "persists"). Describe what an outsider sees happening.
+- **middle**: working developer familiar with REST/MVC/caching/ORM/CI.
+  Standard industry terms used without explanation. Skim-friendly one-liners.
+- **strong**: senior engineer. Name the pattern (visitor, circuit breaker, SCC)
+  without explaining it. Call out non-obvious invariants, constraints, and
+  trade-offs instead of restating the obvious.
+- **expert**: domain specialist. Lead with what is unusual or decision-carrying
+  (which algorithm variant, which API boundary, which trade-off). Precise
+  technical vocabulary, no padding, no introductions.
+
+**For each file, generate FOUR things:**
 
 1. **`short_title`** (1-3 words): The role of the file shown on the diagram card.
    Think of it as a label you'd write on a box in an architecture whiteboard.
@@ -271,7 +298,7 @@ Process 10-20 files per batch. For each file:
 
 2. **`description`** (1-2 sentences): What the file exposes and who uses it.
    Start with an active verb. Be specific enough that a reader who knows the
-   domain could guess the file's role without opening it.
+   domain could guess the file's role without opening it. Voice matches `$LEVEL`.
 
    Hard rules:
    - Don't start with "This file", "Contains", "Module for", "Handles".
@@ -280,7 +307,7 @@ Process 10-20 files per batch. For each file:
      name the 2-3 main things.
    - Present tense, active voice.
 
-   Examples:
+   Examples (middle-level voice):
    - GOOD: `Validates JWT tokens; exposes verify(token) which returns the decoded payload or raises AuthError.`
    - GOOD: `Builds the dependency graph via AST walking; main entry point for analyze() and Graph.from_root().`
    - BAD: `This file handles authentication logic for the app.` (starts with "This file", vague)
@@ -289,7 +316,32 @@ Process 10-20 files per batch. For each file:
    Test files: describe what behavior is covered, not the framework.
    `Covers edge cases in Graph.add_edge, including self-referential cycles and missing imports.`
 
-3. **`flowchart`** (dict): A flowchart showing the ACTUAL logic flow of the file.
+3. **`highlights`** (list of 3 strings, aim for 3): CONCRETE, codebase-specific
+   facts about this file. These render as bullet points **on the diagram card
+   itself**, so they must be legible at a glance even when the diagram is
+   zoomed out.
+
+   Style:
+   - Proper nouns only — named integrations, third-party tools, model names,
+     hyperparameters, cloud providers, protocols, file formats, exact versions,
+     CLI tools, specific thresholds.
+   - NOT adjectives or architectural platitudes.
+   - Each bullet **must be ≤35 characters** so it fits on the card without
+     wrapping. Shorter is better.
+   - Voice: same level as description, but terser. Bullets are fragments, not
+     sentences — no leading verb, no punctuation at the end.
+
+   Examples:
+   - GOOD: `["Claude Code integration", "Codex CLI support", "SQLite cache"]`
+   - GOOD: `["PyTorch", "lr=1e-4", "AdamW optimizer"]`
+   - GOOD: `["GCP Cloud Run", "PostgreSQL via asyncpg"]`
+   - BAD: `["handles user commands", "well-structured", "entry point"]` (generic)
+   - BAD: `["uses a SQLite database for caching descriptions"]` (too long, sentence-y)
+
+   If truly nothing concrete stands out, use `[]`. Empty is better than generic.
+   Aim for 3 per file.
+
+4. **`flowchart`** (dict): A flowchart showing the ACTUAL logic flow of the file.
    This is what appears when a user double-clicks a block in the diagram.
    It MUST reflect the real behavior of the code, NOT be generic.
 
@@ -354,9 +406,9 @@ from prefxplain.graph import Graph
 graph = Graph.load(Path("prefxplain.json"))
 
 # FILL THIS IN -- one entry per file in this batch
-# Format: "path/to/file.py": ("Short Title", "Full description sentence.", {flowchart_dict}),
+# Format: "path/to/file.py": ("Short Title", "Full description.", [highlights], {flowchart_dict}),
 files = {
-    # "src/auth.py": ("JWT Validator", "Validates JWT tokens; exposes verify(token).", {"nodes": [...], "edges": [...]}),
+    # "src/auth.py": ("JWT Validator", "Validates JWT tokens; exposes verify(token).", ["PyJWT", "HS256", "15 min TTL"], {"nodes": [...], "edges": [...]}),
 }
 
 for node in graph.nodes:
@@ -365,7 +417,9 @@ for node in graph.nodes:
         node.short_title = entry[0]
         node.description = entry[1]
         if len(entry) > 2 and entry[2]:
-            node.flowchart = entry[2]
+            node.highlights = list(entry[2])
+        if len(entry) > 3 and entry[3]:
+            node.flowchart = entry[3]
 
 graph.save(Path("prefxplain.json"))
 print(f"Patched {len(files)} files")
@@ -373,8 +427,9 @@ PYEOF
 ```
 
 IMPORTANT: You MUST fill in the `files` dict with real values before running.
-Each value is a tuple of `("Short Title", "Full description.", {flowchart})`.
+Each value is a 4-tuple: `("Short Title", "Full description.", [highlights], {flowchart})`.
 The flowchart dict is required — it MUST reflect the actual logic of the file.
+Highlights may be an empty list `[]` when nothing concrete stands out, but aim for 3.
 Do NOT leave the placeholder comment. Run once per batch. Save after each batch.
 
 #### 4e. Completeness check
@@ -382,7 +437,7 @@ Do NOT leave the placeholder comment. Run once per batch. Save after each batch.
 After all batches, verify nothing was missed:
 
 ```bash
-cd $REPO && "$PREFXPLAIN_PYTHON" -c "
+cd $REPO && python -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 missing = [n['id'] for n in g['nodes'] if not n.get('description')]
@@ -393,7 +448,40 @@ for f in missing: print(f'  {f}')
 
 If MISSING > 0, go back and describe them.
 
-#### 4f. Generate executive summary + health score
+#### 4f. Generate group-level highlights
+
+After file-level highlights are in place, synthesize up to 3 group-level
+bullets per architectural group — concrete facts that span multiple files
+within the group (e.g. "supports Claude Code + Codex + Copilot" from three
+sibling integration files, not from any single one). These render on the
+group's card in the diagram.
+
+Style (same constraints as file highlights):
+- Each bullet ≤35 characters, fragment not sentence, proper nouns only.
+- Voice matches `$LEVEL`.
+- Empty list `[]` when nothing cross-file stands out. Don't pad.
+
+```bash
+cd $REPO && python3 << 'PYEOF'
+from pathlib import Path
+from prefxplain.graph import Graph
+
+graph = Graph.load(Path("prefxplain.json"))
+
+# FILL THESE IN — group name → list of up to 3 concrete, cross-file facts
+graph.metadata.group_highlights = {
+    # "CLI & Integrations": ["Claude Code + Codex + Copilot", "Typer CLI", "MCP stdio server"],
+    # "Code Analysis": ["7 languages", "Claude Sonnet 4.6", "SQLite cache"],
+}
+
+graph.save(Path("prefxplain.json"))
+print(f"Patched {len(graph.metadata.group_highlights)} group highlights")
+PYEOF
+```
+
+Skip groups where nothing concrete spans the files. Empty list is fine.
+
+#### 4g. Generate executive summary + health score
 
 This is the most important step. The summary is what founders paste into decks
 and what devs read to understand a project in 30 seconds.
@@ -401,7 +489,7 @@ and what devs read to understand a project in 30 seconds.
 First, collect the structural signals you need. Run:
 
 ```bash
-cd $REPO && "$PREFXPLAIN_PYTHON" -c "
+cd $REPO && python -c "
 import json
 from collections import Counter
 g = json.loads(open('prefxplain.json').read())
@@ -483,7 +571,7 @@ any project, rewrite it.
 ### 5. Render the final HTML
 
 ```bash
-cd $REPO && "$PREFXPLAIN_PYTHON" -c "
+cd $REPO && python -c "
 from pathlib import Path
 from prefxplain.graph import Graph
 from prefxplain.renderer import render
@@ -500,63 +588,47 @@ If `--output` was passed in `$ARGUMENTS`, use that path instead of the default.
 
 ### 6. Preview in IDE
 
-Open the generated HTML in the installed PrefXplain IDE preview:
+Launch a background HTTP server and let VS Code detect it for Simple Browser preview:
 
 ```bash
-HTML_PATH="$(cd "$REPO" && python3 -c "from pathlib import Path; print(Path('${OUTPUT:-prefxplain.html}').resolve())")"
-# All VS Code family IDEs (Cursor, Windsurf, Antigravity, Trae, Void,
-# VSCodium, Positron, …) follow Microsoft's convention: the URI scheme is
-# literally the IDE name. So `TERM_PROGRAM` is usually the right scheme.
-# Fall back to `vscode` only when TERM_PROGRAM isn't set or names a plain
-# terminal emulator (Terminal.app, iTerm, tmux, …).
-IDE_SCHEME="$(python3 -c "
-import os
-term = (os.environ.get('TERM_PROGRAM') or '').lower().strip()
-generic = {'', 'apple_terminal', 'iterm.app', 'hyper', 'tmux', 'rxvt', 'xterm', 'xterm-256color', 'alacritty', 'kitty', 'ghostty', 'warp', 'wezterm'}
-print('vscode' if term in generic else term)
-")"
-PREVIEW_URI="$(HTML_PATH="$HTML_PATH" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_PATH'])}\")")"
+cd "$REPO"
+# Kill any previous prefxplain server
+[ -f /tmp/prefxplain.pid ] && kill $(cat /tmp/prefxplain.pid) 2>/dev/null; rm -f /tmp/prefxplain.pid /tmp/prefxplain.port
 
-# Dispatch the vscode:// URI to the local IDE. Strategy per platform:
-#   - macOS:         `open <URI>` → LaunchServices → VS Code → extension handler
-#   - Linux desktop: `xdg-open <URI>` (needs DISPLAY) → VS Code registered handler
-#   - Windows/WSL:   `start "" <URI>` or `wslview <URI>`
-#   - Headless SSH:  no display — nothing auto-opens. The clickable URI printed
-#                    just below is the guaranteed fallback (VS Code's integrated
-#                    terminal auto-links `vscode://` so the user Cmd/Ctrl+clicks).
-case "$(uname -s 2>/dev/null)" in
-  Darwin*)
-    command -v open >/dev/null 2>&1 && open "$PREVIEW_URI" 2>/dev/null || true
-    ;;
-  Linux*)
-    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
-      xdg-open "$PREVIEW_URI" 2>/dev/null || true
-    elif command -v wslview >/dev/null 2>&1; then
-      wslview "$PREVIEW_URI" 2>/dev/null || true
-    fi
-    ;;
-  MINGW*|MSYS*|CYGWIN*)
-    command -v start >/dev/null 2>&1 && start "" "$PREVIEW_URI" 2>/dev/null || true
-    ;;
-esac
+# Find a free port in 8765-8775
+PORT=$(python3 -c "
+import socket
+for p in range(8765, 8776):
+    s = socket.socket()
+    try:
+        s.bind(('127.0.0.1', p))
+        s.close()
+        print(p)
+        break
+    except OSError:
+        continue
+")
+
+nohup python3 -m http.server $PORT --directory . > /tmp/prefxplain-server.log 2>&1 &
+echo $! > /tmp/prefxplain.pid
+echo $PORT > /tmp/prefxplain.port
+sleep 0.5
 ```
 
-Then report the path. The OSC 8 hyperlink escape binds a **short clickable
-label** to the full URI, so the link stays Cmd/Ctrl-clickable even on narrow
-terminals where a raw URI would wrap across two lines (VS Code only detects
-links that fit on one line). Plain URI is printed right after as a copy-paste
-fallback and for terminals that don't honor OSC 8:
+Then display the URL clearly:
 
 ```bash
-printf '\n\033]8;;%s\033\\%s\033]8;;\033\\\n' \
-  "$PREVIEW_URI" "▶ Open preview in IDE (Cmd/Ctrl+click here)"
+PORT=$(cat /tmp/prefxplain.port)
 echo ""
-echo "URI:          $PREVIEW_URI"
-echo "HTML on disk: $HTML_PATH"
-echo "Fallback:     Cmd+Shift+P → PrefXplain: Preview diagram"
+echo "prefxplain.html available at: http://localhost:$PORT/prefxplain.html"
+echo ""
+echo "VS Code should show a 'Port $PORT detected' notification -- click 'Preview in Editor' to open in Simple Browser."
+echo "Otherwise: Cmd+Shift+P > 'Simple Browser: Show' > paste the URL."
+echo ""
+echo "Server PID: $(cat /tmp/prefxplain.pid) -- kill with: kill \$(cat /tmp/prefxplain.pid)"
 ```
 
-Do not start a localhost server by default. The plugin webview is the primary preview path.
+Do NOT block on the server. It runs in background. Move on to the report.
 
 ### 7. Report to the user
 
@@ -568,18 +640,7 @@ Keep this tight. Pull structural insights from the JSON:
 - **Entry points** (in-degree 0, excluding tests) -- where to start reading
 - **Orphans** (no imports in or out) -- if >3, give the count, offer to list
 - **Cycles** if detected -- flag as architectural debt
-- **Preview — MUST be rendered as a Markdown link**, not as a bare URL, because
-  Claude Code / Codex / Copilot / Gemini chat panes make Markdown links
-  Cmd/Ctrl-clickable regardless of line wrap, whereas a bare URI in a Bash
-  tool result is just text (OSC 8 escape sequences get stripped by the chat
-  UI). Format exactly like this, substituting `$PREVIEW_URI` and `$HTML_PATH`:
-
-  ```
-  Preview: [▶ Open in IDE]($PREVIEW_URI) ([fallback]: `prefxplain.html` at $HTML_PATH, or `Cmd+Shift+P → PrefXplain: Preview diagram`)
-  ```
-
-  Do NOT claim "opened in the IDE webview" — on headless Remote-SSH / devcontainer
-  / Codespaces, nothing auto-opens; the user has to click the link.
+- **URL to prefxplain.html** (the localhost URL from step 6)
 
 Close with: "Happy to walk through any specific file or cluster."
 Don't preempt -- wait for the user to ask.
@@ -592,5 +653,5 @@ Don't preempt -- wait for the user to ask.
   new or changed files — previous descriptions are preserved automatically
 - The HTML renderer already surfaces entry points, core files, orphans, and cycles
   visually -- the text report is a summary for people reading along in chat
-- The IDE extension preview is the default viewing path. Use a localhost server only
-  if the user explicitly asks for browser preview.
+- A background HTTP server runs after the command for IDE preview. It consumes zero
+  CPU at rest but holds a port open. Kill it with `kill $(cat /tmp/prefxplain.pid)`.

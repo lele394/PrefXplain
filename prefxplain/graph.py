@@ -128,6 +128,7 @@ class GraphMetadata:
     health_notes: str = ""  # plain-English health interpretation
     groups: dict[str, str] = field(default_factory=dict)  # AI group name → description
     group_highlights: dict[str, list[str]] = field(default_factory=dict)  # AI group name → concrete facts
+    level: str = ""  # audience level used for descriptions: newbie | middle | strong | expert
 
     def to_dict(self) -> dict:
         d = {
@@ -147,6 +148,8 @@ class GraphMetadata:
             d["groups"] = self.groups
         if self.group_highlights:
             d["group_highlights"] = self.group_highlights
+        if self.level:
+            d["level"] = self.level
         return d
 
     @classmethod
@@ -162,6 +165,7 @@ class GraphMetadata:
             health_notes=d.get("health_notes", ""),
             groups=d.get("groups", {}),
             group_highlights=dict(d.get("group_highlights") or {}),
+            level=d.get("level", ""),
         )
 
 

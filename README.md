@@ -162,6 +162,7 @@ that use the Anthropic Agent Skill format (Copilot, Gemini, Claude Code).
 | `--force`, `-f` | false | Regenerate all descriptions |
 | `--filter` | — | Glob filter (e.g. `src/**/*.py`) |
 | `--focus` / `--depth` | — | Depth-limited view around a file |
+| `--level`, `-l` | `newbie` | Audience voice for descriptions: `newbie`, `middle`, `strong`, `expert`. Empty reuses the prior run's level. |
 
 </details>
 

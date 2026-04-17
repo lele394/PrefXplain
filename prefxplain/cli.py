@@ -208,6 +208,14 @@ def create(
         "--check-cycles",
         help="Exit with code 1 if circular dependencies are found.",
     ),
+    level: str = typer.Option(
+        "",
+        "--level",
+        "-l",
+        help="Audience level for descriptions: newbie, middle, strong, expert. "
+             "Empty = reuse prior run's level (or 'newbie' on first run). "
+             "Changing level re-describes everything in the new voice.",
+    ),
 ) -> None:
     """Analyze a codebase and generate an interactive HTML dependency graph."""
     _run(
@@ -226,6 +234,7 @@ def create(
         focus=focus,
         depth=depth,
         check_cycles=check_cycles,
+        level=level,
     )
 
 
@@ -274,6 +283,12 @@ def update(
         "--open/--no-open",
         help="Open the generated output in the IDE preview when available, otherwise in the browser.",
     ),
+    level: str = typer.Option(
+        "",
+        "--level",
+        "-l",
+        help="Audience level: newbie, middle, strong, expert. Empty = reuse prior run's level.",
+    ),
 ) -> None:
     """Re-analyze the codebase. Same as `create` but defaults to not opening the browser.
 
@@ -296,6 +311,7 @@ def update(
         focus=None,
         depth=None,
         check_cycles=False,
+        level=level,
     )
 
 
@@ -745,12 +761,25 @@ def _run(
     focus: Optional[str],
     depth: Optional[int],
     check_cycles: bool,
+    level: str = "",
 ) -> None:
     """Shared implementation for create and update commands.
 
     Both commands run the full pipeline: analyze, describe, render. Re-runs are
-    fast because describer.py caches by (file_path, content_hash) in SQLite.
+    fast because describer.py caches by (file_path, content_hash, level) in SQLite.
+    A change in `level` invalidates prior descriptions so the new voice actually
+    shows up on re-run.
     """
+    from .describer import VALID_LEVELS, _DEFAULT_LEVEL
+
+    # Resolve the requested level: CLI arg > prior run's level (from JSON) > default.
+    requested_level = (level or "").strip().lower()
+    if requested_level and requested_level not in VALID_LEVELS:
+        console.print(
+            f"[yellow]Unknown level '{level}'. Using '{_DEFAULT_LEVEL}'. "
+            f"Valid: {', '.join(sorted(VALID_LEVELS))}.[/yellow]"
+        )
+        requested_level = ""
     fmt = output_format.lower()
     default_ext = {
         "html": ".html",
@@ -811,46 +840,102 @@ def _run(
     # Step 2: LLM descriptions
     # Always preserve prior descriptions first — so a failed LLM call or
     # --no-descriptions never silently wipes descriptions from a previous run.
+    # BUT: if the requested audience level differs from the prior run's level,
+    # skip preservation so the new voice actually takes effect.
     prior_json_path = (output or (root / f"prefxplain{ext}")).with_suffix(".json")
+    prior_level = ""
     if prior_json_path.exists():
         try:
             from .diagram import is_generated_group_label
             from .graph import Graph as _Graph
 
             prior_graph = _Graph.load(prior_json_path)
-            prior_descs = {n.id: n for n in prior_graph.nodes if n.description}
-            preserved = 0
-            for node in graph.nodes:
-                prior = prior_descs.get(node.id)
-                if prior:
-                    node.description = prior.description
-                    # Also restore per-symbol descriptions
-                    old_sym = {s.name: s.description for s in prior.symbols if s.description}
-                    for sym in node.symbols:
-                        if sym.name in old_sym:
-                            sym.description = old_sym[sym.name]
-                    if prior.group and not is_generated_group_label(prior.group):
-                        node.group = prior.group
-                    preserved += 1
-            if preserved:
+            prior_level = (getattr(prior_graph.metadata, "level", "") or "").strip().lower()
+
+            # Resolve effective level: explicit CLI arg wins; else reuse prior; else default.
+            effective_level = requested_level or prior_level or _DEFAULT_LEVEL
+
+            level_changed = bool(
+                requested_level and prior_level and requested_level != prior_level
+            )
+            if level_changed:
                 console.print(
-                    f"    [dim]Preserved {preserved} description(s) from previous run[/dim]"
+                    f"    [yellow]Level changed ({prior_level} \u2192 {requested_level})"
+                    f" — re-describing in the new voice.[/yellow]"
                 )
+                # Architecture doesn't change with voice — keep group
+                # assignments and the groups→description map so the LLM
+                # doesn't have to re-derive them on every voice change.
+                prior_by_id = {n.id: n for n in prior_graph.nodes}
+                for node in graph.nodes:
+                    prior = prior_by_id.get(node.id)
+                    if prior and prior.group and not is_generated_group_label(prior.group):
+                        node.group = prior.group
+                if prior_graph.metadata.groups:
+                    graph.metadata.groups = dict(prior_graph.metadata.groups)
+            else:
+                prior_descs = {n.id: n for n in prior_graph.nodes if n.description}
+                preserved = 0
+                for node in graph.nodes:
+                    prior = prior_descs.get(node.id)
+                    if prior:
+                        node.description = prior.description
+                        if prior.short_title:
+                            node.short_title = prior.short_title
+                        if prior.flowchart:
+                            node.flowchart = prior.flowchart
+                        if prior.highlights:
+                            node.highlights = list(prior.highlights)
+                        # Also restore per-symbol descriptions
+                        old_sym = {s.name: s.description for s in prior.symbols if s.description}
+                        for sym in node.symbols:
+                            if sym.name in old_sym:
+                                sym.description = old_sym[sym.name]
+                        if prior.group and not is_generated_group_label(prior.group):
+                            node.group = prior.group
+                        preserved += 1
+                # Carry over graph-level metadata that the skill/API path populated
+                # on the previous run. Without these, a re-run wipes user-written
+                # summaries and health notes.
+                if prior_graph.metadata.summary:
+                    graph.metadata.summary = prior_graph.metadata.summary
+                if prior_graph.metadata.health_score:
+                    graph.metadata.health_score = prior_graph.metadata.health_score
+                if prior_graph.metadata.health_notes:
+                    graph.metadata.health_notes = prior_graph.metadata.health_notes
+                if prior_graph.metadata.group_highlights:
+                    graph.metadata.group_highlights = dict(prior_graph.metadata.group_highlights)
+                if preserved:
+                    console.print(
+                        f"    [dim]Preserved {preserved} description(s) from previous run[/dim]"
+                    )
         except Exception:  # noqa: BLE001 — graceful degradation
-            pass
+            effective_level = requested_level or _DEFAULT_LEVEL
+    else:
+        effective_level = requested_level or _DEFAULT_LEVEL
+
+    graph.metadata.level = effective_level
 
     if no_descriptions or fmt in ("mermaid", "dot"):
         console.print("[bold blue]2/3[/bold blue] Skipping descriptions (preserved from cache)")
     else:
-        console.print("[bold blue]2/3[/bold blue] Generating natural language descriptions...")
+        console.print(
+            f"[bold blue]2/3[/bold blue] Generating natural language descriptions "
+            f"[dim](level: {effective_level})[/dim]..."
+        )
+        # When the level changed, force re-description so the new voice applies.
+        should_force = force or (
+            requested_level and prior_level and requested_level != prior_level
+        )
         graph = describe(
             graph,
             root=root,
             api_key=api_key,
             api_base=api_base,
             model=model,
-            force=force,
+            force=should_force,
             detail=detail,
+            level=effective_level,
         )
         if not detail:
             graph = describe_groups(
@@ -859,7 +944,8 @@ def _run(
                 api_key=api_key,
                 api_base=api_base,
                 model=model,
-                force=force,
+                force=should_force,
+                level=effective_level,
             )
 
     # Step 3: Render output

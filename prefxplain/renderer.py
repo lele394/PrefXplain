@@ -900,18 +900,36 @@ function layoutOpenGroupChildren(group) {{
   // "two blocks inside a container" rather than a tall single-column stack.
   const cols = n <= 1 ? 1 : (n <= 4 ? 2 : 3);
   const rows = Math.ceil(n / cols);
-  // Dynamically widen cells to fit the longest title without truncation.
-  // Bold 14px font is drawn in screen space; target reference zoom ~0.65 so
-  // titles stay readable at typical view distances. ~9px per char + chrome
-  // (left bar + both-side padding + inner margin ≈ 52px). Cap at 2× NODE_W.
+  // Dynamically widen cells to fit the longest title AND the longest bullet
+  // without truncation. Two zoom references:
+  //   REF_ZOOM (0.65) — typical view, used for titles
+  //   FLOOR_ZOOM (0.25) — zoom-to-fit clamp in computeFitZoom. Bullets are
+  //     sized against this so they remain readable even at worst-case zoom.
+  // Cap at 3× NODE_W so one giant label doesn't blow up the whole group.
   const REF_ZOOM = 0.65;
-  const CHAR_PX = 9;
-  const CHROME_PX = 52;
+  const FLOOR_ZOOM = 0.25;
+  const CHAR_PX = 9;                // title font char width (~bold 14 px)
+  const BULLET_CHAR_PX = 8.2;       // bullet font char width (~15 px)
+  const CHROME_PX = 52;             // left bar + both-side padding for title
+  const BULLET_CHROME_PX = 60;      // inset for bullets to stay inside
+                                    // non-rectangular shapes (hexagons etc.)
   const longestTitleScreenW = sorted.reduce((mx, c) => {{
     const len = nodeTitleText(c).length;
     return Math.max(mx, len * CHAR_PX + CHROME_PX);
   }}, 0);
-  const cellW = Math.min(Math.max(NODE_W, Math.ceil(longestTitleScreenW / REF_ZOOM)), NODE_W * 2);
+  const longestBulletScreenW = sorted.reduce((mx, c) => {{
+    const hs = Array.isArray(c.highlights) ? c.highlights : [];
+    if (hs.length === 0) return mx;
+    const maxLen = hs.reduce((m, h) => Math.max(m, (h || '').length), 0);
+    // "• " prefix takes ~2 chars of width
+    return Math.max(mx, (maxLen + 2) * BULLET_CHAR_PX + BULLET_CHROME_PX);
+  }}, 0);
+  const titleDrivenW  = Math.ceil(longestTitleScreenW  / REF_ZOOM);
+  const bulletDrivenW = Math.ceil(longestBulletScreenW / FLOOR_ZOOM);
+  const cellW = Math.min(
+    Math.max(NODE_W, titleDrivenW, bulletDrivenW),
+    NODE_W * 3
+  );
   const cellH = Math.max(...sorted.map(c => c.h || NODE_H_BASE));
   const openW = cols * cellW + (cols - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD * 2;
   const openH = OPEN_GROUP_HEADER + OPEN_GROUP_INNER_TOP + rows * cellH + (rows - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD;
@@ -1843,9 +1861,14 @@ function computeFitZoom(width, height, nodeList) {{
   // must never overflow horizontally (fit width). In horizontal flow, fit
   // height instead so content stays inside vertically.
   const axisFit = dir === 'horizontal' ? zy : zx;
-  // Lower floor than before (0.3 silently swallowed any extra margin on
-  // dense graphs). Keep a tiny floor so we never go to zero.
-  return Math.max(0.05, Math.min(axisFit, 2.5));
+  // Worst-case-zoom-out floor: clamped high enough that a GROUP_CHILD_MIN_H_WITH_BULLETS
+  // card (~240 world-px tall) renders at >= 60 screen-px at fit, which clears
+  // the "title + bullets" threshold in the isGroupChild branch so bullets
+  // remain visible on every card even when the full diagram doesn't fit the
+  // viewport. Trade-off: on very large repos the user pans instead of seeing
+  // the entire diagram at once.
+  const minZoomFloor = 0.25;
+  return Math.max(minZoomFloor, Math.min(axisFit, 2.5));
 }}
 
 function syncZoomScale(width, height) {{
@@ -2053,10 +2076,18 @@ const SOLO_NODE_W = 1404, SOLO_NODE_H = 432;
 const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
 // Fixed height sized to fit a short explanation under each node title.
+// Minimum for a group-child card that carries highlights — sized so that at
+// the clamped zoom-to-fit floor (~0.25, set in computeFitZoom) the screen
+// height is ~125 px, comfortably enough for the 'full' group-child mode
+// (13 px kind + 22 px title + 3×18 px bullet lines + padding) on every
+// shape including hexagons and diamonds that clip text near their edges.
+const GROUP_CHILD_MIN_H_WITH_BULLETS = 500;
+
 function nodeHeight(n) {{
   if (n.isGroup) return NODE_H_BASE;
-  // Dynamically size the card to fit its title + description without clipping.
-  // Uses character-count estimation (no canvas needed at init time):
+  // Dynamically size the card to fit its title + bullets + description
+  // without clipping. Uses character-count estimation (no canvas needed at
+  // init time):
   //   bold 16px  ≈ 9.5 px/char  (title)
   //   regular 13px ≈ 6.5 px/char (summary)
   const w = (n.w || NODE_W) - 16;   // inner width (8 px padding each side)
@@ -2068,10 +2099,19 @@ function nodeHeight(n) {{
   const summaryLines = summaryText
     ? Math.max(1, Math.ceil(summaryText.length / summaryCharsPerLine))
     : 0;
-  // Layout: topPad(12) + title(lines×18) + gap(6) + summary(lines×15) + margin(11) + footer(22)
-  const needed = 12 + titleLines * 18 + 6 + summaryLines * 15 + 11 + 22;
+  // Bullets (file highlights): render directly under the title so a reader
+  // understands the file's role at a glance, even when zoomed out.
+  // Line-height 18 matches the 15 px bullet font used in the draw step.
+  const bulletCount = Array.isArray(n.highlights) ? Math.min(3, n.highlights.length) : 0;
+  const bulletsH    = bulletCount > 0 ? 4 + bulletCount * 18 + 4 : 0;
+  // Layout: topPad(12) + title(lines×18) + gap(6) + bullets + summary(lines×15) + margin(11) + footer(22)
+  const needed = 12 + titleLines * 18 + 6 + bulletsH + summaryLines * 15 + 11 + 22;
   const isSolo = !nodeToGroup[n.id];
-  const minH = isSolo ? SOLO_NODE_H : NODE_H_BASE;
+  let minH = isSolo ? SOLO_NODE_H : NODE_H_BASE;
+  // Worst-case-zoom-out legibility: group-child cards carrying highlights
+  // get a raised floor so that even at the zoom-fit minimum their on-screen
+  // height clears the bullet-rendering threshold.
+  if (!isSolo && bulletCount > 0) minH = Math.max(minH, GROUP_CHILD_MIN_H_WITH_BULLETS);
   return Math.max(minH, needed);
 }}
 
@@ -2822,6 +2862,88 @@ function draw() {{
     drawArrowHead(x1, y1, x2, y2, color, arrowSize);
   }}
 
+  // Obstacle-aware variant of drawArrow used by intra-group edges (inside
+  // open group cards) so the line between two children doesn't clip a sibling
+  // child laid out between them. `obstacles` is an array of {{x, y, w, h}}
+  // boxes (center-based, matching nodeBox); source and target must be
+  // excluded by the caller.
+  function drawAvoidantArrow(x1, y1, x2, y2, obstacles, color, lw, arrowSize) {{
+    const hitStraight = () => {{
+      for (const ob of obstacles) {{
+        if (lineHitsRect(x1, y1, x2, y2, ob.x, ob.y, ob.w, ob.h, 4)) return true;
+      }}
+      return false;
+    }};
+    if (!obstacles || obstacles.length === 0 || !hitStraight()) {{
+      drawArrow(x1, y1, x2, y2, color, lw, arrowSize);
+      return;
+    }}
+    // Build a 3-segment Manhattan path. Choose to detour above or below
+    // (horizontal-dominant) or left/right (vertical-dominant) based on
+    // which side clears all relevant obstacles.
+    const dx = Math.abs(x2 - x1), dy = Math.abs(y2 - y1);
+    const horizontalDominant = dx >= dy;
+    const GAP = Math.max(arrowSize * 1.1, 14 / zoom);
+    const segsOk = (wps) => {{
+      for (const ob of obstacles) {{
+        for (let i = 0; i < wps.length - 1; i++) {{
+          if (lineHitsRect(wps[i].x, wps[i].y, wps[i+1].x, wps[i+1].y,
+              ob.x, ob.y, ob.w, ob.h, 4)) return false;
+        }}
+      }}
+      return true;
+    }};
+    let waypoints;
+    if (horizontalDominant) {{
+      const spanMinX = Math.min(x1, x2), spanMaxX = Math.max(x1, x2);
+      const relevant = obstacles.filter(ob =>
+        (ob.x + ob.w / 2) >= spanMinX && (ob.x - ob.w / 2) <= spanMaxX);
+      let yUp = Math.min(y1, y2), yDown = Math.max(y1, y2);
+      for (const ob of relevant) {{
+        yUp = Math.min(yUp, ob.y - ob.h / 2 - GAP);
+        yDown = Math.max(yDown, ob.y + ob.h / 2 + GAP);
+      }}
+      const up = [{{x:x1, y:y1}}, {{x:x1, y:yUp}}, {{x:x2, y:yUp}}, {{x:x2, y:y2}}];
+      const down = [{{x:x1, y:y1}}, {{x:x1, y:yDown}}, {{x:x2, y:yDown}}, {{x:x2, y:y2}}];
+      waypoints = segsOk(up) ? up : (segsOk(down) ? down : up);
+    }} else {{
+      const spanMinY = Math.min(y1, y2), spanMaxY = Math.max(y1, y2);
+      const relevant = obstacles.filter(ob =>
+        (ob.y + ob.h / 2) >= spanMinY && (ob.y - ob.h / 2) <= spanMaxY);
+      let xLeft = Math.min(x1, x2), xRight = Math.max(x1, x2);
+      for (const ob of relevant) {{
+        xLeft = Math.min(xLeft, ob.x - ob.w / 2 - GAP);
+        xRight = Math.max(xRight, ob.x + ob.w / 2 + GAP);
+      }}
+      const left  = [{{x:x1, y:y1}}, {{x:xLeft,  y:y1}}, {{x:xLeft,  y:y2}}, {{x:x2, y:y2}}];
+      const right = [{{x:x1, y:y1}}, {{x:xRight, y:y1}}, {{x:xRight, y:y2}}, {{x:x2, y:y2}}];
+      waypoints = segsOk(left) ? left : (segsOk(right) ? right : left);
+    }}
+    // Shorten the last segment so the line stops at the arrowhead base.
+    const last = waypoints[waypoints.length - 1];
+    const prev = waypoints[waypoints.length - 2];
+    const angle = Math.atan2(last.y - prev.y, last.x - prev.x);
+    const tx = last.x - Math.cos(angle) * arrowSize * 0.6;
+    const ty = last.y - Math.sin(angle) * arrowSize * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(waypoints[0].x, waypoints[0].y);
+    for (let i = 1; i < waypoints.length - 1; i++) {{
+      const p = waypoints[i - 1], c = waypoints[i], nx = waypoints[i + 1];
+      const r = Math.min(8 / zoom,
+        (Math.abs(c.x - p.x) / 2) || 1e9,
+        (Math.abs(c.y - p.y) / 2) || 1e9,
+        (Math.abs(nx.x - c.x) / 2) || 1e9,
+        (Math.abs(nx.y - c.y) / 2) || 1e9);
+      if (r > 0.5) ctx.arcTo(c.x, c.y, nx.x, nx.y, r);
+      else ctx.lineTo(c.x, c.y);
+    }}
+    ctx.lineTo(tx, ty);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw;
+    ctx.stroke();
+    drawArrowHead(prev.x, prev.y, last.x, last.y, color, arrowSize);
+  }}
+
   // Deterministic hash → consistent lane index per edge pair
   function edgeLaneIndex(a, b) {{
     const N_LANES = 8;
@@ -3245,9 +3367,13 @@ function draw() {{
 
     // Build waypoints
     let waypoints;
-    // Helper: does a segment list graze any obstacle?
+    // Helper: does a segment list graze any obstacle? Also guards against
+    // aBox/bBox so a chosen path that dips into the source or target from
+    // the wrong side is rejected here (the straight-line `segmentHitsAnyBlock`
+    // already checks aBox/bBox — this keeps the re-verify consistent).
     const _segmentsHit = (wps) => {{
-      for (const ob of obstacles) {{
+      const rects = [...obstacles, aBox, bBox];
+      for (const ob of rects) {{
         for (let i = 0; i < wps.length - 1; i++) {{
           if (lineHitsRect(wps[i].x, wps[i].y, wps[i+1].x, wps[i+1].y,
               ob.x, ob.y, ob.w, ob.h, 4)) return true;
@@ -3386,19 +3512,30 @@ function draw() {{
       // time until one becomes clear (bounded by MAX_PUSHES).
       const MAX_PUSHES = 16;
 
-      const routeWaypoints = (primarySide, extraPush) => {{
+      // Parameterised on axisDir so the last-resort fallback can swap the
+      // corridor axis (horizontal↔vertical) when both sides of the primary
+      // axis clip a block. Iterates the SPAN-FILTERED obstacles (not the
+      // initial straight-line `blockers`) so the corridor is pushed past
+      // EVERY block whose transverse footprint overlaps the A↔B span —
+      // not only those on the direct segment. This is what guarantees the
+      // arrow-never-traverses-a-block rule in the nominal path.
+      const routeWaypointsOnAxis = (axisDir, primarySide, extraPush) => {{
         const off = margin + routeOffset + extraPush;
-        if (dir === 'horizontal') {{
+        if (axisDir === 'horizontal') {{
+          const spanMinX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
+          const spanMaxX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
+          const relevant = obstacles.filter(ob =>
+            (ob.x + ob.w / 2) >= spanMinX && (ob.x - ob.w / 2) <= spanMaxX);
           const goDown = aBox.y <= bBox.y;
           const pickSide = primarySide === 'primary' ? goDown : !goDown;
           let sideY;
           if (pickSide) {{
             sideY = Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2);
-            for (const ob of blockers) sideY = Math.max(sideY, ob.y + ob.h / 2);
+            for (const ob of relevant) sideY = Math.max(sideY, ob.y + ob.h / 2);
             sideY += off;
           }} else {{
             sideY = Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2);
-            for (const ob of blockers) sideY = Math.min(sideY, ob.y - ob.h / 2);
+            for (const ob of relevant) sideY = Math.min(sideY, ob.y - ob.h / 2);
             sideY -= off;
           }}
           const sp0h = rectEdgePoint(aBox.x, sideY, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
@@ -3412,16 +3549,20 @@ function draw() {{
           const epX = clampV(ep0h.x + vStagger, bBox);
           return [{{ x: spX, y: sp0h.y }}, {{ x: spX, y: sideY }}, {{ x: epX, y: sideY }}, {{ x: epX, y: ep0h.y }}];
         }} else {{
+          const spanMinY = Math.min(aBox.y - aBox.h / 2, bBox.y - bBox.h / 2);
+          const spanMaxY = Math.max(aBox.y + aBox.h / 2, bBox.y + bBox.h / 2);
+          const relevant = obstacles.filter(ob =>
+            (ob.y + ob.h / 2) >= spanMinY && (ob.y - ob.h / 2) <= spanMaxY);
           const goRight = aBox.x <= bBox.x;
           const pickSide = primarySide === 'primary' ? goRight : !goRight;
           let sideX;
           if (pickSide) {{
             sideX = Math.max(aBox.x + aBox.w / 2, bBox.x + bBox.w / 2);
-            for (const ob of blockers) sideX = Math.max(sideX, ob.x + ob.w / 2);
+            for (const ob of relevant) sideX = Math.max(sideX, ob.x + ob.w / 2);
             sideX += off;
           }} else {{
             sideX = Math.min(aBox.x - aBox.w / 2, bBox.x - bBox.w / 2);
-            for (const ob of blockers) sideX = Math.min(sideX, ob.x - ob.w / 2);
+            for (const ob of relevant) sideX = Math.min(sideX, ob.x - ob.w / 2);
             sideX -= off;
           }}
           const sp0 = rectEdgePoint(sideX, aBox.y, aBox.x, aBox.y, aBox.w / 2 + 2, aBox.h / 2 + 2);
@@ -3437,6 +3578,8 @@ function draw() {{
           return [{{ x: sp0.x, y: spY }}, {{ x: sideX, y: spY }}, {{ x: sideX, y: epY }}, {{ x: ep0.x, y: epY }}];
         }}
       }};
+      const routeWaypoints = (primarySide, extraPush) =>
+        routeWaypointsOnAxis(dir, primarySide, extraPush);
 
       const waypointsHit = (wps) => {{
         for (const ob of obstacles) {{
@@ -3456,14 +3599,35 @@ function draw() {{
         const alt = routeWaypoints('alt', extra);
         if (!waypointsHit(alt) && !_waypointsOverlapDrawn(alt)) {{ chosen = alt; break; }}
       }}
-      // Fall back: prefer the side that doesn't overlap a drawn segment.
-      // Try alt before accepting primary, so two arrows from the same source
-      // land on opposite sides rather than stacking on the same corridor.
+      // Fall back: block-clearance is checked FIRST (the old code tested only
+      // `_waypointsOverlapDrawn` — it could accept a tracé that clipped a
+      // block as long as it didn't cross a previously drawn edge). If both
+      // primary and alt on the flow axis clip a block, we try the orthogonal
+      // axis as a last-resort detour. Only if every option is block-colliding
+      // do we accept the least-bad path.
       if (!chosen) {{
         const fbPrimary = routeWaypoints('primary', MAX_PUSHES * LANE_SPREAD);
         const fbAlt     = routeWaypoints('alt',     MAX_PUSHES * LANE_SPREAD);
-        chosen = _waypointsOverlapDrawn(fbPrimary) && !_waypointsOverlapDrawn(fbAlt)
-          ? fbAlt : fbPrimary;
+        const pOK = !waypointsHit(fbPrimary);
+        const aOK = !waypointsHit(fbAlt);
+        if (pOK && aOK) {{
+          chosen = _waypointsOverlapDrawn(fbPrimary) && !_waypointsOverlapDrawn(fbAlt)
+            ? fbAlt : fbPrimary;
+        }} else if (pOK) {{
+          chosen = fbPrimary;
+        }} else if (aOK) {{
+          chosen = fbAlt;
+        }} else {{
+          const altDir = (dir === 'horizontal') ? 'vertical' : 'horizontal';
+          const orthP = routeWaypointsOnAxis(altDir, 'primary', 0);
+          const orthA = routeWaypointsOnAxis(altDir, 'alt', 0);
+          if (!waypointsHit(orthP)) chosen = orthP;
+          else if (!waypointsHit(orthA)) chosen = orthA;
+          else {{
+            chosen = _waypointsOverlapDrawn(fbPrimary) && !_waypointsOverlapDrawn(fbAlt)
+              ? fbAlt : fbPrimary;
+          }}
+        }}
       }}
       waypoints = chosen;
     }}
@@ -4011,6 +4175,25 @@ function draw() {{
             }});
             subRowBottom = descY;
           }}
+          // Group highlights: concrete cross-file bullets rendered on-card
+          // so a reader sees what the group does at a glance, even zoomed out.
+          // White text for high contrast (was muted grey).
+          const groupHighlights = Array.isArray(n.highlights) ? n.highlights.slice(0, 3) : [];
+          if (groupHighlights.length > 0 && sh > 80) {{
+            ctx.font = '15px -apple-system, sans-serif';
+            ctx.fillStyle = '#e6edf3';
+            ctx.textAlign = 'left';
+            const bulletX = sx - sw / 2 + 14;
+            const bulletMaxW = sw - 28;
+            let by = subRowBottom + 4;
+            for (const h of groupHighlights) {{
+              if (by > sy + sh / 2 - 20) break;
+              ctx.fillText(truncateToFit(ctx, '\u2022 ' + h, bulletMaxW), bulletX, by);
+              by += 18;
+            }}
+            ctx.textAlign = 'center';
+            subRowBottom = by + 2;
+          }}
           // Sub-block hints: show that this group CONTAINS structured pieces,
           // not just a file count. Tiny traced shapes of the children's kinds
           // (or the actual children if the group is small).
@@ -4067,15 +4250,42 @@ function draw() {{
       if (nw * zoom >= 36 && nh * zoom >= 22) {{
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.font = 'bold 12px -apple-system, sans-serif';
-        ctx.fillStyle = '#8b949e';
+        // White text at every tier — bullets and titles alike. Muted grey
+        // is too hard to read at zoom-to-fit.
+        ctx.fillStyle = '#e6edf3';
         ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
         // Truncate to the card's screen width so long titles don't bleed
         // into adjacent cards. Leave ~12px total horizontal padding.
         const lodMaxW = Math.max(16, nw * zoom - 12);
-        const lodText = truncateToFit(ctx, nodeTitleText(n), lodMaxW);
-        ctx.fillText(lodText, n.x * zoom + pan.x, n.y * zoom + pan.y);
+        const lodSx = n.x * zoom + pan.x, lodSy = n.y * zoom + pan.y;
+        const lodSh = nh * zoom;
+        const lodHighlights = Array.isArray(n.highlights) ? n.highlights.slice(0, 3) : [];
+        // If the card is tall enough to show title + bullets, do so —
+        // this is the whole point of "worst-case zoom-out" legibility.
+        // Needs ~14 (title) + 3*15 (bullets) + ~4 margin ≈ 63 screen-px.
+        if (lodHighlights.length > 0 && lodSh >= 64) {{
+          ctx.font = 'bold 14px -apple-system, sans-serif';
+          ctx.textBaseline = 'top';
+          const lodTitle = truncateToFit(ctx, nodeTitleText(n), lodMaxW);
+          const titleY = lodSy - lodSh / 2 + 6;
+          ctx.fillText(lodTitle, lodSx, titleY);
+          // Bullets left-aligned under the title
+          ctx.font = '13px -apple-system, sans-serif';
+          ctx.textAlign = 'left';
+          const bulletX = lodSx - (nw * zoom) / 2 + 6;
+          const bulletMaxW = nw * zoom - 12;
+          let by = titleY + 19;
+          for (const h of lodHighlights) {{
+            if (by > lodSy + lodSh / 2 - 4) break;
+            ctx.fillText(truncateToFit(ctx, '\u2022 ' + h, bulletMaxW), bulletX, by);
+            by += 15;
+          }}
+        }} else {{
+          ctx.font = 'bold 14px -apple-system, sans-serif';
+          ctx.textBaseline = 'middle';
+          const lodText = truncateToFit(ctx, nodeTitleText(n), lodMaxW);
+          ctx.fillText(lodText, lodSx, lodSy);
+        }}
         ctx.restore();
       }}
       continue;
@@ -4123,56 +4333,133 @@ function draw() {{
     // full card. Above that threshold we center the title in the space below
     // the kind label so the two never collide.
     if (isGroupChild) {{
+      // Worst-case-zoom-out layout:
+      // The user's instruction is "always design for the worst case" — the
+      // 3 bullets must remain visible when the diagram is fully zoomed out.
+      // At low zoom, prioritize bullets over kind / title (reader can still
+      // identify via hover / sidebar). Mode ladder, from compact to roomy:
+      //
+      //   screenH < 28  → title only (card too short for bullets, fallback)
+      //   screenH < 46  → bullets only (dropped title + kind), tiny font
+      //   screenH < 76  → title + bullets (dropped kind), small font
+      //   screenH ≥ 76  → kind + title + bullets (current 'full' mode)
+      //
+      // Fonts shrink at each tier so the worst case still gets 3 bullets.
+      const childHighlights = Array.isArray(n.highlights) ? n.highlights.slice(0, 3) : [];
+      const hasBullets = childHighlights.length > 0;
       const kindLabel = humanizeSemanticKind(nodeShape);
-      const KIND_TOP     = 6;  // px from card top edge to kind label
-      const KIND_FONT    = 12; // px — readable even at moderate zoom-out
-      const KIND_RESERVE = 22; // vertical space reserved for kind label + gap below it
-      const kindLabelY   = screenY - screenH / 2 + KIND_TOP;
-      const showKind     = screenH > 72; // worst case: KIND_RESERVE(22) + 2-line title(34) + margin
 
-      if (showKind) {{
-        ctx.font = `${{KIND_FONT}}px -apple-system, sans-serif`;
+      let mode;
+      if (screenH >= 76)                        mode = 'full';
+      else if (screenH >= 46 && hasBullets)     mode = 'title-bullets';
+      else if (screenH >= 28 && hasBullets)     mode = 'bullets-only';
+      else                                      mode = 'title-only';
+
+      // Font tuning per mode. Bumped from the first-pass sizes because
+      // 10-12 px bullets at zoom-to-fit required squinting; white text here
+      // pairs with bigger fonts so the 3 bullets are readable on first look.
+      const cfg = mode === 'full'
+        ? {{ kind: 13, title: 18, titleLH: 22, bullet: 15, bulletLH: 18 }}
+        : mode === 'title-bullets'
+        ? {{ kind: 0,  title: 15, titleLH: 19, bullet: 14, bulletLH: 17 }}
+        : mode === 'bullets-only'
+        ? {{ kind: 0,  title: 0,  titleLH: 0,  bullet: 16, bulletLH: 20 }}
+        : {{ kind: 0,  title: 14, titleLH: 18, bullet: 0,  bulletLH: 0 }};
+
+      const topPad = 4;
+      const botPad = 4;
+      const cardTop = screenY - screenH / 2;
+      const cardBot = screenY + screenH / 2;
+
+      // Optional kind chip at the top
+      if (cfg.kind > 0) {{
+        ctx.font = `${{cfg.kind}}px -apple-system, sans-serif`;
         ctx.fillStyle = parentGc ? parentGc + 'cc' : mutedColor;
         ctx.textBaseline = 'top';
         ctx.textAlign = 'center';
-        ctx.fillText(kindLabel, screenX, kindLabelY);
+        ctx.fillText(kindLabel, screenX, cardTop + 6);
       }}
 
-      // Title: vertically centered in the space below kind label (when shown),
-      // or in the full card (when kind label is hidden).
-      // Re-measure at 14px — the outer titleLines were at 16px which mis-sizes
-      // wrapping; tighten width to avoid bleeding at shape clip edges.
-      ctx.font = 'bold 14px -apple-system, sans-serif';
-      const childLineW = Math.max(20, innerW - 14);
-      const childTitleLines = wrapTextLines(ctx, titleText, childLineW, 2)
-        .map(line => truncateToFit(ctx, line, childLineW));
-      ctx.fillStyle = textColor;
-      ctx.textBaseline = 'middle';
+      // Measure title (if shown)
+      let childTitleLines = [];
+      if (cfg.title > 0) {{
+        ctx.font = `bold ${{cfg.title}}px -apple-system, sans-serif`;
+        const childLineW = Math.max(20, innerW - 14);
+        childTitleLines = wrapTextLines(ctx, titleText, childLineW, mode === 'full' ? 2 : 1)
+          .map(line => truncateToFit(ctx, line, childLineW));
+      }}
 
-      const titleAreaTop    = showKind ? kindLabelY + KIND_RESERVE : screenY - screenH / 2;
-      const titleAreaBottom = screenY + screenH / 2;
-      const titleAreaCenter = (titleAreaTop + titleAreaBottom) / 2;
-      const titleBlockH     = childTitleLines.length * 17;
-      const titleStartY     = titleAreaCenter - titleBlockH / 2 + 17 / 2;
+      // Layout math: stack [title block] over [bullets block], vertically
+      // centered in the card area below the kind chip (if any).
+      const areaTop = cardTop + (cfg.kind > 0 ? (cfg.kind + 10) : topPad);
+      const areaBot = cardBot - botPad;
+      const titleH  = childTitleLines.length * cfg.titleLH;
+      const gap     = (cfg.title > 0 && cfg.bullet > 0) ? 4 : 0;
+      const bulletN = cfg.bullet > 0 ? childHighlights.length : 0;
+      const bulletsH = bulletN * cfg.bulletLH;
+      const contentH = titleH + gap + bulletsH;
+      const areaH   = Math.max(0, areaBot - areaTop);
+      const blockTop = areaTop + Math.max(0, (areaH - contentH) / 2);
 
-      childTitleLines.forEach((line, i) => {{
-        ctx.fillText(line, screenX, titleStartY + i * 17);
-      }});
+      // Draw title lines (baseline 'middle' so each line's center sits on its y)
+      if (childTitleLines.length > 0) {{
+        ctx.font = `bold ${{cfg.title}}px -apple-system, sans-serif`;
+        ctx.fillStyle = textColor;
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'center';
+        const titleStartY = blockTop + cfg.titleLH / 2;
+        childTitleLines.forEach((line, i) => {{
+          ctx.fillText(line, screenX, titleStartY + i * cfg.titleLH);
+        }});
+      }}
+
+      // Draw bullets — the whole point of this skill. White fill for high
+      // contrast. Inset horizontally by ~12% on each side so text stays
+      // inside the "safe center zone" for non-rectangular shapes (hexagon,
+      // diamond, parallelogram) where slanted edges clip text drawn near
+      // the left/right boundary. For rectangles this is still fine — just
+      // slightly more inner padding.
+      if (bulletN > 0) {{
+        ctx.font = `${{cfg.bullet}}px -apple-system, sans-serif`;
+        ctx.fillStyle = textColor;
+        ctx.textBaseline = 'top';
+        ctx.textAlign = 'left';
+        const shapeInset = Math.max(10, screenW * 0.12);
+        const bulletX = screenX - screenW / 2 + shapeInset;
+        const bulletMaxW = screenW - shapeInset * 2;
+        const bulletsStartY = blockTop + titleH + gap;
+        for (let i = 0; i < bulletN; i++) {{
+          const by = bulletsStartY + i * cfg.bulletLH;
+          // Lenient bottom check: allow a bullet whose top sits inside the
+          // card area even if a few pixels of its baseline would nominally
+          // extend past areaBot. The ctx.clip() handles any real overflow
+          // and partial visibility still communicates the fact.
+          if (by > areaBot) break;
+          ctx.fillText(truncateToFit(ctx, '\u2022 ' + childHighlights[i], bulletMaxW), bulletX, by);
+        }}
+      }}
       ctx.restore();
       continue;
     }}
 
-    // ── Standard file card: title + optional description + footer ─────────
+    // ── Standard file card: title + bullets + optional description + footer ─
     // Top of text content in screen px (NODE_R * zoom = border radius in screen px)
     let curY = screenY - screenH / 2 + NODE_R * zoom + 6;
 
-    // Solo blocks: vertically center the title + description block so the
-    // text sits in the middle of the (now larger) card instead of hugging
-    // the top edge. Footer stays pinned at the bottom as usual.
+    // File highlights: short bullets rendered on-card right under the title.
+    // Sized so they remain legible at zoom-to-fit.
+    const fileHighlights = Array.isArray(n.highlights) ? n.highlights.slice(0, 3) : [];
+    const bulletsBlockH = fileHighlights.length > 0
+      ? 4 + fileHighlights.length * 14 + 4
+      : 0;
+
+    // Solo blocks: vertically center the title + bullets + description block
+    // so the text sits in the middle of the (now larger) card instead of
+    // hugging the top edge. Footer stays pinned at the bottom as usual.
     if (soloBlock && !compactCard) {{
       const titleBlockH = titleLines.length * 18;
       const summaryBlockH = summaryLines.length > 0 ? 6 + summaryLines.length * 15 : 0;
-      const contentH = titleBlockH + summaryBlockH;
+      const contentH = titleBlockH + bulletsBlockH + summaryBlockH;
       const footerReserve = 22;
       const availTop = screenY - screenH / 2 + NODE_R * zoom + 6;
       const availBottom = screenY + screenH / 2 - footerReserve;
@@ -4193,6 +4480,25 @@ function draw() {{
 
     if (!compactCard) {{
       const dividerY = screenY + screenH / 2 - 22;
+
+      // Bullets: right under the title, before the description. White text
+      // (same as title) for high contrast — muted grey is too hard to read
+      // at zoom-to-fit. Left-aligned with a small bullet marker.
+      if (fileHighlights.length > 0 && curY < dividerY - 18) {{
+        ctx.fillStyle = textColor;
+        ctx.font = '15px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        const bulletX = screenX - screenW / 2 + padding + 6;
+        const bulletMaxW = innerW - 12;
+        for (const h of fileHighlights) {{
+          if (curY > dividerY - 18) break;
+          ctx.fillText(truncateToFit(ctx, '\u2022 ' + h, bulletMaxW), bulletX, curY);
+          curY += 18;
+        }}
+        ctx.textAlign = 'center';
+        curY += 4;
+      }}
+
       if (summaryLines.length > 0 && curY < dividerY - 10) {{
         ctx.fillStyle = mutedColor;
         ctx.font = '13px -apple-system, sans-serif';
@@ -4301,6 +4607,14 @@ function draw() {{
       }}
       const hasFocus = focusChildIds.size > 0;
 
+      // Sibling boxes act as obstacles for any intra-group edge: children of
+      // the same open group are laid out in a grid, and a straight line from
+      // child_A to a diagonally-placed child_B can clip sibling cells in
+      // between. drawAvoidantArrow detours around them.
+      const siblingBoxes = layout.items.map(it => ({{
+        x: it.cx, y: it.cy,
+        w: (it.node.w || NODE_W), h: (it.node.h || NODE_H_BASE),
+      }}));
       for (const e of iEdges) {{
         const sid = e._srcId || e.source.id, tid = e._tgtId || e.target.id;
         const sp = posMap[sid], ep = posMap[tid];
@@ -4318,7 +4632,9 @@ function draw() {{
         const aSize   = (touches || groupIsSelected ? 13 : 10) / zoom;
 
         ctx.globalAlpha = alpha;
-        drawArrow(start.x, start.y, end.x, end.y, gc, lw, aSize);
+        const obs = siblingBoxes.filter(b => b.x !== sp.cx || b.y !== sp.cy)
+                                .filter(b => b.x !== ep.cx || b.y !== ep.cy);
+        drawAvoidantArrow(start.x, start.y, end.x, end.y, obs, gc, lw, aSize);
 
         // Arrow label badge — drawn in screen space at the arrow midpoint.
         // Always shown regardless of zoom (OPEN_GROUP_GAP is sized to guarantee

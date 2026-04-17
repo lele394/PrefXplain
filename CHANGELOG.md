@@ -4,6 +4,19 @@ All notable changes to PrefXplain are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Audience levels** (`--level` / `-l`): tailor description voice to the reader. Four levels — `newbie` (plain, zero-jargon), `middle` (working developer, standard terms), `strong` (senior engineer, names patterns), `expert` (domain specialist, no padding). Cache key includes the level so switching voices re-describes cleanly without wiping the DB. Empty flag reuses the prior run's level; first runs default to `newbie`.
+- **Larger file cards + on-diagram highlight bullets**: each block now surfaces up to 3 concrete, codebase-specific facts (integrations, model names, exact thresholds) that stay legible when the diagram is fully zoomed out.
+- **Group-level highlights**: architectural groups carry up to 3 cross-file facts synthesized from their children (e.g. `"supports Claude Code + Codex + Copilot"` from three sibling integration files).
+
+### Changed
+- **Default audience level is now `newbie`** (was `middle`). Run `/prefxplain middle` (or any other level) to override.
+- Card and group dimensions enlarged so bullet highlights remain readable at the worst-case zoom-out.
+
+---
+
 ## [0.1.0.2] - 2026-04-15
 
 ### Fixed

@@ -45,34 +45,77 @@ def _resolve_model(model: str | None) -> str:
         return env_model
     return DEFAULT_MODEL
 
+# Audience level controls the voice of LLM descriptions. Each level tunes
+# jargon tolerance, depth, analogy use, and what to skip. "newbie" is the
+# default — plain, zero-jargon voice that works for the widest audience.
+VALID_LEVELS = frozenset({"newbie", "middle", "strong", "expert"})
+_DEFAULT_LEVEL = "newbie"
+
+_LEVEL_VOICES = {
+    "newbie": (
+        "Reader is a first-year CS student. Zero jargon — if a term must appear, "
+        "gloss it in plain words (\"a cache is a box that remembers recent results\"). "
+        "Reach for concrete analogies. Prefer everyday verbs (\"picks\", \"asks\", "
+        "\"saves\") over technical ones (\"invokes\", \"resolves\", \"persists\"). "
+        "Describe what an outsider observes happening, not how the code mechanically works."
+    ),
+    "middle": (
+        "Reader is a working developer familiar with common patterns (REST, MVC, "
+        "caching, ORMs, CI). Use standard industry terms without explaining them. "
+        "Focus on what the code does and how it fits into the system. "
+        "Skim-friendly one-sentence summaries."
+    ),
+    "strong": (
+        "Reader is a senior engineer with deep system-design experience. Be concise "
+        "and specific. Name the pattern (visitor, circuit breaker, SCC) — don't "
+        "explain it. Call out non-obvious invariants, constraints, and trade-offs "
+        "instead of restating the obvious."
+    ),
+    "expert": (
+        "Reader is a domain specialist. Skip introductions. Lead with what is "
+        "unusual or decision-carrying — which algorithm variant, which API boundary, "
+        "which trade-off. Precise technical vocabulary. No padding."
+    ),
+}
+
+
+def _normalize_level(level: str | None) -> str:
+    """Coerce an arbitrary string to one of VALID_LEVELS; fall back to default."""
+    if not level:
+        return _DEFAULT_LEVEL
+    candidate = level.strip().lower()
+    return candidate if candidate in VALID_LEVELS else _DEFAULT_LEVEL
+
+
 # v2 system prompt — returns JSON with file description + per-symbol descriptions
-SYSTEM_PROMPT_V2 = """\
-You are a senior software engineer explaining code to a first-year CS student.
-Given a source file, write plain-language descriptions in JSON format.
+_SYSTEM_PROMPT_V2_TEMPLATE = """\
+You write block descriptions for an interactive codebase architecture diagram.
+Audience voice: __VOICE__
+Given a source file, output JSON describing it.
 Rules:
-- "file": 1-2 sentences saying what this file does in plain language. No jargon. \
-Start with a verb (e.g. "Handles...", "Reads...", "Manages..."). Do not mention the filename.
+- "file": 1-2 sentences. Start with a verb (e.g. "Handles...", "Reads...", "Manages..."). Do not mention the filename.
 - "symbols": for each symbol name, write 3-6 words saying what it does \
 (e.g. "run": "starts the web server", "User": "stores user account data"). \
 Only include functions and classes, not imports or variables.
-- "highlights": up to 3 CONCRETE, codebase-specific facts that make this file \
-interesting. List proper nouns: named integrations, third-party tools, model names, \
+- "highlights": aim for exactly 3 CONCRETE, codebase-specific facts that make this file \
+interesting. Proper nouns: named integrations, third-party tools, model names, \
 hyperparameters, cloud providers, protocols, file formats, CLI tools, exact thresholds. \
-NOT adjectives or architectural platitudes. If nothing concrete exists, return []. \
+NOT adjectives or architectural platitudes. Keep each bullet under 40 chars — these \
+render on the diagram card itself, so a reader should grok them at a glance. \
 GOOD: ["Claude Code integration", "Codex CLI support", "SQLite cache"]. \
 BAD: ["handles user commands", "entry point for CLI", "well-structured module"]. \
-Empty is better than generic.
+Return [] only if truly nothing concrete stands out. Empty is better than generic.
 - "flowchart": a flowchart showing the main logic of the file. \
 Use 3-7 nodes. Each node has "id" (string "1","2"...), "label" (3-6 words describing the step), \
-"type" ("start", "end", "decision", or "step"), and "description" (1 plain-English sentence \
-explaining what happens here — like you're telling a smart friend who doesn't know this codebase). \
+"type" ("start", "end", "decision", or "step"), and "description" (1 concrete sentence \
+explaining what happens here). \
 Each edge has "from" and "to" (node ids) and "label" (condition text for decisions, or "" for unconditional). \
 The flowchart should reflect the ACTUAL logic flow, not be generic. \
 Decision nodes MUST have at least 2 outgoing edges with meaningful condition labels (e.g. "yes"/"no", "found"/"not found", "valid"/"invalid"). \
 Start with one "start" node and end with one "end" node.
 Respond with valid JSON only, no markdown fences.
 Example: {"file": "Manages database connections.", "symbols": {"connect": "opens a database connection"}, \
-"highlights": ["PostgreSQL driver", "connection pooling via pgbouncer", "SSL required"], \
+"highlights": ["PostgreSQL driver", "pgbouncer pooling", "SSL required"], \
 "flowchart": {"nodes": [{"id": "1", "label": "Receive query request", "type": "start", \
 "description": "Someone wants to run a database query."}, \
 {"id": "2", "label": "Connection pool available?", "type": "decision", \
@@ -89,6 +132,16 @@ Example: {"file": "Manages database connections.", "symbols": {"connect": "opens
 {"from": "3", "to": "5", "label": ""}, \
 {"from": "4", "to": "5", "label": ""}]}}
 """
+
+
+def build_system_prompt_v2(level: str | None = None) -> str:
+    """Return the v2 file-description system prompt tailored to the given audience level."""
+    voice = _LEVEL_VOICES[_normalize_level(level)]
+    return _SYSTEM_PROMPT_V2_TEMPLATE.replace("__VOICE__", voice)
+
+
+# Backwards-compat alias — default-level prompt, still imported by tests.
+SYSTEM_PROMPT_V2 = build_system_prompt_v2(_DEFAULT_LEVEL)
 
 SYSTEM_PROMPT_DETAIL = """\
 You are a senior software engineer writing thorough documentation.
@@ -247,9 +300,10 @@ def _set_cached_v2(conn: sqlite3.Connection, file_path: str, content_hash: str, 
     conn.commit()
 
 
-SYSTEM_PROMPT_GROUP = """\
-You are a senior software engineer summarizing a group of related files for a \
-first-year CS student.
+_SYSTEM_PROMPT_GROUP_TEMPLATE = """\
+You summarize a group of related files as concrete bullet points for an interactive \
+codebase architecture diagram.
+Audience voice: __VOICE__
 Given the group name and a list of its files (with short descriptions and any \
 highlights extracted from each file), output JSON: {"highlights": [...]}.
 The highlights list contains up to 3 CONCRETE, group-wide facts that a user would \
@@ -261,15 +315,33 @@ names, hyperparameters, cloud providers, protocols, file formats, exact versions
 "SQLite-backed cache", "ANTHROPIC_API_KEY env var"]. BAD: ["handles CLI commands", \
 "well-organized", "modular design"].
 - If nothing concrete and group-worthy is visible, return []. Empty is better than generic.
-- Each highlight must be ≤60 characters.
+- Each highlight must be ≤40 characters — these render on the group card itself.
 - Respond with valid JSON only, no markdown fences.
 """
 
 
-def _group_signature(label: str, children: list[dict]) -> str:
-    """Build a content-hash signature for a group so we can cache its highlights."""
+def build_system_prompt_group(level: str | None = None) -> str:
+    """Return the group-highlight system prompt tailored to the given audience level."""
+    voice = _LEVEL_VOICES[_normalize_level(level)]
+    return _SYSTEM_PROMPT_GROUP_TEMPLATE.replace("__VOICE__", voice)
+
+
+# Backwards-compat alias — default-level prompt, still imported by tests.
+SYSTEM_PROMPT_GROUP = build_system_prompt_group(_DEFAULT_LEVEL)
+
+
+def _group_signature(label: str, children: list[dict], level: str | None = None) -> str:
+    """Build a content-hash signature for a group so we can cache its highlights.
+
+    The level is included so cached highlights at one voice don't bleed into
+    requests at another voice.
+    """
     payload = json.dumps(
-        {"label": label, "children": sorted((c.get("id", ""), c.get("hash", "")) for c in children)},
+        {
+            "label": label,
+            "level": _normalize_level(level),
+            "children": sorted((c.get("id", ""), c.get("hash", "")) for c in children),
+        },
         ensure_ascii=False,
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -308,14 +380,17 @@ def describe_groups(
     api_base: str | None = None,
     model: str | None = None,
     force: bool = False,
+    level: str | None = None,
 ) -> Graph:
     """Synthesize group-level highlights by reading child file descriptions.
 
     Groups with fewer than 2 member files are skipped — not enough signal.
     Results are written to graph.metadata.group_highlights and cached in sqlite
-    keyed by group label + hash of child file contents.
+    keyed by group label + hash of child file contents + audience level.
     """
     model = _resolve_model(model)
+    normalized_level = _normalize_level(level)
+    system_prompt = build_system_prompt_group(normalized_level)
     try:
         from openai import OpenAI
     except ImportError:
@@ -377,7 +452,7 @@ def describe_groups(
                             "highlights": n.highlights,
                         }
                     )
-                signature = _group_signature(label, children_payload)
+                signature = _group_signature(label, children_payload, normalized_level)
 
                 if not force:
                     cached = _get_cached_group(conn, label, signature)
@@ -407,7 +482,7 @@ def describe_groups(
                     response = client.chat.completions.create(
                         model=model,
                         messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT_GROUP},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
                         max_tokens=200,
@@ -447,6 +522,7 @@ def describe(
     force: bool = False,
     detail: bool = False,
     progress_callback: Callable[[int, int], None] | None = None,
+    level: str | None = None,
 ) -> Graph:
     """Fill in descriptions for all nodes and their symbols.
 
@@ -462,6 +538,9 @@ def describe(
         force: Re-generate all descriptions, ignoring cache.
         detail: If True, generate paragraph-length file descriptions (no symbol descriptions).
         progress_callback: Called with (current, total) for custom progress reporting.
+        level: Audience level for the voice of descriptions — one of newbie, middle,
+            strong, expert. Unknown/empty falls back to newbie. Included in the cache
+            key so changing level invalidates cached descriptions.
 
     Returns:
         The same graph with descriptions filled in on nodes and symbols.
@@ -495,10 +574,12 @@ def describe(
         return graph
 
     resolved_model = _resolve_model(model)
+    normalized_level = _normalize_level(level)
     conn = _init_cache()
     try:
         return _describe_with_conn(
-            conn, graph, root, client, resolved_model, force, detail, progress_callback,
+            conn, graph, root, client, resolved_model, force, detail,
+            progress_callback, normalized_level,
         )
     finally:
         conn.close()
@@ -612,12 +693,15 @@ def _describe_with_conn(
     force: bool,
     detail: bool,
     progress_callback: Callable[[int, int], None] | None,
+    level: str = _DEFAULT_LEVEL,
 ) -> Graph:
     nodes_to_describe = [n for n in graph.nodes if not n.description or force]
     total = len(nodes_to_describe)
 
     if total == 0:
         return graph
+
+    system_prompt_v2 = build_system_prompt_v2(level)
 
     with Progress(
         SpinnerColumn(),
@@ -632,7 +716,12 @@ def _describe_with_conn(
         for i, node in enumerate(nodes_to_describe):
             fpath = root / node.id
             content_hash = _content_hash(fpath)
-            cache_key = f"{node.id}:detail" if detail else node.id
+            # Cache key carries the audience level so a voice change invalidates
+            # cached descriptions — a re-run at a different level regenerates.
+            if detail:
+                cache_key = f"{node.id}:{level}:detail"
+            else:
+                cache_key = f"{node.id}:{level}"
 
             if not force and content_hash:
                 if detail:
@@ -682,7 +771,7 @@ def _describe_with_conn(
                     response = client.chat.completions.create(
                         model=model,
                         messages=[
-                            {"role": "system", "content": SYSTEM_PROMPT_V2},
+                            {"role": "system", "content": system_prompt_v2},
                             {"role": "user", "content": _make_prompt_v2(node, root)},
                         ],
                         max_tokens=600,

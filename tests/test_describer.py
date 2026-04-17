@@ -201,12 +201,13 @@ class TestDescribe:
         monkeypatch.setattr("prefxplain.describer.CACHE_DIR", cache_dir)
         monkeypatch.setattr("prefxplain.describer.CACHE_DB", cache_dir / "cache.db")
 
-        # Pre-populate cache
+        # Pre-populate cache — cache key now includes the audience level so
+        # a voice change can invalidate descriptions without wiping the DB.
         conn = _init_cache()
         h = _content_hash(root / "main.py")
-        _set_cached(conn, "main.py", h, "Cached description.")
+        _set_cached(conn, "main.py:newbie", h, "Cached description.")
         h2 = _content_hash(root / "utils.py")
-        _set_cached(conn, "utils.py", h2, "Cached utils description.")
+        _set_cached(conn, "utils.py:newbie", h2, "Cached utils description.")
         conn.close()
 
         # Mock OpenAI at the module level (lazy import in describe())

@@ -125,7 +125,8 @@ class TestRenderer:
         assert "#sidebar { flex: 1; min-height: 0; overflow: hidden;" in html
         assert "#sidebar .sb-row { display: flex; align-items: center;" in html
         assert "body.panel-resizing { cursor: ns-resize; }" in html
-        assert "max-height: calc(var(--viewport-height) - 72px);" in html
+        # Layout shrinks via CSS variables on <html>/<body> (set by applyViewportHeight in JS).
+        assert "html, body { height: var(--viewport-height); min-height: var(--viewport-height); max-height: var(--viewport-height)" in html
 
     def test_resize_tracks_graph_container(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
@@ -268,7 +269,7 @@ class TestRenderer:
         # and drawEdgeArrow surfaces it as a pill on the main canvas.
         assert "label: edge.label || ''," in html
         assert "const edgeLabel = typeof e.label === 'string' ? e.label : '';" in html
-        assert "drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx, edgeLabel);" in html
+        assert "drawEdgeArrow(a, b, edgeColor, lw, arrowSz, weight, bidi, laneIdx, edgeLabel, srcId, tgtId);" in html
 
     def test_collapsed_groups_show_sub_block_hints(self, simple_graph: Graph) -> None:
         html = render(simple_graph)

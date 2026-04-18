@@ -19,6 +19,16 @@ PX.ui.viewSwitcher = function viewSwitcher(container, {
   const wrap = document.createElement('div');
   wrap.style.cssText = `display:flex;align-items:center;gap:12px;padding:6px 14px;background:${T.panel};border-bottom:1px solid ${T.border};font-family:${T.ui};font-size:11.5px;flex-shrink:0`;
 
+  const reload = document.createElement('button');
+  reload.type = 'button';
+  reload.title = 'Reload preview';
+  reload.textContent = '\u21bb';
+  reload.style.cssText = `display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;background:#ffffff;color:#0d1117;border:1px solid #ffffff;border-radius:4px;font-family:${T.mono};font-size:17px;font-weight:700;line-height:1;cursor:pointer;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,0.15)`;
+  reload.addEventListener('click', () => window.location.reload());
+  reload.addEventListener('mouseenter', () => { reload.style.background = T.accent; reload.style.color = '#ffffff'; reload.style.borderColor = T.accent; });
+  reload.addEventListener('mouseleave', () => { reload.style.background = '#ffffff'; reload.style.color = '#0d1117'; reload.style.borderColor = '#ffffff'; });
+  wrap.appendChild(reload);
+
   const lead = document.createElement('span');
   lead.textContent = 'View';
   lead.style.cssText = `color:${T.inkFaint};font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase`;

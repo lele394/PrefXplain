@@ -1,8 +1,7 @@
 // ui/top-panel.js — sticky info bar at the top of the shell.
 // Empty state shows repo-level stats. When a file is selected, it shows
 // the file title, pills (blast / deps / size), role tag, description,
-// highlights as pills, and a "code preview" toggle that reveals the
-// first lines of the (stub) source.
+// and highlights as pills.
 
 window.PX = window.PX || {};
 PX.ui = PX.ui || {};
@@ -213,7 +212,7 @@ function _renderFocusedGroup(graph, groupId, index, groupsMeta) {
   `;
 }
 
-function _renderSelected(graph, selected, index, showCode, groupsMeta) {
+function _renderSelected(graph, selected, index, groupsMeta) {
   const T = PX.T;
   const n = index.byId[selected];
   if (!n) return _renderEmpty(graph);
@@ -238,7 +237,6 @@ function _renderSelected(graph, selected, index, showCode, groupsMeta) {
         ${_pill('BLAST', blast.size, blast.size > 5 ? 'warn' : null)}
         ${_pill('DEPS', deps.length)}
         ${_pill('SIZE', `${kb} kB`)}
-        <button data-action="toggle-code" style="font-family:${T.mono};font-size:10.5px;padding:3px 9px;background:${showCode ? T.accent + '22' : T.panelAlt};color:${showCode ? T.accent : T.inkMuted};border:1px solid ${showCode ? T.accent : T.border};border-radius:4px;cursor:pointer;flex-shrink:0">${showCode ? '\u25b2 hide code' : '\u25bc code preview'}</button>
         <button data-action="deselect" style="font-family:${T.mono};font-size:10.5px;padding:3px 7px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u00d7</button>
       </div>
       <div style="display:flex;align-items:flex-start;gap:14px;padding:8px 14px;font-size:12px;color:${T.ink2};line-height:1.5">
@@ -247,9 +245,6 @@ function _renderSelected(graph, selected, index, showCode, groupsMeta) {
           ${highlights.map(h => `<span style="display:inline-flex;align-items:center;background:${T.pill};border:1px solid ${T.pillBorder};border-radius:999px;padding:2px 9px;font-size:11px;color:${T.accent2};font-weight:500">${PX.escapeXml(h)}</span>`).join('')}
         </div>` : ''}
       </div>
-      ${showCode ? `<div style="background:${T.codeBg};border-top:1px solid ${T.borderAlt};max-height:200px;overflow:auto;font-family:${T.mono};font-size:11.5px;line-height:1.55;padding:10px 14px;color:${T.ink2}">
-        <pre style="margin:0;white-space:pre-wrap">${PX.escapeXml(n.description || '')}\n\n# ${PX.escapeXml(n.label)} \u00b7 ${kb} kB \u00b7 ${(index.importers[n.id] || []).length} importers</pre>
-      </div>` : ''}
     </div>
   `;
 }
@@ -260,12 +255,11 @@ PX.ui.topPanel = function topPanel(container, { graph, index, groupsMeta }) {
   container.appendChild(mount);
   let selected = null;
   let focusedGroup = null;
-  let showCode = false;
-  const listeners = { onDeselect: [], onToggleCode: [], onClearFocus: [] };
+  const listeners = { onDeselect: [], onClearFocus: [] };
 
   const render = () => {
     mount.innerHTML = selected
-      ? _renderSelected(graph, selected, index, showCode, groupsMeta)
+      ? _renderSelected(graph, selected, index, groupsMeta)
       : focusedGroup
       ? _renderFocusedGroup(graph, focusedGroup, index, groupsMeta)
       : _renderEmpty(graph);
@@ -280,19 +274,13 @@ PX.ui.topPanel = function topPanel(container, { graph, index, groupsMeta }) {
       for (const fn of listeners.onDeselect) fn();
     } else if (action === 'clear-focus') {
       for (const fn of listeners.onClearFocus) fn();
-    } else if (action === 'toggle-code') {
-      showCode = !showCode;
-      render();
-      for (const fn of listeners.onToggleCode) fn(showCode);
     }
   });
 
   return {
-    setSelected: (id) => { selected = id; showCode = false; render(); },
+    setSelected: (id) => { selected = id; render(); },
     setFocusedGroup: (groupId) => { focusedGroup = groupId; if (selected) return; render(); },
-    setShowCode: (v) => { showCode = v; render(); },
     onDeselect: (fn) => listeners.onDeselect.push(fn),
     onClearFocus: (fn) => listeners.onClearFocus.push(fn),
-    onToggleCode: (fn) => listeners.onToggleCode.push(fn),
   };
 };

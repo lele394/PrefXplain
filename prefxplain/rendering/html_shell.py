@@ -30,6 +30,7 @@ _APP_MODULES = [
     "ui/top-panel.js",
     "ui/sidebar.js",
     "ui/flow-modal.js",
+    "ui/code-editor.js",
     "ui/legend.js",
     "main.js",
 ]
@@ -148,6 +149,49 @@ _TEMPLATE = """<!doctype html>
     min-height: 30px;
   }}
   .px-explorer-list::-webkit-scrollbar-thumb:hover {{ background: #6e7681; }}
+
+  /* Code editor: inherits the VS Code theme inside the webview (font, colors,
+     selection). Falls back to sensible dark defaults when loaded as plain HTML
+     so it still looks reasonable outside a VS Code webview. */
+  .px-editor-surface {{
+    background: var(--vscode-editor-background, #1e1e1e);
+    color: var(--vscode-editor-foreground, #d4d4d4);
+    font-family: var(--vscode-editor-font-family, 'JetBrains Mono', 'SFMono-Regular', Menlo, monospace);
+    font-size: var(--vscode-editor-font-size, 13px);
+    line-height: 1.55;
+  }}
+  .px-editor-textarea::selection {{
+    background: var(--vscode-editor-selectionBackground, rgba(88,166,255,0.30));
+    color: transparent;
+  }}
+
+  /* Token colors keyed to the theme kind that VS Code sets on <body>. */
+  .px-t-keyword {{ color: #c586c0; }}
+  .px-t-string {{ color: #ce9178; }}
+  .px-t-number {{ color: #b5cea8; }}
+  .px-t-comment {{ color: #6a9955; font-style: italic; }}
+  .px-t-function {{ color: #dcdcaa; }}
+  .px-t-type {{ color: #4ec9b0; }}
+  .px-t-operator {{ color: #d4d4d4; }}
+  .px-t-builtin {{ color: #4fc1ff; }}
+  .px-t-decorator {{ color: #dcdcaa; }}
+
+  body[data-vscode-theme-kind="vscode-light"] .px-t-keyword {{ color: #af00db; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-string {{ color: #a31515; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-number {{ color: #098658; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-comment {{ color: #008000; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-function {{ color: #795e26; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-type {{ color: #267f99; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-operator {{ color: #000000; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-builtin {{ color: #0070c1; }}
+  body[data-vscode-theme-kind="vscode-light"] .px-t-decorator {{ color: #795e26; }}
+
+  body[data-vscode-theme-kind="vscode-high-contrast"] .px-t-keyword {{ color: #569cd6; }}
+  body[data-vscode-theme-kind="vscode-high-contrast"] .px-t-string {{ color: #ce9178; }}
+  body[data-vscode-theme-kind="vscode-high-contrast"] .px-t-number {{ color: #b5cea8; }}
+  body[data-vscode-theme-kind="vscode-high-contrast"] .px-t-comment {{ color: #7ca668; }}
+  body[data-vscode-theme-kind="vscode-high-contrast"] .px-t-function {{ color: #dcdcaa; }}
+  body[data-vscode-theme-kind="vscode-high-contrast"] .px-t-type {{ color: #4ec9b0; }}
 </style>
 </head>
 <body>

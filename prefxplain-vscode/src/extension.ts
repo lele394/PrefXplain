@@ -148,6 +148,55 @@ function injectResizeBridge(rawHtml: string): string {
   return `${rawHtml}${bridgeScript}`;
 }
 
+function resolveSafeChildPath(rootDir: string, rel: string): string | null {
+  if (!rel || typeof rel !== "string") return null;
+  // Reject absolute paths and anything that escapes the workspace root.
+  if (path.isAbsolute(rel)) return null;
+  const candidate = path.resolve(rootDir, rel);
+  const normalizedRoot = path.resolve(rootDir) + path.sep;
+  if (!(candidate + path.sep).startsWith(normalizedRoot)) return null;
+  return candidate;
+}
+
+function handleWebviewMessage(
+  panel: vscode.WebviewPanel,
+  htmlPath: string,
+  msg: unknown
+): void {
+  if (!msg || typeof msg !== "object") return;
+  const m = msg as { type?: string; id?: string; path?: string; content?: string };
+  if (!m.type || !m.id) return;
+  const reply = (payload: Record<string, unknown>): void => {
+    panel.webview.postMessage({ id: m.id, ...payload });
+  };
+  const rootDir = path.dirname(htmlPath);
+
+  if (m.type === "prefxplain:load-file") {
+    const target = resolveSafeChildPath(rootDir, m.path || "");
+    if (!target) { reply({ ok: false, error: "invalid path" }); return; }
+    try {
+      const content = fs.readFileSync(target, "utf-8");
+      reply({ ok: true, content });
+    } catch (error) {
+      reply({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+
+  if (m.type === "prefxplain:save-file") {
+    const target = resolveSafeChildPath(rootDir, m.path || "");
+    if (!target) { reply({ ok: false, error: "invalid path" }); return; }
+    if (typeof m.content !== "string") { reply({ ok: false, error: "missing content" }); return; }
+    try {
+      fs.writeFileSync(target, m.content, "utf-8");
+      reply({ ok: true });
+    } catch (error) {
+      reply({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+    return;
+  }
+}
+
 function createPanel(htmlPath: string): vscode.WebviewPanel {
   const panel = vscode.window.createWebviewPanel(
     "prefxplain.preview",
@@ -170,6 +219,11 @@ function createPanel(htmlPath: string): vscode.WebviewPanel {
   panel.onDidChangeViewState((event) => {
     if (!event.webviewPanel.visible || !currentHtmlPath) return;
     refreshPreview(currentHtmlPath);
+  });
+
+  panel.webview.onDidReceiveMessage((msg) => {
+    if (!currentHtmlPath) return;
+    handleWebviewMessage(panel, currentHtmlPath, msg);
   });
 
   return panel;

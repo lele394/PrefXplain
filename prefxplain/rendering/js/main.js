@@ -187,11 +187,40 @@
     }
   });
 
+  // Editor opener: shared by canvas (space on selected file card) and
+  // explorer (space on selected entry, or double-click).
+  const openEditor = (id) => {
+    if (!id || !index.byId[id]) return;
+    PX.ui.codeEditor({ nodeId: id, graph, index });
+  };
+
+  // Double-click on an explorer file entry opens the editor. The explorer
+  // sidebar delegates clicks via its own `onSelect`, so we attach directly
+  // to the aside's DOM here.
+  sideHost.addEventListener('dblclick', (e) => {
+    const btn = e.target.closest('button[data-node]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-node');
+    if (id) openEditor(id);
+  });
+
   // Keyboard
   window.addEventListener('keydown', (e) => {
-    if (e.key === '/' && document.activeElement?.tagName !== 'INPUT') {
+    const typing = document.activeElement && (
+      document.activeElement.tagName === 'INPUT' ||
+      document.activeElement.tagName === 'TEXTAREA' ||
+      document.activeElement.isContentEditable
+    );
+    // Skip shell shortcuts when an overlay (editor/flow-modal) is open.
+    const modalOpen = document.body.querySelector('#px-editor-card, #px-flow-card');
+    if (e.key === '/' && !typing) {
       e.preventDefault();
       side.focusFilter();
+    } else if ((e.key === ' ' || e.code === 'Space') && !typing && !modalOpen) {
+      if (state.selected) {
+        e.preventDefault();
+        openEditor(state.selected);
+      }
     } else if (e.key === 'Escape') {
       const overlay = document.querySelector('#px-shell + *, body > div > div[style*="backdrop-filter"]');
       if (overlay && overlay.textContent.includes('Flow')) { overlay.remove(); return; }

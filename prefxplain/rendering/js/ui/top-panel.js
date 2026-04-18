@@ -7,6 +7,128 @@
 window.PX = window.PX || {};
 PX.ui = PX.ui || {};
 
+// GitHub Linguist canonical colors for the languages we detect.
+// Any unknown language falls back to _LANG_FALLBACK_PALETTE via stable hash.
+const _LANG_COLORS = {
+  python:     '#3572A5',
+  javascript: '#f1e05a',
+  typescript: '#3178c6',
+  tsx:        '#3178c6',
+  jsx:        '#f1e05a',
+  html:       '#e34c26',
+  css:        '#563d7c',
+  scss:       '#c6538c',
+  sass:       '#a53b70',
+  less:       '#1d365d',
+  json:       '#292929',
+  yaml:       '#cb171e',
+  toml:       '#9c4221',
+  markdown:   '#083fa1',
+  md:         '#083fa1',
+  shell:      '#89e051',
+  bash:       '#89e051',
+  sh:         '#89e051',
+  go:         '#00ADD8',
+  rust:       '#dea584',
+  java:       '#b07219',
+  kotlin:     '#A97BFF',
+  swift:      '#F05138',
+  ruby:       '#701516',
+  php:        '#4F5D95',
+  c:          '#555555',
+  cpp:        '#f34b7d',
+  'c++':      '#f34b7d',
+  csharp:     '#178600',
+  'c#':       '#178600',
+  dart:       '#00B4AB',
+  vue:        '#41b883',
+  svelte:     '#ff3e00',
+  sql:        '#e38c00',
+  dockerfile: '#384d54',
+};
+const _LANG_FALLBACK_PALETTE = [
+  '#a78bfa', '#f59e0b', '#fb923c', '#22c55e', '#06b6d4',
+  '#3b82f6', '#ec4899', '#14b8a6', '#eab308', '#ef4444',
+];
+
+function _langColor(lang) {
+  const key = String(lang || '').toLowerCase().trim();
+  if (_LANG_COLORS[key]) return _LANG_COLORS[key];
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return _LANG_FALLBACK_PALETTE[h % _LANG_FALLBACK_PALETTE.length];
+}
+
+function _langLabel(lang) {
+  const key = String(lang || '').toLowerCase().trim();
+  const map = {
+    cpp: 'C++', 'c++': 'C++', csharp: 'C#', 'c#': 'C#',
+    javascript: 'JavaScript', typescript: 'TypeScript', tsx: 'TypeScript',
+    jsx: 'JavaScript', html: 'HTML', css: 'CSS', scss: 'SCSS', sass: 'Sass',
+    less: 'Less', json: 'JSON', yaml: 'YAML', toml: 'TOML', markdown: 'Markdown',
+    md: 'Markdown', shell: 'Shell', bash: 'Shell', sh: 'Shell', go: 'Go',
+    rust: 'Rust', java: 'Java', kotlin: 'Kotlin', swift: 'Swift', ruby: 'Ruby',
+    php: 'PHP', c: 'C', dart: 'Dart', vue: 'Vue', svelte: 'Svelte', sql: 'SQL',
+    dockerfile: 'Dockerfile', python: 'Python',
+  };
+  return map[key] || (key ? key[0].toUpperCase() + key.slice(1) : 'Other');
+}
+
+// Paths excluded from the language bar, mirroring GitHub Linguist defaults:
+// vendored dependencies and generated/minified bundles shouldn't skew the stats.
+const _VENDOR_PATH_RX = /(^|\/)(vendor|node_modules|third_party|dist|build|bower_components)\//i;
+const _GENERATED_RX = /\.min\.(js|css|mjs)$|\.bundle\.(js|mjs)$|\.bundled\.js$/i;
+
+function _isVendored(nodeId) {
+  if (!nodeId) return false;
+  return _VENDOR_PATH_RX.test(nodeId) || _GENERATED_RX.test(nodeId);
+}
+
+function _langStats(graph) {
+  const totals = {};
+  for (const n of graph.nodes || []) {
+    if (_isVendored(n.id)) continue;
+    const key = String(n.language || '').toLowerCase().trim() || 'other';
+    const bytes = (n.size && n.size > 0) ? n.size : 1;
+    totals[key] = (totals[key] || 0) + bytes;
+  }
+  const total = Object.values(totals).reduce((a, b) => a + b, 0);
+  if (!total) return { total: 0, items: [] };
+  const items = Object.entries(totals)
+    .map(([lang, bytes]) => ({
+      lang,
+      bytes,
+      pct: (bytes / total) * 100,
+      color: _langColor(lang),
+      label: _langLabel(lang),
+    }))
+    .sort((a, b) => b.bytes - a.bytes);
+  return { total, items };
+}
+
+function _renderLangBar(graph) {
+  const T = PX.T;
+  const { items } = _langStats(graph);
+  if (!items.length) return '';
+  const tooltip = items.map(it => `${it.label} ${it.pct.toFixed(1)}%`).join('  \u00b7  ');
+  const segments = items.map(it =>
+    `<span style="height:100%;background:${it.color};flex:${it.pct} 0 0;min-width:${it.pct > 0 && it.pct < 0.3 ? '2px' : '0'}"></span>`
+  ).join('');
+  const legend = items.map(it =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:${T.inkMuted};font-family:${T.ui};flex-shrink:0">
+      <span style="width:7px;height:7px;border-radius:50%;background:${it.color};display:inline-block"></span>
+      <span style="color:${T.ink2};font-weight:500">${PX.escapeXml(it.label)}</span>
+      <span style="color:${T.inkFaint};font-family:${T.mono}">${it.pct.toFixed(1)}%</span>
+    </span>`
+  ).join('');
+  return `
+    <span title="${PX.escapeXml(tooltip)}" style="display:inline-flex;align-items:center;gap:10px;flex-shrink:0">
+      <span style="display:flex;width:140px;height:6px;border-radius:999px;overflow:hidden;background:${T.panelAlt};border:1px solid ${T.borderAlt};flex-shrink:0">${segments}</span>
+      <span style="display:inline-flex;align-items:center;gap:10px">${legend}</span>
+    </span>
+  `;
+}
+
 function _pill(label, value, tone) {
   const T = PX.T;
   const col = tone === 'warn' ? T.warn : tone === 'good' ? T.good : T.inkMuted;
@@ -39,6 +161,8 @@ function _renderEmpty(graph) {
       ${_pill('EDGES', graph.edges.length)}
       ${graph.health_score != null ? _pill('HEALTH', `${graph.health_score}/10`, 'good') : ''}
       <span style="flex:1"></span>
+      ${_renderLangBar(graph)}
+      <span style="flex:1"></span>
       <span style="font-size:11.5px;color:${T.inkMuted}">
         <span style="color:${T.ink};font-weight:500">Click a group</span> to highlight its links \u00b7 <span style="color:${T.ink};font-weight:500">double-click</span> to drill into Nested.
       </span>
@@ -70,6 +194,8 @@ function _renderFocusedGroup(graph, groupId, index, groupsMeta) {
         ${_pill('FILES', stats.fileCount)}
         ${_pill('IN', stats.externalIn)}
         ${_pill('OUT', stats.externalOut)}
+        <span style="flex:1"></span>
+        ${_renderLangBar(graph)}
         <span style="flex:1"></span>
         <button data-action="clear-focus" style="font-family:${T.mono};font-size:10.5px;padding:3px 9px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u2190 back to overview</button>
       </div>
@@ -106,6 +232,8 @@ function _renderSelected(graph, selected, index, showCode, groupsMeta) {
         <span style="font-size:11px;color:${T.inkFaint};font-family:${T.mono};flex-shrink:0;overflow:hidden;text-overflow:ellipsis;max-width:360px">${PX.escapeXml(n.id)}</span>
         <span style="color:${T.borderAlt}">\u00b7</span>
         ${_roleTag(n.role)}
+        <span style="flex:1"></span>
+        ${_renderLangBar(graph)}
         <span style="flex:1"></span>
         ${_pill('BLAST', blast.size, blast.size > 5 ? 'warn' : null)}
         ${_pill('DEPS', deps.length)}

@@ -126,6 +126,28 @@ _TEMPLATE = """<!doctype html>
   html, body {{ margin: 0; padding: 0; height: 100%; background: #0d1117; color: #c9d1d9;
     font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }}
   * {{ box-sizing: border-box; }}
+
+  /* Always-visible scrollbar for the left file explorer list.
+     -webkit-appearance:none + explicit track/thumb backgrounds defeat macOS
+     overlay scrollbars that auto-hide when idle. Scoped by class so other
+     scrollable surfaces keep platform defaults. */
+  .px-explorer-list {{ scrollbar-width: thin; scrollbar-color: #484f58 #0d1117; }}
+  .px-explorer-list::-webkit-scrollbar {{
+    width: 10px;
+    -webkit-appearance: none;
+    background: #0d1117;
+  }}
+  .px-explorer-list::-webkit-scrollbar-track {{
+    background: #0d1117;
+    border-left: 1px solid #21262d;
+  }}
+  .px-explorer-list::-webkit-scrollbar-thumb {{
+    background: #484f58;
+    border-radius: 5px;
+    border: 2px solid #0d1117;
+    min-height: 30px;
+  }}
+  .px-explorer-list::-webkit-scrollbar-thumb:hover {{ background: #6e7681; }}
 </style>
 </head>
 <body>

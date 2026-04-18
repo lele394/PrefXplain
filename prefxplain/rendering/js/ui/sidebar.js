@@ -12,7 +12,7 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
   const T = PX.T;
   container.innerHTML = '';
   const aside = document.createElement('aside');
-  aside.style.cssText = `flex-shrink:0;background:${T.panel};border-right:1px solid ${T.border};display:flex;flex-direction:column;font-family:${T.ui};font-size:12.5px;transition:width 180ms ease`;
+  aside.style.cssText = `flex-shrink:0;height:100%;min-height:0;background:${T.panel};border-right:1px solid ${T.border};display:flex;flex-direction:column;font-family:${T.ui};font-size:12.5px;transition:width 180ms ease`;
 
   let collapsed = false;
   try { collapsed = localStorage.getItem(STORAGE_KEY) === '1'; } catch {}
@@ -43,7 +43,11 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
   aside.appendChild(filterBox);
 
   const listHost = document.createElement('div');
-  listHost.style.cssText = `flex:1;overflow-y:auto;padding:6px 0 30px`;
+  listHost.className = 'px-explorer-list';
+  // min-height:0 is required for `flex:1 + overflow` to actually scroll inside
+  // a flex column. overflow-y:scroll (not auto) keeps the track visible so
+  // users immediately see the explorer is scrollable.
+  listHost.style.cssText = `flex:1;min-height:0;overflow-y:scroll;padding:6px 0 30px`;
   aside.appendChild(listHost);
 
   const listeners = { onSelect: [], onSelectGroup: [], onFilter: [], onToggle: [] };

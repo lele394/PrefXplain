@@ -222,6 +222,19 @@ def create(
         help="HTML renderer: 'elk' (new SVG pipeline, default) or 'legacy' "
              "(old Canvas force-directed, kept during the transition).",
     ),
+    include_config: bool = typer.Option(
+        True,
+        "--include-config/--no-include-config",
+        help="Surface high-signal non-code files (Makefile, Dockerfile, "
+             "pyproject.toml, .github/workflows/*.yml, ...) as node-only entries.",
+    ),
+    include_changed: bool = typer.Option(
+        False,
+        "--include-changed/--no-include-changed",
+        help="Also include files returned by `git diff --name-only HEAD` and "
+             "`git ls-files --others --exclude-standard`. Escape hatch for files "
+             "you just touched that aren't yet code/config recognized.",
+    ),
 ) -> None:
     """Analyze a codebase and generate an interactive HTML dependency graph."""
     _run(
@@ -242,6 +255,8 @@ def create(
         check_cycles=check_cycles,
         level=level,
         renderer_choice=renderer_choice,
+        include_config=include_config,
+        include_changed=include_changed,
     )
 
 
@@ -302,6 +317,18 @@ def update(
         help="HTML renderer: 'elk' (new SVG pipeline, default) or 'legacy' "
              "(old Canvas force-directed, kept during the transition).",
     ),
+    include_config: bool = typer.Option(
+        True,
+        "--include-config/--no-include-config",
+        help="Surface high-signal non-code files (Makefile, Dockerfile, "
+             "pyproject.toml, .github/workflows/*.yml, ...) as node-only entries.",
+    ),
+    include_changed: bool = typer.Option(
+        False,
+        "--include-changed/--no-include-changed",
+        help="Also include files returned by `git diff --name-only HEAD` and "
+             "`git ls-files --others --exclude-standard`.",
+    ),
 ) -> None:
     """Re-analyze the codebase. Same as `create` but defaults to not opening the browser.
 
@@ -326,6 +353,8 @@ def update(
         check_cycles=False,
         level=level,
         renderer_choice=renderer_choice,
+        include_config=include_config,
+        include_changed=include_changed,
     )
 
 
@@ -777,6 +806,8 @@ def _run(
     check_cycles: bool,
     level: str = "",
     renderer_choice: str = "elk",
+    include_config: bool = True,
+    include_changed: bool = False,
 ) -> None:
     """Shared implementation for create and update commands.
 
@@ -817,7 +848,12 @@ def _run(
 
     # Step 1: Static analysis
     console.print("[bold blue]1/3[/bold blue] Parsing files and extracting imports...")
-    graph = analyze(root, max_files=max_files)
+    graph = analyze(
+        root,
+        max_files=max_files,
+        include_config=include_config,
+        include_changed=include_changed,
+    )
 
     # Apply filter
     if filter_pattern:

@@ -1,7 +1,7 @@
 ---
 name: prefxplain
 description: Generate or update an interactive dependency graph of the current codebase with natural-language descriptions for each file, rendered as a self-contained HTML the user can share. Use this skill whenever the user wants to understand, map, review, present, or explain the architecture of a codebase -- onboarding onto a new repo, preparing a walkthrough for a manager or teammate, pitching the code to an investor or client, or finding the core files vs the orphans. Trigger on indirect phrasings too: "help me understand this repo", "what's the structure here", "I need to present the code to X", "what are the load-bearing files", "draw me a map of this project", "update the diagram", "refresh prefxplain", "show the graph", "open prefxplain".
-argument-hint: [level: newbie|middle|strong|expert] [path] [--no-descriptions] [--output path/to/graph.html]
+argument-hint: [level: newbie|middle|strong|expert] [path] [--no-descriptions] [--output path/to/graph.html] [--include-changed] [--no-include-config]
 allowed-tools: Bash, Read, Edit
 ---
 

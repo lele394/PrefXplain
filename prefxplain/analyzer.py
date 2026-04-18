@@ -11,8 +11,10 @@ Java/Kotlin: uses regex for import statements.
 from __future__ import annotations
 
 import ast
+import fnmatch
 import os
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,8 +39,80 @@ SKIP_DIRS = {
     ".mypy_cache", ".pytest_cache", ".ruff_cache", "dist", "build",
     ".next", ".nuxt", "coverage", ".coverage", "htmlcov",
     "site-packages", "eggs", ".eggs",
-    "out", "node_modules", "prefxplain-vscode",
+    "out", "node_modules",
 }
+
+# Dot-directories the walker keeps instead of blanket-skipping them.
+# .github houses CI workflows, .vscode/.devcontainer house IDE/dev env config —
+# high-signal non-code files users often want surfaced.
+ALLOWED_DOTDIRS = {".github", ".vscode", ".devcontainer"}
+
+# High-signal non-code files. They become graph nodes (no edges) so users see
+# the project's build/deploy/config surface alongside the code. Policy is
+# path/name-based — ".yml" alone is too broad (fixtures, data) so we anchor
+# patterns under known parent dirs (e.g. .github/workflows/*.yml).
+CONFIG_NODE_BASENAMES = {
+    "Makefile", "makefile", "Dockerfile", "dockerfile",
+    "pyproject.toml", "package.json",
+    "go.mod", "Cargo.toml", "pom.xml",
+    ".env.example",
+}
+# Patterns are matched with fnmatch against the POSIX-ified relative path when
+# the pattern contains "/", otherwise against the basename.
+CONFIG_NODE_GLOBS = (
+    "tsconfig*.json",
+    "requirements*.txt",
+    "build.gradle*",
+    "docker-compose*.yml", "docker-compose*.yaml",
+    "compose*.yml", "compose*.yaml",
+    ".github/workflows/*.yml", ".github/workflows/*.yaml",
+)
+
+
+def _is_config_file(path: Path, root: Path) -> bool:
+    """True if `path` matches the high-signal non-code allowlist."""
+    if path.name in CONFIG_NODE_BASENAMES:
+        return True
+    try:
+        rel_posix = path.relative_to(root).as_posix()
+    except ValueError:
+        rel_posix = path.name
+    for pattern in CONFIG_NODE_GLOBS:
+        target = rel_posix if "/" in pattern else path.name
+        if fnmatch.fnmatch(target, pattern):
+            return True
+    return False
+
+
+def _git_changed_files(root: Path) -> list[Path]:
+    """Return modified + untracked files under `root` via git.
+
+    Honors `root` via `-C`. Returns [] if git is missing, the dir is not a
+    repo, or the commands time out. Errors are swallowed — this is an opt-in
+    best-effort feature, not a hard dependency.
+    """
+    cmds = (
+        ["git", "-C", str(root), "diff", "--name-only", "HEAD"],
+        ["git", "-C", str(root), "ls-files", "--others", "--exclude-standard"],
+    )
+    out: list[Path] = []
+    for cmd in cmds:
+        try:
+            res = subprocess.run(
+                cmd, capture_output=True, text=True,
+                timeout=5, check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        if res.returncode != 0:
+            continue
+        for line in res.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            out.append(root / line)
+    return out
+
 
 # JS/TS import patterns
 _JS_IMPORT_RE = re.compile(
@@ -792,46 +866,98 @@ def _resolve_java_import(
 # Main analysis entry point
 # ---------------------------------------------------------------------------
 
-def _collect_files(root: Path, max_files: int) -> list[Path]:
-    """Walk root and collect source files, skipping known junk dirs and symlinks."""
+def _collect_files(
+    root: Path,
+    max_files: int,
+    include_config: bool = True,
+    include_changed: bool = False,
+) -> list[Path]:
+    """Walk root and collect files worth surfacing in the graph.
+
+    Policy:
+      * Code files (suffix in ALL_EXTS) are always included.
+      * High-signal non-code files (see CONFIG_NODE_BASENAMES/CONFIG_NODE_GLOBS)
+        are included when include_config=True.
+      * User-modified / untracked files are included when include_changed=True,
+        even if they don't match either filter (escape hatch for
+        "file I just touched is invisible").
+
+    Dot-directories are skipped unless they're in ALLOWED_DOTDIRS. SKIP_DIRS
+    is always honored. Symlinks are never followed.
+    """
     files: list[Path] = []
     seen_real: set[str] = set()
+
+    def _add(fpath: Path) -> bool:
+        """Record fpath if new. Returns True when the max_files cap is reached."""
+        if fpath.is_symlink():
+            return False
+        try:
+            real = str(fpath.resolve())
+        except OSError:
+            return False
+        if real in seen_real:
+            return False
+        seen_real.add(real)
+        files.append(fpath)
+        return len(files) >= max_files
+
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
-        # Prune skip dirs and symlinked dirs in-place
+        # Prune skip dirs and symlinked dirs in-place. Dot-directories get a
+        # one-shot allowlist check — generic `.cache`, `.idea`, etc. still get
+        # pruned, but `.github`/`.vscode`/`.devcontainer` pass through.
         dirnames[:] = [
             d for d in dirnames
             if d not in SKIP_DIRS
-            and not d.startswith(".")
+            and (not d.startswith(".") or d in ALLOWED_DOTDIRS)
             and not (Path(dirpath) / d).is_symlink()
         ]
         for fname in filenames:
             fpath = Path(dirpath) / fname
-            if fpath.is_symlink():
+            ext_supported = fpath.suffix.lower() in ALL_EXTS
+            is_config = include_config and _is_config_file(fpath, root)
+            if not (ext_supported or is_config):
                 continue
-            if fpath.suffix.lower() in ALL_EXTS:
-                real = str(fpath.resolve())
-                if real in seen_real:
-                    continue
-                seen_real.add(real)
-                files.append(fpath)
-            if len(files) >= max_files:
+            if _add(fpath):
                 return files
+
+    if include_changed:
+        for fpath in _git_changed_files(root):
+            if not fpath.exists() or fpath.is_dir():
+                continue
+            if _add(fpath):
+                return files
+
     return files
 
 
-def analyze(root_path: Path, max_files: int = 500) -> Graph:
+def analyze(
+    root_path: Path,
+    max_files: int = 500,
+    include_config: bool = True,
+    include_changed: bool = False,
+) -> Graph:
     """Parse a project directory and return a Graph with nodes and IMPORTS edges.
 
     Args:
         root_path: Project root directory.
         max_files: Maximum number of files to analyze (ranked by discovery order).
+        include_config: Surface high-signal non-code files (Makefile, Dockerfile,
+            pyproject.toml, .github/workflows/*.yml, ...) as node-only entries.
+        include_changed: Also include files returned by `git diff --name-only`
+            and `git ls-files --others --exclude-standard`, even if they aren't
+            code or config. Opt-in escape hatch for files the user just touched.
 
     Returns:
         A Graph with nodes (one per file) and edges (IMPORTS relationships).
         Node descriptions are empty — call describer.describe() to fill them.
     """
     root = root_path.resolve()
-    files = _collect_files(root, max_files)
+    files = _collect_files(
+        root, max_files,
+        include_config=include_config,
+        include_changed=include_changed,
+    )
 
     # Load TypeScript/JS path aliases once for the whole project
     ts_aliases = _load_ts_aliases(root)
@@ -846,6 +972,13 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
     for fpath in files:
         rel = str(fpath.relative_to(root))
         lang = _language(fpath)
+
+        # Non-code files that passed the collector either because they're in
+        # the config allowlist or because --include-changed surfaced them.
+        # They get a node but no edges. "config" tags allowlisted files;
+        # "other" tags unknown-type files picked up via --include-changed.
+        if lang == "other" and _is_config_file(fpath, root):
+            lang = "config"
 
         if lang == "python":
             symbols, raw_imports = _analyze_python(fpath, root)
@@ -862,6 +995,7 @@ def analyze(root_path: Path, max_files: int = 500) -> Graph:
         elif lang == "kotlin":
             symbols, raw_imports = _analyze_kotlin(fpath)
         else:
+            # "config" and "other" land here — Node-only, no edges.
             symbols, raw_imports = [], []
 
         try:

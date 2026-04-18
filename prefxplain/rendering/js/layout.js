@@ -24,11 +24,20 @@ PX.LAYOUT_OPTIONS = {
   'elk.spacing.edgeNode': '40',
   'elk.spacing.edgeEdge': '32',
   'elk.spacing.portPort': '20',
+  'elk.spacing.edgeLabel': '12',
   'elk.layered.spacing.nodeNodeBetweenLayers': '240',
   'elk.layered.spacing.edgeNodeBetweenLayers': '48',
   'elk.layered.spacing.edgeEdgeBetweenLayers': '40',
   // Nudge nodes apart if the router still can't avoid an overlap.
   'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
+  // Edge labels participate in layout. ELK reserves space for each edge's
+  // declared label (see ir.js → _aggregateGroupEdges.labels) and routes
+  // edges so foreign labels are AVOIDED. Placement CENTER keeps the label
+  // on the middle stretch of the edge's trunk. SMART_UP picks the side
+  // that minimises crossings with node and edge geometry.
+  'elk.edgeLabels.placement': 'CENTER',
+  'elk.edgeLabels.inline': 'true',
+  'elk.layered.edgeLabels.sideSelection': 'SMART_UP',
 };
 
 let _workerUrlPromise = null;

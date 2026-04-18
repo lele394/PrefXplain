@@ -64,6 +64,34 @@ function _groupsOf(nodes) {
   return order;
 }
 
+// Char-width estimates for the 3-line colored labels. Must stay in sync
+// with the rendering in components/edge.js — drift between the layout
+// dimensions and the drawn dimensions is what causes labels to overflow
+// their reserved ELK slot.
+const LABEL_CH_BOLD = 8.2;
+const LABEL_CH_REG = 7.6;
+const LABEL_HEIGHT = 50;
+const LABEL_PADDING = 26;
+
+function _labelDims(sourceName, targetName, count) {
+  const line1 = `[${sourceName}]`;
+  const line2 = `imports ${count}\u00d7`;
+  const line3 = `[${targetName}]`;
+  const w = Math.max(
+    line1.length * LABEL_CH_BOLD,
+    line2.length * LABEL_CH_REG,
+    line3.length * LABEL_CH_BOLD,
+  ) + LABEL_PADDING;
+  return { width: Math.ceil(w), height: LABEL_HEIGHT };
+}
+
+// Aggregate edges with UNIQUE ports per edge. Sharing ports (`$group.out`
+// for all outgoing edges of a group) forces ELK to stack edges through the
+// same point, which produces the "traffic jam" look where multiple edges
+// hug the same x-column and have to snake around each others' labels. With
+// per-edge ports, ELK's FIXED_SIDE port constraint distributes each port
+// along the node side (NORTH for incoming, SOUTH for outgoing), and each
+// edge gets its own corridor from source to target.
 function _aggregateGroupEdges(graph, byId) {
   const counts = {};
   for (const e of graph.edges) {
@@ -75,14 +103,37 @@ function _aggregateGroupEdges(graph, byId) {
   }
   return Object.entries(counts).map(([k, count], i) => {
     const [source, target] = k.split('\u0000');
+    const dims = _labelDims(source, target, count);
     return {
       id: `ge${i}`,
-      sources: [`${source}.out`],
-      targets: [`${target}.in`],
+      sources: [`${source}.out-ge${i}`],
+      targets: [`${target}.in-ge${i}`],
+      sourceGroupName: source,
+      targetGroupName: target,
       count,
+      labels: [{ text: '', width: dims.width, height: dims.height }],
     };
   });
 }
+
+// Build the list of ports a group node needs based on which aggregate edges
+// connect to it. Incoming edges → NORTH ports, outgoing → SOUTH. Order in
+// the array doesn't matter under FIXED_SIDE — ELK reorders to minimise
+// crossings.
+function _portsForGroup(groupName, aggregateEdges) {
+  const ports = [];
+  for (const e of aggregateEdges) {
+    if (e.sourceGroupName === groupName) {
+      ports.push({ id: e.sources[0], properties: { 'port.side': 'SOUTH' } });
+    }
+    if (e.targetGroupName === groupName) {
+      ports.push({ id: e.targets[0], properties: { 'port.side': 'NORTH' } });
+    }
+  }
+  return ports;
+}
+
+PX._labelDims = _labelDims;
 
 function _groupPort(groupId, side) {
   return `${groupId}.${side === 'NORTH' ? 'in' : 'out'}`;
@@ -138,10 +189,18 @@ PX.buildIr = function buildIr(graph, viewMode, {
   const byId = Object.fromEntries((graph.nodes || []).map(n => [n.id, n]));
   if (viewMode === 'group-map') {
     const groups = _groupsOf(graph.nodes || []);
+    const aggregateEdges = _aggregateGroupEdges(graph, byId);
+    const children = groups.map(g => ({
+      id: g,
+      width: PX.NODE_SIZES.hero.w,
+      height: PX.NODE_SIZES.hero.h,
+      ports: _portsForGroup(g, aggregateEdges),
+      properties: { 'org.eclipse.elk.portConstraints': 'FIXED_SIDE' },
+    }));
     return {
       id: 'root',
-      children: groups.map(g => _makeNode(g, PX.NODE_SIZES.hero.w, PX.NODE_SIZES.hero.h)),
-      edges: _aggregateGroupEdges(graph, byId),
+      children,
+      edges: aggregateEdges,
     };
   }
   if (viewMode === 'nested') {

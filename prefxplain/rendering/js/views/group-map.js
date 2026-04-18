@@ -2,6 +2,13 @@
 // Shows only hero cards for each group + aggregate "Nx imports" arrows
 // between them. The view runs its own ELK layout (viewMode='group-map')
 // because the card sizes differ from Nested (320x180 hero cards).
+//
+// Labels participate in layout via the IR (ir.js → _aggregateGroupEdges
+// declares them). ELK reserves space and routes edges aware of label
+// footprints — no post-processing detour (which caused the "F1 circuit"
+// zigzags) is needed. ELKjs doesn't position edge labels automatically,
+// so we still compute label positions with placeEdgeLabels + avoidLabel
+// Collisions AFTER routing. The key win: no polyline rewriting.
 
 window.PX = window.PX || {};
 PX.views = PX.views || {};
@@ -14,41 +21,23 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
   const laid = await PX.runLayout(ir);
   const nodesById = PX._collectNodes(laid);
   const polylines = PX.extractEdgePolylines(laid);
-  const edgeCounts = Object.fromEntries((ir.edges || []).map(e => [e.id, e.count || 1]));
-  const withCounts = polylines.map(p => {
-    const src = PX.splitPortId(p.source).nodeId;
-    const tgt = PX.splitPortId(p.target).nodeId;
-    return { ...p, count: edgeCounts[p.id] || 1, sourceGroup: src, targetGroup: tgt };
+  const irEdgesById = Object.fromEntries((ir.edges || []).map(e => [e.id, e]));
+
+  const withLabelDims = polylines.map(p => {
+    const irEdge = irEdgesById[p.id] || {};
+    const lbl = (irEdge.labels || [])[0] || {};
+    return {
+      ...p,
+      count: irEdge.count || 1,
+      sourceGroup: PX.splitPortId(p.source).nodeId,
+      targetGroup: PX.splitPortId(p.target).nodeId,
+      __labelW: lbl.width || 180,
+      __labelH: lbl.height || 50,
+    };
   });
-  // Pre-compute label bbox so the collision avoider can nudge overlaps apart
-  // before anything is drawn. 3-line colored labels are 50px tall; width is
-  // driven by the widest of the 3 lines. The 7.6/7.2 char multipliers match
-  // actual rendered width for JetBrains Mono at 11px — earlier numbers (6.8/6.4)
-  // underestimated by ~15%, which made the avoider think non-overlapping
-  // labels were fine when they were actually touching.
-  // Char-width estimates have to run slightly wide so the collision avoider
-  // nudges labels apart even in borderline cases. We measured real rendered
-  // width and went 10% higher, then added a generous gap so the "almost
-  // touching" case never leaks into visual overlap.
-  const CH_BOLD = 8.2;
-  const CH_REG  = 7.6;
-  const withLabelDims = withCounts.map(e => {
-    const line1 = `[${e.sourceGroup}]`;
-    const line2 = `imports ${e.count}\u00d7`;
-    const line3 = `[${e.targetGroup}]`;
-    const w = Math.max(line1.length * CH_BOLD, line2.length * CH_REG, line3.length * CH_BOLD) + 26;
-    return { ...e, __labelW: w, __labelH: 50 };
-  });
-  // centerOnPath: aggregate edges between big hero cards often route as
-  // L/Z/U shapes around obstacles. The longest-horizontal strategy (used by
-  // nested) can pick a peripheral detour segment, leaving labels visually
-  // detached from the "main" path. Arc-length midpoint keeps the label on
-  // the polyline — vertical-segment landings are masked by the label rect's
-  // bg fill.
+
   const placed = PX.placeEdgeLabels(withLabelDims, { centerOnPath: true });
-  // Flat list of every orthogonal segment, tagged with its owning edge. The
-  // collision avoider uses it to reject label Y-positions that would sit on
-  // a foreign arrow (the label's own segment is masked by its rect fill).
+
   const segments = [];
   for (const edge of placed) {
     const pts = edge.points || [];
@@ -60,12 +49,25 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
       });
     }
   }
-  const withLabels = PX.avoidLabelCollisions(placed, {
-    labelW: (e) => e.__labelW || 180,
-    labelH: (e) => e.__labelH || 50,
+  const cardRects = (laid.children || []).map(box => ({
+    x1: box.x, y1: box.y,
+    x2: box.x + box.width, y2: box.y + box.height,
+  }));
+  const edges = PX.avoidLabelCollisions(placed, {
+    labelW: (e) => e.__labelW,
+    labelH: (e) => e.__labelH,
     gap: 18,
     segments,
+    walkPath: true,
+    cardRects,
   });
+
+  // Detour post-processing removed: unique per-edge ports (ir.js →
+  // _aggregateGroupEdges) give every edge its own corridor, so edges no
+  // longer share trunks with foreign labels. Any remaining label overlaps
+  // are masked visually by the opaque label rect rendered on top of paths.
+  // Bringing back detour at this layer caused "tentacle" jogs where ELK's
+  // clean route was post-edited for tiny overlaps.
 
   const topBoxes = (laid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
   const layerOf = {};
@@ -78,8 +80,6 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
     prevY = b.y || 0;
   }
 
-  // Selection lives at group level in Group Map. The selected file from the
-  // sidebar maps to a group; edges in/out of that group highlight.
   const selectedGroup = focusedGroup || (selected && index ? (index.byId[selected] || {}).group : null);
   const groupEdgeState = (e) => {
     if (!selectedGroup) return 'normal';
@@ -90,32 +90,59 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
   const groupBoxState = (name) => {
     if (!selectedGroup) return 'normal';
     if (name === selectedGroup) return 'selected';
-    const involved = withLabels.some(e => (e.sourceGroup === selectedGroup && e.targetGroup === name) || (e.targetGroup === selectedGroup && e.sourceGroup === name));
+    const involved = edges.some(e => (e.sourceGroup === selectedGroup && e.targetGroup === name) || (e.targetGroup === selectedGroup && e.sourceGroup === name));
     return involved ? 'normal' : 'faded';
   };
 
-  const W = Math.round((laid.width || 1000) + 40);
-  const H = Math.round((laid.height || 800) + 40);
-  // Scale SVG to fit container width — never blow past natural size but always
-  // shrink to fit when the canvas is narrower. Height follows aspect ratio,
-  // so the user scrolls vertically instead of horizontally. This kills the
-  // "Tests card clipped on the right" bug that appeared when laid.width > viewport.
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="group-map" data-natural-w="${W}" data-natural-h="${H}">`;
+  // Compute the true bounding box of everything that gets drawn: node rects,
+  // polyline waypoints (including detour bumps), and label rects. ELK's
+  // laid.width/height only covers the node frame — labels and detour waypoints
+  // can spill over, which used to clip the right/left edges of the canvas.
+  let minX = 0, minY = 0;
+  let maxX = laid.width || 1000;
+  let maxY = laid.height || 800;
+  for (const box of (laid.children || [])) {
+    if (box.x < minX) minX = box.x;
+    if (box.y < minY) minY = box.y;
+    if (box.x + box.width  > maxX) maxX = box.x + box.width;
+    if (box.y + box.height > maxY) maxY = box.y + box.height;
+  }
+  for (const e of edges) {
+    for (const p of e.points || []) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+    if (e.labelX != null && e.labelY != null) {
+      const lw = e.__labelW || 0, lh = e.__labelH || 0;
+      if (e.labelX - lw / 2 < minX) minX = e.labelX - lw / 2;
+      if (e.labelY - lh / 2 < minY) minY = e.labelY - lh / 2;
+      if (e.labelX + lw / 2 > maxX) maxX = e.labelX + lw / 2;
+      if (e.labelY + lh / 2 > maxY) maxY = e.labelY + lh / 2;
+    }
+  }
+  const pad = 20;
+  const vbX = Math.floor(minX - pad);
+  const vbY = Math.floor(minY - pad);
+  const W = Math.ceil(maxX - minX + 2 * pad);
+  const H = Math.ceil(maxY - minY + 2 * pad);
+  let svg = `<svg viewBox="${vbX} ${vbY} ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="group-map" data-natural-w="${W}" data-natural-h="${H}">`;
   svg += PX.components.markers();
 
-  for (const e of withLabels) {
+  // Render in three layers: arrow paths → cards → labels. Labels on top
+  // means their bg-filled rects mask any stray arrow that clips them.
+  const mkLabel = (e) => (e.count > 0 && e.sourceGroup && e.targetGroup ? {
+    sourceName: e.sourceGroup,
+    sourceColor: PX.groupColor(e.sourceGroup, groupsMeta[e.sourceGroup] || {}),
+    targetName: e.targetGroup,
+    targetColor: PX.groupColor(e.targetGroup, groupsMeta[e.targetGroup] || {}),
+    count: e.count,
+  } : null);
+
+  for (const e of edges) {
     const st = groupEdgeState(e);
-    // Three-line label: [source] / imports Nx / [target]. Source + target
-    // names are colored with their group's swatch so the eye links arrow
-    // to block instantly.
-    const label = e.count > 0 && e.sourceGroup && e.targetGroup ? {
-      sourceName: e.sourceGroup,
-      sourceColor: PX.groupColor(e.sourceGroup, groupsMeta[e.sourceGroup] || {}),
-      targetName: e.targetGroup,
-      targetColor: PX.groupColor(e.targetGroup, groupsMeta[e.targetGroup] || {}),
-      count: e.count,
-    } : null;
-    svg += PX.components.edge(e, { nodesById, state: st, label, thick: true, reverseArrow: true });
+    svg += PX.components.edge(e, { nodesById, state: st, thick: true, pathOnly: true });
   }
 
   for (const box of (laid.children || [])) {
@@ -136,6 +163,13 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
     });
   }
 
+  for (const e of edges) {
+    const st = groupEdgeState(e);
+    const label = mkLabel(e);
+    if (!label) continue;
+    svg += PX.components.edge(e, { nodesById, state: st, label, thick: true, labelOnly: true });
+  }
+
   svg += `</svg>`;
-  return { svg, laid, nodesById, edges: withLabels, W, H };
+  return { svg, laid, nodesById, edges, W, H };
 };

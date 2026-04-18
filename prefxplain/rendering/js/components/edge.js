@@ -16,30 +16,42 @@ PX.components.edge = function edgeSvg(edge, opts = {}) {
     opacity = null,
     markerSuffix = '',
     reverseArrow = false, // when true, arrowhead lands on the source (importer) instead of target (importee)
+    pathOnly = false,    // emit the <path> only, skip the label
+    labelOnly = false,   // emit the label <g> only, skip the <path>
   } = opts;
   const T = PX.T;
   const color = PX.stateColor(state);
   const rawPts = edge.bus ? PX.buildBusTrunkPath(edge, nodesById || {}) : edge.points;
   if (!rawPts || rawPts.length < 2) return '';
   const pts = reverseArrow ? [...rawPts].reverse() : rawPts;
-  const d = PX.pathD(pts, 5);
   const strokeW = thick
     ? Math.max(1.8, Math.min(5, 1.4 + (edge.count || 1) * 0.55))
     : (state === 'normal' ? 1 : 1.6);
+  // Markers use markerUnits="strokeWidth" and a viewBox width of 10. Actual
+  // marker length in user units = markerWidth_attr * strokeWidth. Matches
+  // the refX=0 markers: stroke ends at arrowhead base, triangle extends
+  // forward to the original polyline endpoint.
+  const MARKER_WIDTH_ATTR = 7;
+  const tailTrim = MARKER_WIDTH_ATTR * strokeW;
+  const d = PX.pathD(pts, 5, tailTrim);
   const eff = opacity != null ? opacity : (state === 'faded' ? 0.12 : state === 'normal' ? 0.55 : 0.95);
   const markerId = `arr-${state}${markerSuffix}`;
-  let out = `<path d="${d}" fill="none" stroke="${color}" stroke-width="${strokeW}" opacity="${eff}" marker-end="url(#${markerId})" style="transition:all 200ms"/>`;
-  if (label) {
+  let out = labelOnly
+    ? ''
+    : `<path d="${d}" fill="none" stroke="${color}" stroke-width="${strokeW}" opacity="${eff}" marker-end="url(#${markerId})" style="transition:all 200ms"/>`;
+  if (label && !pathOnly) {
     let lx = edge.labelX, ly = edge.labelY;
     if (lx == null || ly == null) {
       lx = (pts[0].x + pts[pts.length - 1].x) / 2;
       ly = (pts[0].y + pts[pts.length - 1].y) / 2;
     }
-    const labelOpacity = state === 'faded' ? 0.3 : 1;
+    // Faded state only dims text/stroke; the bg rect stays OPAQUE so it
+    // keeps masking foreign arrows that pass behind it. A semi-transparent
+    // faded rect lets highlighted edges "leak through" — the effect the
+    // user flagged as "blue arrow passing under a block".
+    const textOpacity = state === 'faded' ? 0.35 : 1;
+    const strokeOpacity = state === 'faded' ? 0.5 : 1;
     if (typeof label === 'object' && label.sourceName && label.targetName) {
-      // Three-line colored label: [source] / imports Nx / [target]
-      // Char widths match group-map's collision estimate — drift between them
-      // is what makes the collision avoider fire too late.
       const line1 = `[${label.sourceName}]`;
       const line2 = `imports ${label.count}\u00d7`;
       const line3 = `[${label.targetName}]`;
@@ -47,18 +59,18 @@ PX.components.edge = function edgeSvg(edge, opts = {}) {
       const w = Math.max(line1.length * charW1, line2.length * charW2, line3.length * charW1) + 26;
       const h = 50;
       const top = ly - h / 2;
-      out += `<g pointer-events="none" opacity="${labelOpacity}">`
-        +  `<rect x="${lx - w / 2}" y="${top}" width="${w}" height="${h}" fill="${T.bg}" stroke="${color}" stroke-width="1" rx="8"/>`
-        +  `<text x="${lx}" y="${top + 14}" font-family="${T.mono}" font-size="11" fill="${label.sourceColor || color}" text-anchor="middle" font-weight="700">${PX.escapeXml(line1)}</text>`
-        +  `<text x="${lx}" y="${top + 28}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="middle">${PX.escapeXml(line2)}</text>`
-        +  `<text x="${lx}" y="${top + 42}" font-family="${T.mono}" font-size="11" fill="${label.targetColor || color}" text-anchor="middle" font-weight="700">${PX.escapeXml(line3)}</text>`
+      out += `<g pointer-events="none">`
+        +  `<rect x="${lx - w / 2}" y="${top}" width="${w}" height="${h}" fill="${T.bg}" stroke="${color}" stroke-width="1" stroke-opacity="${strokeOpacity}" rx="8"/>`
+        +  `<text x="${lx}" y="${top + 14}" font-family="${T.mono}" font-size="11" fill="${label.sourceColor || color}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="700">${PX.escapeXml(line1)}</text>`
+        +  `<text x="${lx}" y="${top + 28}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" fill-opacity="${textOpacity}" text-anchor="middle">${PX.escapeXml(line2)}</text>`
+        +  `<text x="${lx}" y="${top + 42}" font-family="${T.mono}" font-size="11" fill="${label.targetColor || color}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="700">${PX.escapeXml(line3)}</text>`
         +  `</g>`;
     } else {
       const txt = PX.escapeXml(String(label));
       const w = txt.length * 6.4 + 16;
-      out += `<g pointer-events="none" opacity="${labelOpacity}">`
-        +  `<rect x="${lx - w / 2}" y="${ly - 11}" width="${w}" height="22" fill="${T.bg}" stroke="${color}" stroke-width="1" rx="11"/>`
-        +  `<text x="${lx}" y="${ly + 4.5}" font-family="${T.mono}" font-size="11" fill="${color}" text-anchor="middle" font-weight="600">${txt}</text>`
+      out += `<g pointer-events="none">`
+        +  `<rect x="${lx - w / 2}" y="${ly - 11}" width="${w}" height="22" fill="${T.bg}" stroke="${color}" stroke-width="1" stroke-opacity="${strokeOpacity}" rx="11"/>`
+        +  `<text x="${lx}" y="${ly + 4.5}" font-family="${T.mono}" font-size="11" fill="${color}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="600">${txt}</text>`
         +  `</g>`;
     }
   }
@@ -66,13 +78,16 @@ PX.components.edge = function edgeSvg(edge, opts = {}) {
 };
 
 PX.components.markers = function markersSvg(suffix = '') {
+  // refX=0 (base-at-endpoint) pairs with pathD's tailTrim: stroke terminates
+  // at the arrowhead's base, the triangle extends forward to the original
+  // polyline endpoint. Clean seam between shaft and arrowhead, no overlap.
   const states = ['normal', 'depends', 'imports', 'blast', 'faded'];
   let out = '<defs>';
   for (const s of states) {
     const col = PX.stateColor(s);
-    out += `<marker id="arr-${s}${suffix}" viewBox="0 -5 10 10" refX="10" refY="0" markerWidth="7" markerHeight="7" orient="auto">`
+    out += `<marker id="arr-${s}${suffix}" viewBox="0 -5 10 10" refX="0" refY="0" markerWidth="7" markerHeight="7" orient="auto">`
       +  `<path d="M0,-4L10,0L0,4" fill="${col}"/></marker>`;
-    out += `<marker id="garr-${s}${suffix}" viewBox="0 -6 12 12" refX="12" refY="0" markerWidth="9" markerHeight="9" orient="auto">`
+    out += `<marker id="garr-${s}${suffix}" viewBox="0 -6 12 12" refX="0" refY="0" markerWidth="9" markerHeight="9" orient="auto">`
       +  `<path d="M0,-5L12,0L0,5" fill="${col}"/></marker>`;
   }
   out += '</defs>';

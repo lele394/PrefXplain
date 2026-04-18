@@ -19,8 +19,13 @@ install-extension:
 		echo "No IDE CLI found. Install manually: code --install-extension $(CURDIR)/prefxplain-vscode/prefxplain-vscode-0.1.0.vsix"; \
 	fi
 
-test:
+test: test-py test-js
+
+test-py:
 	python -m pytest tests/ -x -q
+
+test-js:
+	node --test tests/*.mjs
 
 lint:
 	ruff check prefxplain/ tests/

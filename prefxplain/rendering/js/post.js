@@ -55,6 +55,31 @@ function _findEdgeContainer(root, edgeId, stack = []) {
   return null;
 }
 
+// Walk ELK's compound tree, harvest each edge's first label position, and
+// translate its (x, y) from container-relative to root-frame coords. Returns
+// an object keyed by edge id → { x, y, width, height } of the label's
+// top-left corner in root coords. ELK only populates x/y for edges that
+// had a label declared in the IR and that the router had room for.
+PX.extractEdgeLabels = function extractEdgeLabels(laidRoot) {
+  const byId = {};
+  const walk = (container, ancestors) => {
+    for (const e of (container.edges || [])) {
+      const lbl = (e.labels || [])[0];
+      if (!lbl) continue;
+      let x = lbl.x || 0, y = lbl.y || 0;
+      for (const a of ancestors) { x += (a.x || 0); y += (a.y || 0); }
+      byId[e.id] = {
+        x, y,
+        width: lbl.width || 0,
+        height: lbl.height || 0,
+      };
+    }
+    for (const c of (container.children || [])) walk(c, [...ancestors, c]);
+  };
+  walk(laidRoot, []);
+  return byId;
+};
+
 PX.extractEdgePolylines = function extractEdgePolylines(laidRoot) {
   const results = [];
   const walkEdges = (container, ancestors) => {
@@ -203,6 +228,36 @@ function _overlapsSegment(bbox, seg, gap) {
   return false;
 }
 
+// Walk along an edge's own polyline and return the point at fractional arc
+// length t in [0, 1]. Guarantees the returned point sits ON the polyline.
+function _pointAtT(points, t) {
+  if (!points || points.length < 2) return null;
+  const lens = [];
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    const dx = points[i + 1].x - points[i].x;
+    const dy = points[i + 1].y - points[i].y;
+    const len = Math.hypot(dx, dy);
+    lens.push(len);
+    total += len;
+  }
+  if (total === 0) return { x: points[0].x, y: points[0].y };
+  const target = Math.max(0, Math.min(total, total * t));
+  let walked = 0;
+  for (let i = 0; i < lens.length; i++) {
+    if (walked + lens[i] >= target) {
+      const ratio = lens[i] > 0 ? (target - walked) / lens[i] : 0;
+      return {
+        x: points[i].x + (points[i + 1].x - points[i].x) * ratio,
+        y: points[i].y + (points[i + 1].y - points[i].y) * ratio,
+      };
+    }
+    walked += lens[i];
+  }
+  const last = points[points.length - 1];
+  return { x: last.x, y: last.y };
+}
+
 PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
   const {
     labelW = (e) => (e.__labelW || 180),
@@ -210,6 +265,8 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
     gap = 8,
     maxIter = 60,
     segments = [],
+    walkPath = false,
+    cardRects = [],
   } = opts;
   const placed = [];
   const sorted = [...edges].sort((a, b) =>
@@ -218,6 +275,14 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
 
   const collides = (e, lx, ly, w, h) => {
     const bbox = { x1: lx - w / 2, y1: ly - h / 2, x2: lx + w / 2, y2: ly + h / 2 };
+    // Card/node obstacle check: labels must never overlap a hero card.
+    // Cards are opaque, and a label underneath would be hidden or visually
+    // merge into the card — hard rejection, no shared-trunk exception.
+    for (const c of cardRects) {
+      if (!(bbox.x2 < c.x1 || bbox.x1 > c.x2 || bbox.y2 < c.y1 || bbox.y1 > c.y2)) {
+        return true;
+      }
+    }
     for (const p of placed) {
       if (p.labelX == null || p.labelY == null) continue;
       const pw = labelW(p), ph = labelH(p);
@@ -225,13 +290,45 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
       const dy = Math.abs(p.labelY - ly);
       if (dx < (pw + w) / 2 + gap && dy < (ph + h) / 2 + gap) return true;
     }
+    // Shared-trunk exception: if one of the edge's own segments already
+    // crosses the label bbox, the label is on-path. Foreign segments that
+    // also cross the bbox are a shared corridor (multiple edges converging
+    // on a common trunk), not a real obstacle. Foreign arrows passing
+    // through the label area are detoured around it by detourAroundLabels
+    // in a separate pass.
+    const ownCovers = segments.some(s => s.edgeId === e.id && _overlapsSegment(bbox, s, 0));
     for (const seg of segments) {
       if (seg.edgeId === e.id) continue;
-      if (_overlapsSegment(bbox, seg, gap)) return true;
+      if (_overlapsSegment(bbox, seg, gap)) {
+        if (ownCovers) continue;
+        return true;
+      }
     }
     return false;
   };
 
+  // walkPath=true: candidates come from the edge's own polyline — label is
+  // guaranteed on-path. walkPath=false (legacy): free-float Y-nudge.
+  const tryWalkPath = (e, w, h) => {
+    const pts = e.points;
+    if (!pts || pts.length < 2) return null;
+    // Try t=0.5 first, then fan outward in ~5% arc-length steps, alternating
+    // sides. Max walk range stops at 10% (head) and 90% (tail) so the label
+    // never ends up jammed against a node. Fine granularity (0.025 step) means
+    // the label can shift only a few pixels if needed — tight hug on the arrow.
+    const tries = [0.5];
+    for (let i = 1; i <= 16; i++) {
+      const d = i * 0.025;
+      tries.push(0.5 + d, 0.5 - d);
+    }
+    for (const t of tries) {
+      if (t < 0.1 || t > 0.9) continue;
+      const p = _pointAtT(pts, t);
+      if (!p) continue;
+      if (!collides(e, p.x, p.y, w, h)) return p;
+    }
+    return null;
+  };
   const tryYNudge = (e, lx, w, h, originalY) => {
     if (!collides(e, lx, originalY, w, h)) return originalY;
     for (let i = 0; i < maxIter; i++) {
@@ -247,6 +344,20 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
     const w = labelW(e), h = labelH(e);
     const originalX = e.labelX;
     const originalY = e.labelY;
+
+    if (walkPath) {
+      // walk-polyline mode: label stays on the arrow no matter what.
+      if (!collides(e, originalX, originalY, w, h)) {
+        placed.push(e);
+        continue;
+      }
+      const p = tryWalkPath(e, w, h);
+      if (p) { e.labelX = p.x; e.labelY = p.y; placed.push(e); continue; }
+      // No non-colliding position on the polyline: keep midpoint on-path
+      // (accept overlap — label rect bg-fill masks whatever it covers).
+      placed.push(e);
+      continue;
+    }
 
     const yAtOriginalX = tryYNudge(e, originalX, w, h, originalY);
     if (yAtOriginalX != null) {
@@ -270,11 +381,116 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
   return edges;
 };
 
-PX.pathD = function pathD(points, r = 5) {
+// Detour an orthogonal polyline around foreign label bboxes. For each segment
+// in the input polyline, find all bboxes it crosses, compute a UNION envelope
+// of those bboxes, and route a SINGLE bypass around the envelope. No iterative
+// per-bbox processing: this prevents the "cascade zigzag" when several labels
+// cluster in a fan-in corridor (each iteration's detour waypoints would land
+// inside the next bbox, triggering more detours and accumulating bends).
+//
+// Handles partial overlap correctly: if a segment endpoint is inside an
+// envelope, the detour turns sideways immediately at that endpoint rather
+// than trying to "enter" at the envelope boundary (which would walk backward).
+//
+// Returns a new points array. Safe to call with empty bboxes (returns input).
+PX.detourAroundLabels = function detourAroundLabels(points, bboxes, gap = 12) {
+  if (!points || points.length < 2 || !bboxes || bboxes.length === 0) return points;
+  const out = [points[0]];
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i], b = points[i + 1];
+    for (const p of _detourSegment(a, b, bboxes, gap)) out.push(p);
+  }
+  return out;
+};
+
+// For one orthogonal segment (a, b), return the list of waypoints (including
+// b) that route around every bbox the segment crosses. If no bbox is crossed,
+// returns [b].
+function _detourSegment(a, b, bboxes, gap) {
+  const isH = Math.abs(a.y - b.y) <= 1;
+  const isV = Math.abs(a.x - b.x) <= 1;
+  if (!isH && !isV) return [b];
+
+  // Map each bbox into the segment's reference frame: "pass" axis = the axis
+  // the segment travels on, "cross" axis = the constant axis.
+  const crossed = [];
+  for (const bb of bboxes) {
+    const B = {
+      pass1: (isH ? bb.x1 : bb.y1) - gap,
+      pass2: (isH ? bb.x2 : bb.y2) + gap,
+      cross1: (isH ? bb.y1 : bb.x1) - gap,
+      cross2: (isH ? bb.y2 : bb.x2) + gap,
+    };
+    const crossCoord = isH ? a.y : a.x;
+    const passA = isH ? a.x : a.y;
+    const passB = isH ? b.x : b.y;
+    if (crossCoord > B.cross1 && crossCoord < B.cross2
+        && Math.max(passA, passB) > B.pass1
+        && Math.min(passA, passB) < B.pass2) {
+      crossed.push(B);
+    }
+  }
+  if (crossed.length === 0) return [b];
+
+  const passA = isH ? a.x : a.y;
+  const passB = isH ? b.x : b.y;
+  const crossCoord = isH ? a.y : a.x;
+
+  // Envelope of all crossed bboxes.
+  const envPass1 = Math.min(...crossed.map(c => c.pass1));
+  const envPass2 = Math.max(...crossed.map(c => c.pass2));
+  const envCross1 = Math.min(...crossed.map(c => c.cross1));
+  const envCross2 = Math.max(...crossed.map(c => c.cross2));
+
+  // Choose detour side (closer of top/bottom or left/right).
+  const detourCross = Math.abs(crossCoord - envCross1) <= Math.abs(crossCoord - envCross2)
+    ? envCross1 : envCross2;
+
+  const dir = passB >= passA ? 1 : -1;
+  // Clip entry/exit pass-axis coords to the segment's own range and the
+  // envelope's pass range. If the endpoint is already inside the envelope,
+  // the entry (or exit) stays at the endpoint's coord — no backward walk.
+  const entryPass = dir > 0 ? Math.max(passA, envPass1) : Math.min(passA, envPass2);
+  const exitPass  = dir > 0 ? Math.min(passB, envPass2) : Math.max(passB, envPass1);
+
+  const mk = (p, c) => isH ? { x: p, y: c } : { x: c, y: p };
+
+  const waypoints = [];
+  // If A is OUTSIDE the envelope pass-range, walk along cross-axis to the
+  // envelope boundary before turning. Inside → turn immediately at A.
+  const aOutside = (dir > 0 && passA < envPass1) || (dir < 0 && passA > envPass2);
+  if (aOutside) waypoints.push(mk(entryPass, crossCoord));
+  waypoints.push(mk(entryPass, detourCross));
+  waypoints.push(mk(exitPass, detourCross));
+  const bOutside = (dir > 0 && passB > envPass2) || (dir < 0 && passB < envPass1);
+  if (bOutside) waypoints.push(mk(exitPass, crossCoord));
+  waypoints.push(b);
+  return waypoints;
+}
+
+PX.pathD = function pathD(points, r = 5, tailTrim = 0) {
   if (!points || points.length < 2) return '';
+  // tailTrim pulls the last point back along its direction. Pairs with a
+  // marker whose refX=0 (base-at-endpoint): the stroke ends at the arrow-
+  // head's BASE, the arrowhead triangle extends forward to the original
+  // endpoint. Visually: clean boundary between shaft and arrowhead, no
+  // stroke visible past the arrowhead tip or "under" the triangle.
+  let endPt = points[points.length - 1];
+  if (tailTrim > 0 && points.length >= 2) {
+    const prev = points[points.length - 2];
+    const dx = endPt.x - prev.x, dy = endPt.y - prev.y;
+    const len = Math.hypot(dx, dy);
+    if (len > tailTrim + 1) {
+      const ratio = (len - tailTrim) / len;
+      endPt = { x: prev.x + dx * ratio, y: prev.y + dy * ratio };
+    }
+  }
   let d = `M${points[0].x},${points[0].y}`;
   for (let i = 1; i < points.length - 1; i++) {
-    const prev = points[i - 1], cur = points[i], next = points[i + 1];
+    const prev = points[i - 1], cur = points[i];
+    // Clamp rounding radius by the actual NEXT segment length — which might
+    // be the trimmed final segment.
+    const next = (i === points.length - 2) ? endPt : points[i + 1];
     const dx1 = Math.sign(cur.x - prev.x), dy1 = Math.sign(cur.y - prev.y);
     const dx2 = Math.sign(next.x - cur.x), dy2 = Math.sign(next.y - cur.y);
     const len1 = Math.hypot(cur.x - prev.x, cur.y - prev.y);
@@ -283,8 +499,7 @@ PX.pathD = function pathD(points, r = 5) {
     d += ` L${cur.x - dx1 * rr},${cur.y - dy1 * rr}`;
     d += ` Q${cur.x},${cur.y} ${cur.x + dx2 * rr},${cur.y + dy2 * rr}`;
   }
-  const last = points[points.length - 1];
-  d += ` L${last.x},${last.y}`;
+  d += ` L${endPt.x},${endPt.y}`;
   return d;
 };
 

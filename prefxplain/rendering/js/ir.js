@@ -206,12 +206,47 @@ PX.buildIr = function buildIr(graph, viewMode, {
   if (viewMode === 'nested') {
     const groups = _groupsOf(graph.nodes || []);
     const fileSize = showBullets ? PX.NODE_SIZES.fileBullets : PX.NODE_SIZES.fileNoBullets;
+    const pairStats = (index && index.groupPairStats) || [];
+    const includeFocusDetails = focusedGroup && edgeDetailMode !== 'overview';
+    const selectedGroup = selected && byId[selected] ? ((byId[selected].group || 'Ungrouped')) : null;
+    const focusSelection = includeFocusDetails && selected && selectedGroup === focusedGroup ? selected : null;
+
+    // Pre-compute aggregate edges with UNIQUE ports per edge — same trick
+    // as group-map (see _aggregateGroupEdges). Sharing `.in` / `.out` ports
+    // across all aggregate edges of a group forces ELK to stack them; per-
+    // edge ports give each aggregate arrow its own fanned-out corridor.
+    const aggregateEdges = [];
+    let aggIdx = 0;
+    for (const rec of pairStats) {
+      if (includeFocusDetails && (rec.sourceGroup === focusedGroup || rec.targetGroup === focusedGroup)) continue;
+      const dims = _labelDims(rec.sourceGroup, rec.targetGroup, rec.count);
+      aggregateEdges.push({
+        id: `e-agg${aggIdx}`,
+        sources: [`${rec.sourceGroup}.out-agg${aggIdx}`],
+        targets: [`${rec.targetGroup}.in-agg${aggIdx}`],
+        count: rec.count,
+        kind: 'aggregate',
+        sourceGroup: rec.sourceGroup,
+        targetGroup: rec.targetGroup,
+        labels: [{ text: '', width: dims.width, height: dims.height }],
+      });
+      aggIdx++;
+    }
+
     const groupNodes = groups.map((g) => {
       const isFocused = focusedGroup === g;
       const isExpanded = isFocused;
+      // Always expose the default shared ports for gateway edges (used when
+      // a group is focused). Add per-aggregate-edge ports for any aggregate
+      // edge touching this group.
+      const ports = [_port(g, 'NORTH'), _port(g, 'SOUTH')];
+      for (const e of aggregateEdges) {
+        if (e.sourceGroup === g) ports.push({ id: e.sources[0], properties: { 'port.side': 'SOUTH' } });
+        if (e.targetGroup === g) ports.push({ id: e.targets[0], properties: { 'port.side': 'NORTH' } });
+      }
       const groupNode = {
         id: g,
-        ports: [_port(g, 'NORTH'), _port(g, 'SOUTH')],
+        ports,
         properties: {
           'org.eclipse.elk.portConstraints': 'FIXED_SIDE',
           'org.eclipse.elk.padding': isExpanded
@@ -232,8 +267,8 @@ PX.buildIr = function buildIr(graph, viewMode, {
       return groupNode;
     });
 
-    const edges = [];
-    let edgeId = 0;
+    const edges = [...aggregateEdges];
+    let edgeId = aggregateEdges.length;
     const pushEdge = (sourcePort, targetPort, extra = {}) => {
       edges.push({
         id: `e${edgeId++}`,
@@ -242,25 +277,6 @@ PX.buildIr = function buildIr(graph, viewMode, {
         ...extra,
       });
     };
-
-    const pairStats = (index && index.groupPairStats) || [];
-    const includeFocusDetails = focusedGroup && edgeDetailMode !== 'overview';
-    const selectedGroup = selected && byId[selected] ? ((byId[selected].group || 'Ungrouped')) : null;
-    const focusSelection = includeFocusDetails && selected && selectedGroup === focusedGroup ? selected : null;
-
-    // Aggregate group edges remain visible for the overview and for routes
-    // between non-focused groups. When a focused group is open with detail
-    // edges visible, omit its aggregate connections to avoid duplicating the
-    // gateway edges that replace them.
-    for (const rec of pairStats) {
-      if (includeFocusDetails && (rec.sourceGroup === focusedGroup || rec.targetGroup === focusedGroup)) continue;
-      pushEdge(_groupPort(rec.sourceGroup, 'SOUTH'), _groupPort(rec.targetGroup, 'NORTH'), {
-        count: rec.count,
-        kind: 'aggregate',
-        sourceGroup: rec.sourceGroup,
-        targetGroup: rec.targetGroup,
-      });
-    }
 
     if (!focusedGroup) {
       return { id: 'root', children: groupNodes, edges };

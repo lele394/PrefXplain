@@ -160,11 +160,16 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     ...e,
     ...(overviewEdgeMetaById[e.id] || {}),
   }));
-  // Only aggregate edges carry a visible label ("Nx"). Short, but still can
-  // land on a neighbour arrow when two bus trunks share a Y band.
-  const overviewLabelled = PX.placeEdgeLabels(PX.detectBus(overviewPolylines, overviewNodesByIdRaw)).map(e => {
-    const txt = (e.count || 0) > 0 ? `${e.count}\u00d7` : '';
-    return { ...e, __labelW: txt ? txt.length * 6.4 + 16 : 0, __labelH: txt ? 22 : 0 };
+  // Aggregate edges carry a 3-line colored label (same shape as group-map).
+  // The dims are deterministic from source/target names + count, so ELK
+  // already reserved space in the layered layout (see ir.js → aggregateEdges
+  // with `labels: [{width, height}]`).
+  const overviewLabelled = PX.placeEdgeLabels(PX.detectBus(overviewPolylines, overviewNodesByIdRaw), { centerOnPath: true }).map(e => {
+    if (!(e.count > 0 && e.sourceGroup && e.targetGroup)) {
+      return { ...e, __labelW: 0, __labelH: 0 };
+    }
+    const dims = PX._labelDims(e.sourceGroup, e.targetGroup, e.count);
+    return { ...e, __labelW: dims.width, __labelH: dims.height };
   });
   const overviewSegments = [];
   for (const edge of overviewLabelled) {
@@ -177,11 +182,18 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
       });
     }
   }
+  const overviewCardRects = (overviewLaid.children || []).map(box => ({
+    x1: box.x || 0, y1: box.y || 0,
+    x2: (box.x || 0) + (box.width || 0),
+    y2: (box.y || 0) + (box.height || 0),
+  }));
   const overviewEdgesRaw = PX.avoidLabelCollisions(overviewLabelled, {
     labelW: (e) => e.__labelW || 40,
     labelH: (e) => e.__labelH || 22,
-    gap: 8,
+    gap: 12,
     segments: overviewSegments,
+    walkPath: true,
+    cardRects: overviewCardRects,
   }).map(e => ({
     ...e,
     sourceGroup: PX.splitPortId(e.source).nodeId,
@@ -300,12 +312,22 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
   svg += `<text x="${detailPanelX}" y="${TOP_PAD - 2}" font-family="${PX.T.mono}" font-size="10" letter-spacing="1.2" fill="${PX.T.inkFaint}">DETAIL</text>`;
   svg += `<line x1="${overviewX + overviewW + SECTION_GAP / 2}" y1="${TOP_PAD}" x2="${overviewX + overviewW + SECTION_GAP / 2}" y2="${H - TOP_PAD}" stroke="${PX.T.borderAlt}" stroke-width="1"/>`;
 
+  // Build the rich 3-line label object shape (same as group-map) for each
+  // aggregate edge; paths first, cards next, labels last for clean z-order.
+  const mkOverviewLabel = (e) => (e.count > 0 && e.sourceGroup && e.targetGroup ? {
+    sourceName: e.sourceGroup,
+    sourceColor: PX.groupColor(e.sourceGroup, groupsMeta[e.sourceGroup] || {}),
+    targetName: e.targetGroup,
+    targetColor: PX.groupColor(e.targetGroup, groupsMeta[e.targetGroup] || {}),
+    count: e.count,
+  } : null);
+
   for (const e of overviewEdges) {
     svg += PX.components.edge(e, {
       nodesById: overviewNodesById,
       state: overviewEdgeState(e),
-      label: e.count > 0 ? `${e.count}\u00d7` : null,
       thick: true,
+      pathOnly: true,
     });
   }
 
@@ -332,6 +354,18 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
       expanded: false,
       selected: box.id === focusGroupId,
       faded: !!faded,
+    });
+  }
+
+  for (const e of overviewEdges) {
+    const label = mkOverviewLabel(e);
+    if (!label) continue;
+    svg += PX.components.edge(e, {
+      nodesById: overviewNodesById,
+      state: overviewEdgeState(e),
+      label,
+      thick: true,
+      labelOnly: true,
     });
   }
 

@@ -37,6 +37,12 @@ Free. MIT. Fork it, improve it, make it yours.
 
 ---
 
+## What is PrefXplain?
+
+PrefXplain is a free, open-source slash command that turns any codebase into an interactive architecture diagram — one self-contained HTML file, no API key, no upload — so you can grasp a repo in 5 minutes instead of 5 hours.
+
+It runs inside Claude Code, Codex, Cursor, Windsurf, Copilot CLI, or Gemini CLI as `/prefxplain`, or as a standalone `prefxplain` CLI. Every file in your repo gets a plain-English description, a layered position in the dependency graph, a blast-radius view, and an auto-generated flowchart.
+
 ## See it
 
 ![PrefXplain open side-by-side with Claude Code inside VS Code](docs/images/hero-split.png)
@@ -177,6 +183,28 @@ that use the Anthropic Agent Skill format (Copilot, Gemini, Claude Code).
 First-class tree-sitter support for the regex-parsed languages is on the
 roadmap.
 
+## FAQ
+
+### Does PrefXplain upload my code?
+No. The dependency graph is built **locally** — Python AST for Python, regex + `tsconfig` parsing for TypeScript/JavaScript, regex for the rest. The optional LLM step sends only per-file signatures (path, imports, exports, a handful of top-level symbol names) to the model you already use; it never sends file contents. Run `prefxplain create . --no-descriptions` to skip the LLM step entirely and stay fully offline.
+
+### Does it work offline / without an API key?
+Yes. `--no-descriptions` produces a full diagram — structure, blast radius, search — with zero network calls. When you *do* want descriptions, PrefXplain runs inside your existing Claude Code / Codex / Copilot / Gemini session, so there's no extra billing. Only the standalone `prefxplain` CLI requires `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+
+### How is this different from CodeSee, Sourcegraph, or `tree`?
+- **`tree` / `madge` / `pydeps`** show the shape of your codebase. PrefXplain adds plain-English descriptions, a layered layout, blast-radius on click, and per-file flowcharts.
+- **Sourcegraph / CodeSee** are SaaS — they require an account, upload source to their servers, and cost money. PrefXplain is one offline HTML file, no account, MIT.
+- PrefXplain is **agent-native**: a single slash command inside the AI coding tool you already use, not a separate UI.
+
+### How accurate are the AI-generated descriptions?
+Good enough for navigation, not a substitute for reading the code. The LLM sees one file at a time plus its imports and exports, so descriptions are reliable for *what a file does* and less reliable for *subtle contract details*. Descriptions are cached and re-used across runs; `prefxplain update .` preserves them unless you pass `--force`.
+
+### Can I use PrefXplain in CI?
+Yes. `prefxplain check .` exits non-zero on circular dependencies — drop it into a GitHub Action to fail the build when new cycles appear. For artifacts, `prefxplain create . --no-descriptions` generates an offline HTML diagram with no API calls, safe to upload as a CI artifact.
+
+### How is it different from a dependency graph I could generate myself?
+`madge`, `pydeps`, and `import-linter` give you edges. PrefXplain adds a description per file, a layered layout that groups files by architectural role, blast-radius on click, per-file flowcharts, and semantic search across descriptions (not just filenames). The output is one self-contained HTML file — shareable, safe to drop into a deck.
+
 ## Development
 
 ```bash
@@ -190,3 +218,7 @@ make test
 ## License
 
 MIT. Free forever. Go build something.
+
+---
+
+Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/). Source and issues at [github.com/PrefOptimize/PrefXplain](https://github.com/PrefOptimize/PrefXplain). MIT licensed.

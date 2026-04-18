@@ -37,24 +37,40 @@ If that also fails, stop and say what went wrong.
 
 **2. Check IDE extension (for in-IDE preview):**
 
+Check both the CLI AND the on-disk extension directories — common macOS setups
+ship VS Code/Cursor but don't add the `code`/`cursor` CLI to PATH, so a pure-
+CLI check yields false negatives.
+
 ```bash
 PREFXPLAIN_ROOT="$(python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null)"
-IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null || echo "")"
-if [ -n "$IDE_CLI" ]; then
-  $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.browser" && echo "EXTENSION_OK" || echo "EXTENSION_MISSING"
-else
-  echo "NO_IDE_CLI"
+EXT_INSTALLED="no"
+for ext_dir in "$HOME/.vscode/extensions" "$HOME/.cursor/extensions" "$HOME/.windsurf/extensions"; do
+  if ls -d "$ext_dir"/prefxplain.prefxplain-vscode-* >/dev/null 2>&1; then
+    EXT_INSTALLED="yes"
+    break
+  fi
+done
+# Fallback: CLI listing if on-disk check missed
+if [ "$EXT_INSTALLED" = "no" ]; then
+  IDE_CLI="$(which code 2>/dev/null || which cursor 2>/dev/null || which windsurf 2>/dev/null || echo "")"
+  if [ -n "$IDE_CLI" ] && $IDE_CLI --list-extensions 2>/dev/null | grep -q "prefxplain.prefxplain-vscode"; then
+    EXT_INSTALLED="yes"
+  fi
 fi
+echo "EXT_INSTALLED: $EXT_INSTALLED"
 ```
 
-If EXTENSION_MISSING and `$PREFXPLAIN_ROOT/vscode-extension/` exists, install it
-silently (no need to ask, it's a 3KB extension with zero overhead):
+If EXT_INSTALLED is "no" and `$PREFXPLAIN_ROOT` is set, install silently via
+the Makefile target (it detects the IDE CLI and works even when none is on
+PATH by falling back to the .app bundle):
 
 ```bash
-cd "$PREFXPLAIN_ROOT" && make install-extension
+[ -n "$PREFXPLAIN_ROOT" ] && cd "$PREFXPLAIN_ROOT" && make install-extension
 ```
 
-If NO_IDE_CLI, skip silently. Preview will fall back to the browser.
+If installation can't find any IDE, skip silently — preview will fall back
+to the plain browser (step 6 prints both the `vscode://` deeplink and the
+`http://` URL so the user can click whichever works).
 
 ## Division of labor
 
@@ -588,7 +604,10 @@ If `--output` was passed in `$ARGUMENTS`, use that path instead of the default.
 
 ### 6. Preview in IDE
 
-Launch a background HTTP server and let VS Code detect it for Simple Browser preview:
+The goal is zero-friction: preview auto-opens in the IDE. Three-layer strategy:
+a background HTTP server (always runs, for port-detection UX), a `vscode://`
+deeplink triggered via `open` (auto-opens the webview when the extension is
+installed — no user click needed), and the raw http URL as last-resort fallback.
 
 ```bash
 cd "$REPO"
@@ -615,15 +634,41 @@ echo $PORT > /tmp/prefxplain.port
 sleep 0.5
 ```
 
-Then display the URL clearly:
+Auto-open via the IDE's URI handler. `open` routes the deeplink to whichever
+IDE registered the scheme (Cursor takes `cursor://`, VS Code takes `vscode://`);
+if the extension isn't installed, `open` falls through gracefully and the
+user still has the http URL below as a click-through in the chat output.
+
+```bash
+HTML_ABS="$REPO/prefxplain.html"
+[ -f "$HTML_ABS" ] || HTML_ABS="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$REPO/prefxplain.html")"
+ENCODED_PATH=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$HTML_ABS")
+
+# Prefer Cursor if present, else VS Code. `open` silently no-ops when neither
+# scheme is registered, so we don't need to probe first.
+CURSOR_URI="cursor://prefxplain.prefxplain-vscode/?path=${ENCODED_PATH}"
+VSCODE_URI="vscode://prefxplain.prefxplain-vscode/?path=${ENCODED_PATH}"
+if [ -d "/Applications/Cursor.app" ]; then
+  open "$CURSOR_URI" 2>/dev/null
+  PRIMARY_URI="$CURSOR_URI"
+elif [ -d "/Applications/Visual Studio Code.app" ]; then
+  open "$VSCODE_URI" 2>/dev/null
+  PRIMARY_URI="$VSCODE_URI"
+else
+  PRIMARY_URI="$VSCODE_URI"
+fi
+```
+
+Display clickable fallbacks in the chat output so the user always has a
+one-click escape hatch, in case the auto-open failed (no extension, wrong
+IDE focused, etc.):
 
 ```bash
 PORT=$(cat /tmp/prefxplain.port)
 echo ""
-echo "prefxplain.html available at: http://localhost:$PORT/prefxplain.html"
-echo ""
-echo "VS Code should show a 'Port $PORT detected' notification -- click 'Preview in Editor' to open in Simple Browser."
-echo "Otherwise: Cmd+Shift+P > 'Simple Browser: Show' > paste the URL."
+echo "Preview auto-opened in IDE. If it didn't appear, click either of:"
+echo "  [IDE webview]   $PRIMARY_URI"
+echo "  [browser]       http://localhost:$PORT/prefxplain.html"
 echo ""
 echo "Server PID: $(cat /tmp/prefxplain.pid) -- kill with: kill \$(cat /tmp/prefxplain.pid)"
 ```

@@ -853,7 +853,12 @@ function collapseGroups() {{
 // Position children inside an open group as a grid of full-size cards.
 // Returns {{ items: [{{ node, cx, cy }}], openW, openH, cols, rows }}.
 const OPEN_GROUP_HEADER = 120;
-const OPEN_GROUP_PAD = 48;   // wider frame — more horizontal breathing room
+// Side padding — wide enough that the Manhattan detour a drawAvoidantArrow
+// uses to route around a middle sibling fits INSIDE the container.
+// At zoom-to-fit (floor 0.25) the detour GAP is ~88 world-px
+// (arrowSize * 1.1 / zoom with arrowSize=20), so keep OPEN_GROUP_PAD > that
+// plus a tiny visual margin.
+const OPEN_GROUP_PAD = 100;
 const OPEN_GROUP_GAP = 160;  // arrow zone between cells — sized so badge (18px) always fits at minimum zoom
 const OPEN_GROUP_INNER_TOP = 28; // breathing room between separator line and first child row
 
@@ -861,26 +866,49 @@ function layoutOpenGroupChildren(group) {{
   const children = (group.childIds || []).map(id => nodeIndex[id]).filter(Boolean);
   if (children.length === 0) return {{ items: [], openW: group.w, openH: group.h, cols: 0, rows: 0, internalEdges: [] }};
 
-  // Topological sort using intra-group edges (Kahn's algorithm)
+  // Topological sort using intra-group edges (Kahn's algorithm).
+  // Two-tier priority on the initial queue so that a sibling with ZERO
+  // intra-group edges (not connected to any other child) never ends up
+  // between two children that ARE connected by an edge. Otherwise the
+  // A → C arrow has to detour around the unrelated B placed in the middle,
+  // which is visually incoherent — the user's complaint.
   const gEdges = intraGroupEdges[group.id] || [];
   const childSet = new Set(children.map(c => c.id));
   const inDeg = {{}};
   const adj = {{}};
+  const touchedByIntra = new Set();
   for (const c of children) {{ inDeg[c.id] = 0; adj[c.id] = []; }}
   for (const e of gEdges) {{
     const sid = e._srcId || e.source.id, tid = e._tgtId || e.target.id;
     if (childSet.has(sid) && childSet.has(tid)) {{
       adj[sid].push(tid);
       inDeg[tid] = (inDeg[tid] || 0) + 1;
+      touchedByIntra.add(sid);
+      touchedByIntra.add(tid);
     }}
   }}
-  const queue = children.filter(c => inDeg[c.id] === 0)
+  // Primary queue: intra-group-connected sources (processed first so edges
+  // stay compact). Tail queue: siblings that aren't part of any edge
+  // (rendered at the end, out of the way of detours).
+  const primaryQueue = children.filter(c => inDeg[c.id] === 0 && touchedByIntra.has(c.id))
     .sort((a, b) => (b.pagerank || 0) - (a.pagerank || 0));
+  const tailQueue = children.filter(c => inDeg[c.id] === 0 && !touchedByIntra.has(c.id))
+    .sort((a, b) => (b.pagerank || 0) - (a.pagerank || 0));
+  const queue = [...primaryQueue, ...tailQueue];
   const sorted = [];
   const visited = new Set();
+  // Defer disconnected nodes until after Kahn's has drained the connected
+  // subgraph, so they don't split a connected chain.
+  let deferredTail = [];
   for (let i = 0; i < queue.length; i++) {{
     const node = queue[i];
     if (visited.has(node.id)) continue;
+    if (!touchedByIntra.has(node.id) && adj[node.id].length === 0) {{
+      // Hold isolated nodes for later — append after Kahn finishes connecting.
+      deferredTail.push(node);
+      visited.add(node.id);
+      continue;
+    }}
     visited.add(node.id);
     sorted.push(node);
     for (const nid of (adj[node.id] || [])) {{
@@ -891,26 +919,26 @@ function layoutOpenGroupChildren(group) {{
       }}
     }}
   }}
+  // Append the isolated tail now, at the very bottom of the column.
+  sorted.push(...deferredTail);
   for (const c of rankChildNodes(children)) {{
     if (!visited.has(c.id)) sorted.push(c);
   }}
 
   const n = sorted.length;
-  // Side-by-side layout for small groups (2–4 children) so they read as
-  // "two blocks inside a container" rather than a tall single-column stack.
-  const cols = n <= 1 ? 1 : (n <= 4 ? 2 : 3);
-  const rows = Math.ceil(n / cols);
   // Dynamically widen cells to fit the longest title AND the longest bullet
-  // without truncation. Two zoom references:
-  //   REF_ZOOM (0.65) — typical view, used for titles
-  //   FLOOR_ZOOM (0.25) — zoom-to-fit clamp in computeFitZoom. Bullets are
-  //     sized against this so they remain readable even at worst-case zoom.
-  // Cap at 3× NODE_W so one giant label doesn't blow up the whole group.
-  const REF_ZOOM = 0.65;
-  const FLOOR_ZOOM = 0.25;
-  const CHAR_PX = 9;                // title font char width (~bold 14 px)
+  // without truncation. Sized for the zoom-to-fit policy:
+  //   REF_ZOOM (0.2) — a typical grouped-view zoom where the whole diagram
+  //     fits the viewport. Text is drawn directly in screen px via the LOD
+  //     renderer, so we size world cells to cover the longest label at this
+  //     reference zoom. When the user zooms in, cells get wider than needed
+  //     — acceptable, since we've now lost the truncation problem.
+  // Cap at 2× NODE_W so one giant label doesn't blow up the whole group
+  // (this is our main knob against runaway horizontal growth).
+  const REF_ZOOM = 0.2;
+  const CHAR_PX = 9.5;              // title font char width (~bold 16 px)
   const BULLET_CHAR_PX = 8.2;       // bullet font char width (~15 px)
-  const CHROME_PX = 52;             // left bar + both-side padding for title
+  const CHROME_PX = 28;             // left/right padding around the title
   const BULLET_CHROME_PX = 60;      // inset for bullets to stay inside
                                     // non-rectangular shapes (hexagons etc.)
   const longestTitleScreenW = sorted.reduce((mx, c) => {{
@@ -925,12 +953,47 @@ function layoutOpenGroupChildren(group) {{
     return Math.max(mx, (maxLen + 2) * BULLET_CHAR_PX + BULLET_CHROME_PX);
   }}, 0);
   const titleDrivenW  = Math.ceil(longestTitleScreenW  / REF_ZOOM);
-  const bulletDrivenW = Math.ceil(longestBulletScreenW / FLOOR_ZOOM);
+  const bulletDrivenW = Math.ceil(longestBulletScreenW / REF_ZOOM);
   const cellW = Math.min(
     Math.max(NODE_W, titleDrivenW, bulletDrivenW),
-    NODE_W * 3
+    Math.ceil(NODE_W * 2)
   );
   const cellH = Math.max(...sorted.map(c => c.h || NODE_H_BASE));
+
+  // Aspect-ratio-balanced track layout. Pick the number of perpendicular
+  // tracks (cols in vertical flow, rows in horizontal flow) that makes the
+  // resulting container closest to 1:1. Capped at 3 tracks so a group of
+  // many children doesn't overflow the viewport's perpendicular axis at the
+  // zoom-to-fit floor (3 × cellW ≈ 4860 world-px → ~1215 screen-px at
+  // zoom 0.25, fits a laptop viewport even with sibling groups).
+  const flowDir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
+  function pickTracks(count, cellMain, cellPerp, maxTracks) {{
+    if (count <= 1) return 1;
+    let bestTracks = 1;
+    let bestScore = Infinity;
+    const cap = Math.min(maxTracks, count);
+    for (let t = 1; t <= cap; t++) {{
+      const steps = Math.ceil(count / t);
+      const perpSpan = t * cellPerp;
+      const flowSpan = steps * cellMain;
+      const lo = Math.max(1, Math.min(perpSpan, flowSpan));
+      const hi = Math.max(perpSpan, flowSpan);
+      // Lower is better (ratio of 1 means perfect square).
+      // Tiny penalty per extra track biases ties toward fewer tracks, which
+      // is safer for overall diagram width.
+      const score = (hi / lo) + t * 1e-6;
+      if (score < bestScore) {{
+        bestScore = score;
+        bestTracks = t;
+      }}
+    }}
+    return bestTracks;
+  }}
+  const MAX_TRACKS = 3;
+  const cols = flowDir === 'horizontal'
+    ? Math.ceil(n / pickTracks(n, cellW, cellH, MAX_TRACKS))
+    : pickTracks(n, cellH, cellW, MAX_TRACKS);
+  const rows = Math.ceil(n / cols);
   const openW = cols * cellW + (cols - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD * 2;
   const openH = OPEN_GROUP_HEADER + OPEN_GROUP_INNER_TOP + rows * cellH + (rows - 1) * OPEN_GROUP_GAP + OPEN_GROUP_PAD;
   const topY = group.y - group.h / 2;
@@ -1081,56 +1144,157 @@ function stackNodesVertically(nodeList, centerX, startY, gapY) {{
   }}
 }}
 
-// Vertical flow: each row = one topo depth, blocks arranged left-to-right within rows
-function layoutBlockRows(rows) {{
+// Build an undirected adjacency Set from inter-group edges: "idA|idB" (sorted)
+// so both lookup directions work. Used by the lane layout to detect when two
+// adjacent group blocks are actually connected by an arrow — in that case we
+// bump the gap between them so the arrow and its label get room to breathe
+// instead of crowding against the block edges.
+function buildBlockAdjacencySet(edgeList) {{
+  const set = new Set();
+  if (!edgeList) return set;
+  for (const e of edgeList) {{
+    if (!e.source || !e.target) continue;
+    if (!e.source.isGroup || !e.target.isGroup) continue;
+    if (e.source.id === e.target.id) continue;
+    const a = e.source.id, b = e.target.id;
+    const key = a < b ? (a + '|' + b) : (b + '|' + a);
+    set.add(key);
+  }}
+  return set;
+}}
+
+function _blocksAreConnected(a, b, adjSet) {{
+  if (!adjSet || adjSet.size === 0) return false;
+  const key = a.id < b.id ? (a.id + '|' + b.id) : (b.id + '|' + a.id);
+  return adjSet.has(key);
+}}
+
+// Are any blocks in laneA connected by an arrow to any blocks in laneB?
+function _lanesAreConnected(laneA, laneB, adjSet) {{
+  if (!adjSet || adjSet.size === 0) return false;
+  for (const a of laneA) {{
+    for (const b of laneB) {{
+      if (_blocksAreConnected(a, b, adjSet)) return true;
+    }}
+  }}
+  return false;
+}}
+
+// Vertical flow: each row = one topo depth, blocks arranged left-to-right within rows.
+// `adjSet` is a Set of "idA|idB" keys (sorted) describing inter-group arrows.
+// When two adjacent rows have an arrow between them, the ROW gap between them
+// is boosted so the (vertical) arrow + label aren't cramped against block
+// edges. When two adjacent blocks inside the same row have an arrow, the COL
+// gap between them is boosted for the same reason on the horizontal axis.
+function layoutBlockRows(rows, adjSet) {{
   const nonEmpty = rows.filter(r => r.length > 0);
   if (nonEmpty.length === 0) return;
 
   // Vertical flow: flow axis is vertical, so stretch ROW_GAP — content can
   // scroll vertically and edge labels between layers get more breathing room.
-  const ROW_GAP = Math.max(320, 320 * spreadFactor);
-  const COL_GAP = Math.max(130, 130 * spreadFactor);
+  const BASE_ROW_GAP = Math.max(320, 320 * spreadFactor);
+  const BASE_COL_GAP = Math.max(130, 130 * spreadFactor);
+  // Extra gap applied only between connected pairs. Sized so the mid-arrow
+  // label (~12px tall, padded) sits clear of both block edges. Numbers tuned
+  // for the readability-first zoom policy (zoom >= 0.55 by default), so a
+  // 160 px world boost is ~88 screen px — enough for arrow labels without
+  // exploding the graph's physical span.
+  const ROW_GAP_BOOST = Math.max(160, 160 * spreadFactor);
+  const COL_GAP_BOOST = Math.max(80, 80 * spreadFactor);
+
   const rowHeights = nonEmpty.map(row => Math.max(...row.map(n => n.h)));
-  const rowWidths = nonEmpty.map(row =>
-    row.reduce((sum, n) => sum + n.w, 0) + Math.max(0, row.length - 1) * COL_GAP
-  );
-  const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0) + Math.max(0, rowHeights.length - 1) * ROW_GAP;
+  // Gap between row ri and row ri+1 (length = nonEmpty.length - 1)
+  const rowGaps = [];
+  for (let i = 0; i < nonEmpty.length - 1; i++) {{
+    const connected = _lanesAreConnected(nonEmpty[i], nonEmpty[i + 1], adjSet);
+    rowGaps.push(connected ? BASE_ROW_GAP + ROW_GAP_BOOST : BASE_ROW_GAP);
+  }}
+  // Per-row: gap between adjacent blocks inside that row
+  const perRowColGaps = nonEmpty.map(row => {{
+    const gaps = [];
+    for (let i = 0; i < row.length - 1; i++) {{
+      const connected = _blocksAreConnected(row[i], row[i + 1], adjSet);
+      gaps.push(connected ? BASE_COL_GAP + COL_GAP_BOOST : BASE_COL_GAP);
+    }}
+    return gaps;
+  }});
+  const rowWidths = nonEmpty.map((row, ri) => {{
+    const baseW = row.reduce((sum, n) => sum + n.w, 0);
+    const gapsW = perRowColGaps[ri].reduce((s, g) => s + g, 0);
+    return baseW + gapsW;
+  }});
+  const totalHeight = rowHeights.reduce((sum, h) => sum + h, 0) + rowGaps.reduce((s, g) => s + g, 0);
 
   let cursorY = -totalHeight / 2;
   nonEmpty.forEach((row, ri) => {{
     const height = rowHeights[ri];
     const centerY = cursorY + height / 2;
     const rw = rowWidths[ri];
+    const gaps = perRowColGaps[ri];
     let cursorX = -rw / 2;
-    row.forEach(n => {{
+    row.forEach((n, i) => {{
       n.x = cursorX + n.w / 2;
       n.y = centerY;
-      cursorX += n.w + COL_GAP;
+      cursorX += n.w + (gaps[i] || 0);
     }});
-    cursorY += height + ROW_GAP;
+    cursorY += height + (rowGaps[ri] || 0);
   }});
 }}
 
-// Horizontal flow: each column = one topo depth, blocks stacked vertically
-function layoutBlockColumns(columns) {{
+// Horizontal flow: each column = one topo depth, blocks stacked vertically.
+// Symmetric to layoutBlockRows: connected adjacent columns get a wider
+// COLUMN gap (horizontal arrow), and connected adjacent blocks within a
+// column get a wider ROW gap (vertical arrow inside the column).
+function layoutBlockColumns(columns, adjSet) {{
   const nonEmpty = columns.filter(col => col.length > 0);
   if (nonEmpty.length === 0) return;
 
   // Horizontal flow: flow axis is horizontal, so stretch COLUMN_GAP — content
   // can scroll horizontally and edge labels between layers get breathing room.
-  const COLUMN_GAP = Math.max(400, 400 * spreadFactor);
-  const ROW_GAP = Math.max(130, 130 * spreadFactor);
+  // Boosts tuned for the readability-first zoom policy (see layoutBlockRows).
+  const BASE_COLUMN_GAP = Math.max(320, 320 * spreadFactor);
+  const BASE_ROW_GAP = Math.max(130, 130 * spreadFactor);
+  const COLUMN_GAP_BOOST = Math.max(160, 160 * spreadFactor);
+  const ROW_GAP_BOOST = Math.max(80, 80 * spreadFactor);
+
   const widths = nonEmpty.map(col => Math.max(...col.map(n => n.w)));
-  const heights = nonEmpty.map(col => col.reduce((sum, n) => sum + n.h, 0) + Math.max(0, col.length - 1) * ROW_GAP);
-  const totalWidth = widths.reduce((sum, width) => sum + width, 0) + Math.max(0, widths.length - 1) * COLUMN_GAP;
+  // Gap between column i and column i+1
+  const columnGaps = [];
+  for (let i = 0; i < nonEmpty.length - 1; i++) {{
+    const connected = _lanesAreConnected(nonEmpty[i], nonEmpty[i + 1], adjSet);
+    columnGaps.push(connected ? BASE_COLUMN_GAP + COLUMN_GAP_BOOST : BASE_COLUMN_GAP);
+  }}
+  // Per-column: gap between adjacent blocks stacked inside that column
+  const perColRowGaps = nonEmpty.map(col => {{
+    const gaps = [];
+    for (let i = 0; i < col.length - 1; i++) {{
+      const connected = _blocksAreConnected(col[i], col[i + 1], adjSet);
+      gaps.push(connected ? BASE_ROW_GAP + ROW_GAP_BOOST : BASE_ROW_GAP);
+    }}
+    return gaps;
+  }});
+  const heights = nonEmpty.map((col, idx) => {{
+    const baseH = col.reduce((sum, n) => sum + n.h, 0);
+    const gapsH = perColRowGaps[idx].reduce((s, g) => s + g, 0);
+    return baseH + gapsH;
+  }});
+  const totalWidth = widths.reduce((sum, width) => sum + width, 0) + columnGaps.reduce((s, g) => s + g, 0);
 
   let cursorX = -totalWidth / 2;
   nonEmpty.forEach((col, index) => {{
     const width = widths[index];
     const centerX = cursorX + width / 2;
-    const startY = -heights[index] / 2;
-    stackNodesVertically(col, centerX, startY, ROW_GAP);
-    cursorX += width + COLUMN_GAP;
+    let y = -heights[index] / 2;
+    const gaps = perColRowGaps[index];
+    col.forEach((n, i) => {{
+      n.x = centerX;
+      n.y = y + n.h / 2;
+      n.vx = 0;
+      n.vy = 0;
+      n.pinned = true;
+      y += n.h + (gaps[i] || 0);
+    }});
+    cursorX += width + (columnGaps[index] || 0);
   }});
 }}
 
@@ -1272,6 +1436,12 @@ function layoutGroupedBlocks(nodeList, edgeList) {{
     }});
   }});
 
+  // Adjacency set of inter-group arrows. Feed to layoutBlockRows / Columns
+  // so the gap between two connected lanes (or two connected blocks inside
+  // a lane) gets boosted — arrows need room for their label and for the
+  // Manhattan detour, otherwise they collide with block edges.
+  const blockAdj = buildBlockAdjacencySet(groupEdges);
+
   // If all ended up in one lane, use the old column-based fallback
   const nonEmptyLanes = lanes.filter(l => l.length > 0);
   if (nonEmptyLanes.length <= 1 && blocks.length > 1) {{
@@ -1282,9 +1452,9 @@ function layoutGroupedBlocks(nodeList, edgeList) {{
       columns[col].push(block);
     }});
     if (dir === 'horizontal') {{
-      layoutBlockColumns(columns);
+      layoutBlockColumns(columns, blockAdj);
     }} else {{
-      layoutBlockRows(columns);
+      layoutBlockRows(columns, blockAdj);
     }}
     computeBlockLayerBands(columns.filter(c => c.length > 0), dir);
     return;
@@ -1292,10 +1462,10 @@ function layoutGroupedBlocks(nodeList, edgeList) {{
 
   if (dir === 'horizontal') {{
     // Horizontal flow: topo depth = column (left to right)
-    layoutBlockColumns(nonEmptyLanes);
+    layoutBlockColumns(nonEmptyLanes, blockAdj);
   }} else {{
     // Vertical flow: topo depth = row (top to bottom)
-    layoutBlockRows(nonEmptyLanes);
+    layoutBlockRows(nonEmptyLanes, blockAdj);
   }}
   computeBlockLayerBands(nonEmptyLanes, dir);
 }}
@@ -1823,12 +1993,32 @@ function computeFitZoom(width, height, nodeList) {{
   const nodeB = graphBounds(nodeList);
   if (!nodeB) return 1;
   const vb = _lastDrawnVisualBounds;
+  // Cap how far the visual bounds (edge routing + labels) can extend beyond
+  // node bounds, otherwise a few long-detour edges dominate the zoom-to-fit
+  // calculation and force an unreadably low zoom. In flat view the layered
+  // layout compacts nodes tightly (~1k×3k world units) while some edges
+  // detour 3× further, and letting the router's extent drive fit zoom made
+  // the whole graph shrink to ~6% scale. A 25% margin per side on each axis
+  // is plenty to show edge waypoints and labels near each node; any edge
+  // that routes further than that is cropped at the viewport edge on first
+  // draw and pans back in on interaction.
+  const nodeSpanX = Math.max(nodeB.wx1 - nodeB.wx0, 1);
+  const nodeSpanY = Math.max(nodeB.wy1 - nodeB.wy0, 1);
+  const edgeMargin = 0.25;
+  const maxExtendX = nodeSpanX * edgeMargin;
+  const maxExtendY = nodeSpanY * edgeMargin;
   const bounds = vb ? {{
-    wx0: Math.min(vb.wx0, nodeB.wx0),
-    wy0: Math.min(vb.wy0, nodeB.wy0),
-    wx1: Math.max(vb.wx1, nodeB.wx1),
-    wy1: Math.max(vb.wy1, nodeB.wy1),
+    wx0: Math.max(vb.wx0, nodeB.wx0 - maxExtendX),
+    wy0: Math.max(vb.wy0, nodeB.wy0 - maxExtendY),
+    wx1: Math.min(vb.wx1, nodeB.wx1 + maxExtendX),
+    wy1: Math.min(vb.wy1, nodeB.wy1 + maxExtendY),
   }} : nodeB;
+  // Guard: Math.max/min combination above could invert bounds when vb is
+  // inside nodeB-expanded window; re-anchor to at least cover nodeB.
+  bounds.wx0 = Math.min(bounds.wx0, nodeB.wx0);
+  bounds.wy0 = Math.min(bounds.wy0, nodeB.wy0);
+  bounds.wx1 = Math.max(bounds.wx1, nodeB.wx1);
+  bounds.wy1 = Math.max(bounds.wy1, nodeB.wy1);
   const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
   const rawSpanX = Math.max(bounds.wx1 - bounds.wx0, 1);
   const rawSpanY = Math.max(bounds.wy1 - bounds.wy0, 1);
@@ -1857,18 +2047,22 @@ function computeFitZoom(width, height, nodeList) {{
   const pad = 24; // viewport inner padding (screen px)
   const zx = Math.max(0.01, (width - pad * 2) / spanX);
   const zy = Math.max(0.01, (height - pad * 2) / spanY);
-  // Axis-locked fit: in vertical flow the user scrolls vertically, so content
-  // must never overflow horizontally (fit width). In horizontal flow, fit
-  // height instead so content stays inside vertically.
-  const axisFit = dir === 'horizontal' ? zy : zx;
-  // Worst-case-zoom-out floor: clamped high enough that a GROUP_CHILD_MIN_H_WITH_BULLETS
-  // card (~240 world-px tall) renders at >= 60 screen-px at fit, which clears
-  // the "title + bullets" threshold in the isGroupChild branch so bullets
-  // remain visible on every card even when the full diagram doesn't fit the
-  // viewport. Trade-off: on very large repos the user pans instead of seeing
-  // the entire diagram at once.
-  const minZoomFloor = 0.25;
-  return Math.max(minZoomFloor, Math.min(axisFit, 2.5));
+  // Fit BOTH axes: take the min so neither width nor height overflows the
+  // viewport at the default zoom. Historically we axis-locked to the flow's
+  // primary axis (fit width in vertical flow, fit height in horizontal
+  // flow), which made the user scroll on the cross axis — acceptable for
+  // very large repos but surprising for medium graphs where the cross axis
+  // only slightly overflowed. Inter-group arrow spacing boosts now add real
+  // vertical/horizontal slack, so we must respect both dimensions.
+  const axisFit = Math.min(zx, zy);
+  // Zoom-to-fit policy: show the ENTIRE diagram in the viewport by default.
+  // The user's explicit requirement is that they must see the overall
+  // structure at a glance — not a single block filling the screen. Text
+  // legibility at this zoom is guaranteed by the LOD renderer, not by
+  // forcing a minimum zoom. NATURAL_CAP just prevents tiny graphs from
+  // being stretched beyond their authored card proportions.
+  const NATURAL_CAP = 1.0;
+  return Math.min(axisFit, NATURAL_CAP);
 }}
 
 function syncZoomScale(width, height) {{
@@ -2041,20 +2235,24 @@ function clampPan() {{
   const maxPanY = -(wy0 * zoom) + canvasH() * (1 - margin);
   pan.x = Math.max(minPanX, Math.min(maxPanX, pan.x));
   pan.y = Math.max(minPanY, Math.min(maxPanY, pan.y));
-  // When zoomed out to (or past) the axis-fit level, the perpendicular axis
-  // already fits entirely in the viewport — lock pan on that axis so the user
-  // can only scroll along the flow axis. Use the visual extent (nodes +
-  // routing + labels) when available so asymmetric edges are centered.
+  // Axis-lock ONLY when the perpendicular axis actually fits in the viewport.
+  // With the readability-first zoom policy the diagram often overflows both
+  // axes at the default zoom — in that case the user must be free to pan
+  // horizontally AND vertically, so we skip the lock.
   if (fitZoomLevel && zoom <= fitZoomLevel + 1e-3) {{
     const vb = _lastDrawnVisualBounds;
     const cx0 = vb ? Math.min(vb.wx0, wx0) : wx0;
     const cx1 = vb ? Math.max(vb.wx1, wx1) : wx1;
     const cy0 = vb ? Math.min(vb.wy0, wy0) : wy0;
     const cy1 = vb ? Math.max(vb.wy1, wy1) : wy1;
+    const spanXpx = (cx1 - cx0) * zoom;
+    const spanYpx = (cy1 - cy0) * zoom;
     const dir = (typeof resolvedFlowDirection === 'function') ? resolvedFlowDirection() : 'vertical';
-    if (dir === 'vertical') {{
+    // Vertical flow → lock X only if the diagram's total width fits.
+    // Horizontal flow → lock Y only if the diagram's total height fits.
+    if (dir === 'vertical' && spanXpx <= canvasW()) {{
       pan.x = (canvasW() - (cx0 + cx1) * zoom) / 2;
-    }} else {{
+    }} else if (dir === 'horizontal' && spanYpx <= canvasH()) {{
       pan.y = (canvasH() - (cy0 + cy1) * zoom) / 2;
     }}
   }}
@@ -2067,21 +2265,27 @@ function clampPan() {{
 const WHITESPACE_RE = new RegExp('\\\\s+', 'g');
 const JS_EXT_RE = new RegExp('\\\\.(py|js|ts)$');
 
-const NODE_W = 540, NODE_H_BASE = 160, NODE_R = 6;
-// Solo blocks (nodes that live outside any group container) get a bigger
-// minimum footprint so they read as first-class citizens next to the grouped
-// cards — and so their description has room without wrapping too tightly.
-const SOLO_NODE_W = 1404, SOLO_NODE_H = 432;
-// Taller nodes need more space — bump repulsion and spring length
-const REPULSION = 12000, SPRING_LEN = 280, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
+const NODE_W = 320, NODE_H_BASE = 160, NODE_R = 6;
+// Solo blocks (nodes that live outside any group container) get a slightly
+// bigger minimum footprint so they read as first-class citizens next to the
+// grouped cards — and so their description has room without wrapping too
+// tightly. Sized for the zoom-to-fit policy: cards must be compact enough
+// that the whole diagram fits the viewport by default.
+const SOLO_NODE_W = 480, SOLO_NODE_H = 220;
+// Taller nodes need more space — bump repulsion and spring length.
+// SPRING_LEN / REPULSION bumped again because open groups are now much
+// larger (wider cellW, taller min-H, plus 100 px side padding for detour
+// clearance). With the old values, group-to-group edges were squeezed down
+// to a tiny visible segment between two huge containers.
+const REPULSION = 22000, SPRING_LEN = 560, SPRING_K = 0.04, GRAVITY = 0.012, DAMPING = 0.85;
 
 // Fixed height sized to fit a short explanation under each node title.
-// Minimum for a group-child card that carries highlights — sized so that at
-// the clamped zoom-to-fit floor (~0.25, set in computeFitZoom) the screen
-// height is ~125 px, comfortably enough for the 'full' group-child mode
-// (13 px kind + 22 px title + 3×18 px bullet lines + padding) on every
-// shape including hexagons and diamonds that clip text near their edges.
-const GROUP_CHILD_MIN_H_WITH_BULLETS = 500;
+// Minimum for a group-child card that carries highlights. Under the new
+// zoom-to-fit policy we don't pad card height to survive extreme zoom-out —
+// at fit-to-viewport the LOD renderer prints title+bullets in SCREEN px
+// regardless of how small the world-space card becomes. Keep this minimum
+// modest so the flat layout doesn't explode vertically.
+const GROUP_CHILD_MIN_H_WITH_BULLETS = 220;
 
 function nodeHeight(n) {{
   if (n.isGroup) return NODE_H_BASE;
@@ -2867,7 +3071,7 @@ function draw() {{
   // child laid out between them. `obstacles` is an array of {{x, y, w, h}}
   // boxes (center-based, matching nodeBox); source and target must be
   // excluded by the caller.
-  function drawAvoidantArrow(x1, y1, x2, y2, obstacles, color, lw, arrowSize) {{
+  function drawAvoidantArrow(x1, y1, x2, y2, obstacles, color, lw, arrowSize, bounds) {{
     const hitStraight = () => {{
       for (const ob of obstacles) {{
         if (lineHitsRect(x1, y1, x2, y2, ob.x, ob.y, ob.w, ob.h, 4)) return true;
@@ -2876,7 +3080,7 @@ function draw() {{
     }};
     if (!obstacles || obstacles.length === 0 || !hitStraight()) {{
       drawArrow(x1, y1, x2, y2, color, lw, arrowSize);
-      return;
+      return [{{x: x1, y: y1}}, {{x: x2, y: y2}}];
     }}
     // Build a 3-segment Manhattan path. Choose to detour above or below
     // (horizontal-dominant) or left/right (vertical-dominant) based on
@@ -2919,6 +3123,20 @@ function draw() {{
       const right = [{{x:x1, y:y1}}, {{x:xRight, y:y1}}, {{x:xRight, y:y2}}, {{x:x2, y:y2}}];
       waypoints = segsOk(left) ? left : (segsOk(right) ? right : left);
     }}
+    // Keep the detour inside the caller-provided bounds (the open-group
+    // container for intra-group edges). Without this, a tall column with
+    // big children forces the Manhattan elbow wider than the container
+    // and the arrow visibly leaves its group frame, which reads as
+    // "arrow escaping the viewport" especially when the diagram fills
+    // the viewport at zoom-to-fit.
+    if (bounds) {{
+      for (const p of waypoints) {{
+        if (p.x < bounds.xMin) p.x = bounds.xMin;
+        else if (p.x > bounds.xMax) p.x = bounds.xMax;
+        if (p.y < bounds.yMin) p.y = bounds.yMin;
+        else if (p.y > bounds.yMax) p.y = bounds.yMax;
+      }}
+    }}
     // Shorten the last segment so the line stops at the arrowhead base.
     const last = waypoints[waypoints.length - 1];
     const prev = waypoints[waypoints.length - 2];
@@ -2942,6 +3160,7 @@ function draw() {{
     ctx.lineWidth = lw;
     ctx.stroke();
     drawArrowHead(prev.x, prev.y, last.x, last.y, color, arrowSize);
+    return waypoints;
   }}
 
   // Deterministic hash → consistent lane index per edge pair
@@ -4245,9 +4464,15 @@ function draw() {{
       ctx.fill();
     }}
 
-    // LOD: skip text if card is too small on screen
+    // LOD: skip text if card is too small on screen.
+    // We render at two tiers:
+    //   - multi-line (title + up to 3 bullets) when the card is tall
+    //     enough (~64 screen-px).
+    //   - single-line title with a font that adapts to card height. We
+    //     allow shrinking down to 10px so titles stay readable even at
+    //     the worst-case zoom-to-fit (nh*zoom ≈ 18–22 px).
     if (nw * zoom < 75 || nh * zoom < 36) {{
-      if (nw * zoom >= 36 && nh * zoom >= 22) {{
+      if (nw * zoom >= 36 && nh * zoom >= 14) {{
         ctx.save();
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         // White text at every tier — bullets and titles alike. Muted grey
@@ -4281,7 +4506,11 @@ function draw() {{
             by += 15;
           }}
         }} else {{
-          ctx.font = 'bold 14px -apple-system, sans-serif';
+          // Scale font to card height so short cards still show titles.
+          // Clamp between 9px (still legible) and 14px (default). Coefficient
+          // 0.55 keeps a little breathing room under the title.
+          const titleFontPx = Math.max(9, Math.min(14, Math.floor(lodSh * 0.55)));
+          ctx.font = 'bold ' + titleFontPx + 'px -apple-system, sans-serif';
           ctx.textBaseline = 'middle';
           const lodText = truncateToFit(ctx, nodeTitleText(n), lodMaxW);
           ctx.fillText(lodText, lodSx, lodSy);
@@ -4414,28 +4643,56 @@ function draw() {{
       }}
 
       // Draw bullets — the whole point of this skill. White fill for high
-      // contrast. Inset horizontally by ~12% on each side so text stays
-      // inside the "safe center zone" for non-rectangular shapes (hexagon,
-      // diamond, parallelogram) where slanted edges clip text drawn near
-      // the left/right boundary. For rectangles this is still fine — just
-      // slightly more inner padding.
+      // contrast. Bullet max-width is computed per-row from the card's SHAPE
+      // so diamonds (decision kind) that taper severely at top/bottom no
+      // longer clip the 2nd/3rd bullet, and hexagons that slant moderately
+      // get a tighter inset than rectangles. The "safe" width at a vertical
+      // offset dy from the card center is shape-specific:
+      //   process / external / test (rect): full width (tiny visual inset)
+      //   decision (diamond): cardW * (1 - 2|dy|/cardH)
+      //   entry (home-plate hex): full width in the central 70% band, then
+      //                           linearly taper to ~40% at the tip
+      //   analysis / data (parallelogram): slant-compensated inset
+      function shapeSafeWidth(shape, dy, cardW, cardH) {{
+        const h = Math.max(1, cardH);
+        const absDy = Math.abs(dy);
+        if (shape === 'decision') {{
+          // Diamond: linear taper from center to tip
+          const frac = 1 - (2 * absDy) / h;
+          return Math.max(0, cardW * frac);
+        }}
+        if (shape === 'entry') {{
+          // home-plate: full width in middle 60%, taper in the outer 20% each side
+          const flatBand = h * 0.3;
+          if (absDy <= flatBand) return cardW;
+          const taperFrac = 1 - ((absDy - flatBand) / (h / 2 - flatBand)) * 0.55;
+          return Math.max(0, cardW * taperFrac);
+        }}
+        if (shape === 'analysis' || shape === 'data') {{
+          // Parallelogram: ~12% slant inset constant regardless of dy
+          return cardW * 0.76;
+        }}
+        // rect-like shapes: full width with a tiny visual inset
+        return cardW * 0.94;
+      }}
       if (bulletN > 0) {{
         ctx.font = `${{cfg.bullet}}px -apple-system, sans-serif`;
         ctx.fillStyle = textColor;
         ctx.textBaseline = 'top';
         ctx.textAlign = 'left';
-        const shapeInset = Math.max(10, screenW * 0.12);
-        const bulletX = screenX - screenW / 2 + shapeInset;
-        const bulletMaxW = screenW - shapeInset * 2;
         const bulletsStartY = blockTop + titleH + gap;
         for (let i = 0; i < bulletN; i++) {{
           const by = bulletsStartY + i * cfg.bulletLH;
-          // Lenient bottom check: allow a bullet whose top sits inside the
-          // card area even if a few pixels of its baseline would nominally
-          // extend past areaBot. The ctx.clip() handles any real overflow
-          // and partial visibility still communicates the fact.
           if (by > areaBot) break;
-          ctx.fillText(truncateToFit(ctx, '\u2022 ' + childHighlights[i], bulletMaxW), bulletX, by);
+          // Shape-aware per-row width: each bullet is sized against the
+          // shape's horizontal extent at its own y, so diamonds shrink
+          // the lower bullets rather than clipping them.
+          const rowCenterY = by + cfg.bulletLH / 2;
+          const dyFromCenter = rowCenterY - screenY;
+          const safeW = shapeSafeWidth(nodeShape, dyFromCenter, screenW, screenH);
+          const rowMaxW = Math.max(20, safeW - 12); // minus a small padding
+          const bulletX = screenX - rowMaxW / 2;
+          ctx.fillText(truncateToFit(ctx, '\u2022 ' + childHighlights[i], rowMaxW), bulletX, by);
         }}
       }}
       ctx.restore();
@@ -4610,11 +4867,25 @@ function draw() {{
       // Sibling boxes act as obstacles for any intra-group edge: children of
       // the same open group are laid out in a grid, and a straight line from
       // child_A to a diagonally-placed child_B can clip sibling cells in
-      // between. drawAvoidantArrow detours around them.
+      // between. drawAvoidantArrow detours around them, clamped to the
+      // container rectangle so the arrow never escapes its own group frame.
       const siblingBoxes = layout.items.map(it => ({{
         x: it.cx, y: it.cy,
         w: (it.node.w || NODE_W), h: (it.node.h || NODE_H_BASE),
       }}));
+      const gTopBound    = g.y - g.h / 2;
+      const gLeftBound   = g.x - layout.openW / 2;
+      const gRightBound  = g.x + layout.openW / 2;
+      const gBottomBound = gTopBound + layout.openH;
+      // Shrink by a small margin so the arrow stays visibly INSIDE the
+      // container border, not on top of it.
+      const CONTAINER_MARGIN = 12;
+      const edgeBounds = {{
+        xMin: gLeftBound + CONTAINER_MARGIN,
+        xMax: gRightBound - CONTAINER_MARGIN,
+        yMin: gTopBound + OPEN_GROUP_HEADER + CONTAINER_MARGIN,
+        yMax: gBottomBound - CONTAINER_MARGIN,
+      }};
       for (const e of iEdges) {{
         const sid = e._srcId || e.source.id, tid = e._tgtId || e.target.id;
         const sp = posMap[sid], ep = posMap[tid];
@@ -4628,32 +4899,61 @@ function draw() {{
         // this keeps arrow highlight and node highlight in visual sync.
         const touches = hasFocus && focusChildIds.has(sid) && focusChildIds.has(tid);
         const alpha   = hasFocus ? (touches ? 0.95 : 0.1) : 0.7;
-        const lw      = (touches || groupIsSelected ? 2.5 : 1.5) / zoom;
-        const aSize   = (touches || groupIsSelected ? 13 : 10) / zoom;
+        // Arrow weights bumped so they're visible next to the larger bullet
+        // fonts. Was 1.5/2.5 lw + 10/13 aSize; now ~60% larger.
+        const lw      = (touches || groupIsSelected ? 4 : 2.5) / zoom;
+        const aSize   = (touches || groupIsSelected ? 20 : 16) / zoom;
 
         ctx.globalAlpha = alpha;
         const obs = siblingBoxes.filter(b => b.x !== sp.cx || b.y !== sp.cy)
                                 .filter(b => b.x !== ep.cx || b.y !== ep.cy);
-        drawAvoidantArrow(start.x, start.y, end.x, end.y, obs, gc, lw, aSize);
+        const pathWps = drawAvoidantArrow(start.x, start.y, end.x, end.y, obs, gc, lw, aSize, edgeBounds);
 
-        // Arrow label badge — drawn in screen space at the arrow midpoint.
-        // Always shown regardless of zoom (OPEN_GROUP_GAP is sized to guarantee
-        // the badge fits between cells at minimum zoom).
+        // Arrow label badge — drawn in screen space on the arrow shaft.
+        // For a straight (2-point) arrow, anchor the label at the midpoint
+        // of the SHORTENED line (i.e., excluding the arrowhead zone at the
+        // target end), so the badge sits clearly on the shaft and doesn't
+        // kiss the arrowhead. For a detoured Manhattan path, anchor on the
+        // midpoint of the longest middle segment, which is guaranteed to be
+        // outside sibling boxes thanks to drawAvoidantArrow's GAP.
         const labelText = (e.label || e.type || '').toLowerCase();
         if (labelText && alpha > 0.15) {{
-          const mx = (start.x + end.x) / 2;
-          const my = (start.y + end.y) / 2;
+          let mx, my;
+          if (Array.isArray(pathWps) && pathWps.length > 2) {{
+            // Multi-segment path — pick midpoint of longest segment.
+            let bestLen = -1;
+            for (let i = 0; i < pathWps.length - 1; i++) {{
+              const a = pathWps[i], b = pathWps[i + 1];
+              const d = Math.hypot(b.x - a.x, b.y - a.y);
+              if (d > bestLen) {{
+                bestLen = d;
+                mx = (a.x + b.x) / 2;
+                my = (a.y + b.y) / 2;
+              }}
+            }}
+          }} else {{
+            // Straight arrow — pull back from the tip by the arrowhead's
+            // length before midpointing, so the label sits centered on the
+            // shaft rather than drifting toward the arrowhead.
+            const ang = Math.atan2(end.y - start.y, end.x - start.x);
+            const shaftEndX = end.x - Math.cos(ang) * aSize * 1.1;
+            const shaftEndY = end.y - Math.sin(ang) * aSize * 1.1;
+            mx = (start.x + shaftEndX) / 2;
+            my = (start.y + shaftEndY) / 2;
+          }}
           ctx.save();
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
           const lsx = mx * zoom + pan.x;
           const lsy = my * zoom + pan.y;
           ctx.globalAlpha = alpha * 0.92;
-          ctx.font = 'bold 11px -apple-system, sans-serif';
+          // Bigger, bolder label to match the 15 px bullet font on cards.
+          ctx.font = 'bold 14px -apple-system, sans-serif';
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          const tw = ctx.measureText(labelText).width + 10;
-          ctx.fillStyle = '#0d1117dd';
-          roundRect(ctx, lsx - tw / 2, lsy - 9, tw, 18, 4);
+          const tw = ctx.measureText(labelText).width + 14;
+          const th = 22;
+          ctx.fillStyle = '#0d1117ee';
+          roundRect(ctx, lsx - tw / 2, lsy - th / 2, tw, th, 5);
           ctx.fill();
           ctx.fillStyle = gc + 'ee';
           ctx.fillText(labelText, lsx, lsy);
@@ -4710,6 +5010,16 @@ function roundRect(ctx, x, y, w, h, r) {{
 // ── Pan & zoom ───────────────────────────────────────────────────────────────
 
 let pan = {{ x: 0, y: 0 }}, zoom = 1;
+// Read-only diagnostic hook (used by automated QA / Playwright tests).
+// Exposed on window because `let` declarations don't leak to the global object.
+window.__qaState = () => ({{
+  zoom,
+  pan: {{ x: pan.x, y: pan.y }},
+  fitZoomLevel: (typeof fitZoomLevel !== 'undefined') ? fitZoomLevel : null,
+  groupingState: (typeof groupingState !== 'undefined') ? groupingState : null,
+  flowDirection: (typeof flowDirection !== 'undefined') ? flowDirection : null,
+  visualBounds: (typeof _lastDrawnVisualBounds !== 'undefined') ? _lastDrawnVisualBounds : null,
+}});
 let dragging = false, dragStart = null, panStart = null, dragNode = null;
 let clickTimer = null, pendingClickNode = null;
 const DOUBLE_CLICK_DELAY = 220;
@@ -6477,7 +6787,21 @@ if (minimap) {{ minimap.width = 160; minimap.height = 100; }}
         // isSingletonGroup branch in draw()), so use standard node
         // dimensions. We still inherit the child's shape so the block
         // looks semantically the same as the file it wraps.
-        g.w = SOLO_NODE_W;
+        // Singleton group-box sized for the zoom-to-fit policy. We size the
+        // world-space card to the longest label at a reference screen size
+        // (~SOLO_REF_ZOOM). SOLO_REF_ZOOM is set to a typical grouped-view
+        // zoom (~0.2) so titles are wide enough at fit-zoom without the
+        // block being grotesquely oversized when the user zooms in.
+        const SOLO_REF_ZOOM = 0.2;
+        const SOLO_CHAR_PX = 8.5;
+        const SOLO_CHROME_PX = 24;
+        const labelLen = (g.label || g.id || '').length;
+        const titleScreenW = labelLen * SOLO_CHAR_PX + SOLO_CHROME_PX;
+        const titleDrivenW = Math.ceil(titleScreenW / SOLO_REF_ZOOM);
+        g.w = Math.min(
+          Math.max(SOLO_NODE_W, titleDrivenW),
+          Math.ceil(SOLO_NODE_W * 1.5)
+        );
         g.h = SOLO_NODE_H;
         g._closedW = g.w;
         g._closedH = g.h;
@@ -6554,16 +6878,31 @@ _MATRIX_TEMPLATE = """\
 """
 
 
-def render(graph: Graph, output_path: Path | None = None) -> str:
+def render(
+    graph: Graph,
+    output_path: Path | None = None,
+    renderer: str = "elk",
+) -> str:
     """Render a graph as a self-contained interactive HTML string.
 
     Args:
         graph: The graph to render.
         output_path: If provided, write the HTML to this path.
+        renderer: Which renderer to use. "elk" (default) uses the new SVG/ELK
+            pipeline in :mod:`prefxplain.rendering`. "legacy" keeps the
+            existing Canvas/force-directed code path.
 
     Returns:
         The HTML string.
     """
+    if renderer == "elk":
+        from .rendering import render_elk
+
+        return render_elk(graph, output_path=output_path)
+    if renderer != "legacy":
+        raise ValueError(
+            f"Unknown renderer {renderer!r}; expected 'elk' or 'legacy'."
+        )
     meta = graph.metadata
     repo = meta.repo if meta else "repo"
     total_files = meta.total_files if meta else len(graph.nodes)

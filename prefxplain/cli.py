@@ -216,6 +216,12 @@ def create(
              "Empty = reuse prior run's level (or 'newbie' on first run). "
              "Changing level re-describes everything in the new voice.",
     ),
+    renderer_choice: str = typer.Option(
+        "elk",
+        "--renderer",
+        help="HTML renderer: 'elk' (new SVG pipeline, default) or 'legacy' "
+             "(old Canvas force-directed, kept during the transition).",
+    ),
 ) -> None:
     """Analyze a codebase and generate an interactive HTML dependency graph."""
     _run(
@@ -235,6 +241,7 @@ def create(
         depth=depth,
         check_cycles=check_cycles,
         level=level,
+        renderer_choice=renderer_choice,
     )
 
 
@@ -289,6 +296,12 @@ def update(
         "-l",
         help="Audience level: newbie, middle, strong, expert. Empty = reuse prior run's level.",
     ),
+    renderer_choice: str = typer.Option(
+        "elk",
+        "--renderer",
+        help="HTML renderer: 'elk' (new SVG pipeline, default) or 'legacy' "
+             "(old Canvas force-directed, kept during the transition).",
+    ),
 ) -> None:
     """Re-analyze the codebase. Same as `create` but defaults to not opening the browser.
 
@@ -312,6 +325,7 @@ def update(
         depth=None,
         check_cycles=False,
         level=level,
+        renderer_choice=renderer_choice,
     )
 
 
@@ -762,6 +776,7 @@ def _run(
     depth: Optional[int],
     check_cycles: bool,
     level: str = "",
+    renderer_choice: str = "elk",
 ) -> None:
     """Shared implementation for create and update commands.
 
@@ -963,7 +978,7 @@ def _run(
         dot_str = export_dot(graph)
         output_path.write_text(dot_str, encoding="utf-8")
     else:
-        render(graph, output_path=output_path)
+        render(graph, output_path=output_path, renderer=renderer_choice)
 
     console.print(f"    [green]\u2713[/green] Written to [cyan]{output_path}[/cyan]")
 

@@ -212,7 +212,10 @@ class TestRolesInRenderer:
             edges=[Edge(source="main.py", target="utils.py")],
             metadata=GraphMetadata(repo="test", generated_at="2026-01-01", total_files=2, languages=["python"]),
         )
-        html = render(g)
+        # These assertions are tied to the legacy Canvas renderer which
+        # embeds ROLE_COLORS as a JS constant. The ELK renderer uses CSS
+        # tokens on cards instead, so pin this check to the legacy path.
+        html = render(g, renderer="legacy")
         assert "ROLE_COLORS" in html
         assert "entry_point" in html
 
@@ -228,7 +231,9 @@ class TestRolesInRenderer:
             ],
             metadata=GraphMetadata(repo="test", generated_at="2026-01-01", total_files=2, languages=["python"]),
         )
-        html = render(g)
+        # Legacy-only: the ELK renderer doesn't embed CYCLE_NODES / METRICS
+        # as JS globals; cycles surface through edge state in the SVG.
+        html = render(g, renderer="legacy")
         assert "CYCLE_NODES" in html
         assert "CYCLE_EDGES" in html
         assert "METRICS" in html

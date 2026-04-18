@@ -655,3 +655,23 @@ Don't preempt -- wait for the user to ask.
   visually -- the text report is a summary for people reading along in chat
 - A background HTTP server runs after the command for IDE preview. It consumes zero
   CPU at rest but holds a port open. Kill it with `kill $(cat /tmp/prefxplain.pid)`.
+
+### View modes
+
+The new default renderer is **ELK-based** (SVG, layered top→bottom, orthogonal
+edge routing). It ships two user-selectable views via the switcher in the top bar:
+
+- **Group map** (default): one hero card per architectural group. Inter-group
+  arrows are aggregated with a `Nx imports` label. Best for the 30-second
+  "what does this codebase do" view.
+- **Nested**: groups become containers and files appear inside as mini-dashboard
+  cards (role glyph + name + size dots + 2 highlights + IN/OUT fan bars).
+  File-level arrows are routed orthogonally; fan-in hubs like a SPOF get a
+  visual bus trunk rather than a 15-arrow comb.
+
+Keyboard: `/` focuses the filter, `Escape` deselects, double-click on a file
+card opens a 3-column Flow modal (importers → file → dependencies).
+
+If you need the older Canvas-based layout for any reason (e.g. parity with
+pre-redesign screenshots), pass `--renderer=legacy`. The old path is kept for
+a transition period and will be removed in a follow-up PR.

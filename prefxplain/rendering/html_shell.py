@@ -1,0 +1,159 @@
+"""Build the self-contained HTML shell for the ELK renderer.
+
+Phase 1: minimal scaffold that loads elkjs + a sanity-check JS module. Graph
+data is embedded as JSON on `window.__PREFXPLAIN_GRAPH__` so later phases can
+consume it without reparsing the DOM.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from ..graph import Graph
+from .assets import app_modules, vendor_elk, vendor_elk_worker
+
+
+_APP_MODULES = [
+    "tokens.js",
+    "graph-utils.js",
+    "ir.js",
+    "layout.js",
+    "post.js",
+    "components/edge.js",
+    "components/card-hero.js",
+    "components/card-file.js",
+    "components/group-container.js",
+    "views/group-map.js",
+    "views/nested.js",
+    "ui/view-switcher.js",
+    "ui/top-panel.js",
+    "ui/sidebar.js",
+    "ui/flow-modal.js",
+    "ui/legend.js",
+    "main.js",
+]
+
+
+def build_html(graph: Graph) -> str:
+    """Return the full HTML document as a string."""
+    repo = graph.metadata.repo if graph.metadata else "repo"
+    payload = _serialize_graph(graph)
+    payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+
+    elk_js = vendor_elk()
+    elk_worker_js = vendor_elk_worker()
+    app_js = app_modules(_APP_MODULES)
+
+    return _TEMPLATE.format(
+        repo=_escape_attr(repo),
+        payload_json=payload_json,
+        elk_js=elk_js,
+        elk_worker_js=elk_worker_js,
+        app_js=app_js,
+    )
+
+
+def _serialize_graph(graph: Graph) -> dict[str, Any]:
+    """Serialize the graph into a JSON-friendly dict consumed by the JS side."""
+    meta = graph.metadata
+    group_descs: dict[str, str] = (
+        dict(getattr(meta, "groups", {}) or {}) if meta else {}
+    )
+    group_highlights: dict[str, list[str]] = (
+        dict(getattr(meta, "group_highlights", {}) or {}) if meta else {}
+    )
+    # Merge into the shape the JS renderer expects: { name: { desc, highlights } }.
+    meta_groups: dict[str, dict[str, Any]] = {}
+    for name in set(group_descs) | set(group_highlights):
+        meta_groups[name] = {
+            "desc": group_descs.get(name, ""),
+            "highlights": list(group_highlights.get(name, []) or []),
+        }
+    return {
+        "repo": meta.repo if meta else "repo",
+        "version": getattr(meta, "version", None) if meta else None,
+        "total_files": meta.total_files if meta else len(graph.nodes),
+        "languages": list(getattr(meta, "languages", []) or []) if meta else [],
+        "summary": getattr(meta, "summary", "") if meta else "",
+        "health_score": getattr(meta, "health_score", None) if meta else None,
+        "health_notes": getattr(meta, "health_notes", "") if meta else "",
+        "metaGroups": meta_groups,
+        "nodes": [
+            {
+                "id": n.id,
+                "label": n.label,
+                "short": getattr(n, "short_title", None) or n.label,
+                "description": n.description or "",
+                "role": getattr(n, "role", None) or "undefined",
+                "group": getattr(n, "group", None) or "",
+                "language": getattr(n, "language", None) or "",
+                "size": getattr(n, "size", 0) or 0,
+                "highlights": list(getattr(n, "highlights", []) or []),
+            }
+            for n in graph.nodes
+        ],
+        "edges": [
+            {
+                "source": e.source,
+                "target": e.target,
+                "type": getattr(e, "type", None) or "import",
+            }
+            for e in graph.edges
+        ],
+    }
+
+
+def _escape_attr(s: str) -> str:
+    return (
+        s.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PrefXplain \u2014 {repo}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  html, body {{ margin: 0; padding: 0; height: 100%; background: #0d1117; color: #c9d1d9;
+    font-family: 'Inter', system-ui, sans-serif; overflow: hidden; }}
+  * {{ box-sizing: border-box; }}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script id="prefxplain-graph" type="application/json">{payload_json}</script>
+<script>
+  try {{
+    window.__PREFXPLAIN_GRAPH__ = JSON.parse(document.getElementById('prefxplain-graph').textContent);
+  }} catch (e) {{
+    console.error('[prefxplain] failed to parse embedded graph JSON', e);
+    window.__PREFXPLAIN_GRAPH__ = null;
+  }}
+</script>
+
+<script>
+{elk_js}
+</script>
+
+<!-- Inline worker source: turned into a Blob URL at runtime by layout.js
+     when nodeCount > WORKER_THRESHOLD, so layout never blocks the UI. -->
+<script id="elk-worker-source" type="text/plain">
+{elk_worker_js}
+</script>
+
+<script>
+{app_js}
+</script>
+</body>
+</html>
+"""

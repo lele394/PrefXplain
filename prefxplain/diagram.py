@@ -243,7 +243,7 @@ def build_semantic_diagram(graph: Graph) -> SemanticDiagram:
         shape = KIND_TO_SHAPE[kind]
         summary = summarize_group(graph, source_kind, group_key, label, child_nodes, pagerank)
         group_id = f"semantic:{source_kind}:{slugify(group_key or label)}:{index}"
-        detail = build_group_detail(graph, child_nodes, label)
+        detail = build_group_detail(graph, child_nodes, label, pagerank)
         group_highlights_map = getattr(graph.metadata, "group_highlights", {}) or {}
         group_highlights = list(group_highlights_map.get(label) or group_highlights_map.get(group_key) or [])
         semantic_node = SemanticDiagramNode(
@@ -740,11 +740,15 @@ def infer_edge_label(source: Node, target: Node) -> tuple[str, str]:
     return "depends_on", "depends on"
 
 
-def build_group_detail(graph: Graph, child_nodes: list[Node], label: str) -> dict | None:
+def build_group_detail(
+    graph: Graph,
+    child_nodes: list[Node],
+    label: str,
+    pagerank: dict[str, float],
+) -> dict | None:
     if not child_nodes:
         return None
 
-    pagerank = graph.pagerank() if graph.nodes else {}
     ranked = sorted(child_nodes, key=lambda node: node_score(node, pagerank), reverse=True)
     featured = ranked[:MAX_DETAIL_MEMBERS]
     featured_ids = {node.id for node in featured}

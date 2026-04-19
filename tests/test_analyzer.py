@@ -297,6 +297,17 @@ class TestPythonRelativeImports:
         edges = {(e.source, e.target) for e in graph.edges}
         assert ("mypkg/main.py", "mypkg/utils.py") in edges
 
+    def test_from_dot_import_module_resolves(self, tmp_path: Path) -> None:
+        """`from . import utils` should not collapse into a self-loop on __init__.py."""
+        pkg = tmp_path / "mypkg"
+        pkg.mkdir()
+        (pkg / "__init__.py").write_text("from . import utils\n")
+        (pkg / "utils.py").write_text("def helper(): pass\n")
+        graph = analyze(tmp_path)
+        edges = {(e.source, e.target) for e in graph.edges}
+        assert ("mypkg/__init__.py", "mypkg/utils.py") in edges
+        assert ("mypkg/__init__.py", "mypkg/__init__.py") not in edges
+
     def test_from_double_dot_resolves(self, tmp_path: Path) -> None:
         """`from ..foo import bar` resolves up one level."""
         pkg = tmp_path / "mypkg"

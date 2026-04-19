@@ -44,6 +44,15 @@ app = typer.Typer(
 console = Console()
 
 
+def _print_codex_project_note() -> None:
+    console.print(
+        "[yellow]Codex detected, but its setup is project-local.[/yellow]"
+    )
+    console.print(
+        "Run [bold]prefxplain setup codex[/bold] inside each repo you want to map."
+    )
+
+
 def _in_ide() -> bool:
     """Detect if we're running inside VS Code or JetBrains terminal."""
     return bool(
@@ -506,7 +515,8 @@ def setup_cmd(
         detected.append("claude-code")
     if (home / ".cursor").is_dir() or shutil.which("cursor"):
         detected.append("cursor")
-    if shutil.which("codex"):
+    codex_available = bool(shutil.which("codex"))
+    if codex_available and project:
         detected.append("codex")
     if shutil.which("copilot"):
         detected.append("copilot")
@@ -521,6 +531,14 @@ def setup_cmd(
 
     targets = [tool] if tool else detected
     if not targets:
+        if not tool and not project and codex_available:
+            if installed:
+                console.print("[bold green]Setup complete![/bold green]")
+                for item in installed:
+                    console.print(f"  [green]\u2713[/green] {item}")
+                console.print()
+            _print_codex_project_note()
+            return
         if installed:
             console.print("[bold green]Setup complete![/bold green]")
             for item in installed:
@@ -572,7 +590,8 @@ def setup_cmd(
             installed.append(f"Cursor ({scope}): {dest}")
 
         elif t == "codex":
-            # Codex uses AGENTS.md for project instructions
+            # Codex uses AGENTS.md for project instructions. There is no global
+            # install target, so explicit setup always writes to the current repo.
             dest = Path.cwd() / "AGENTS.md"
             section = (
                 "\n\n## /prefxplain\n\n"
@@ -583,12 +602,12 @@ def setup_cmd(
                 existing = dest.read_text(encoding="utf-8")
                 if "prefxplain" not in existing:
                     dest.write_text(existing + section, encoding="utf-8")
-                    installed.append(f"Codex (appended to {dest})")
+                    installed.append(f"Codex (project): appended to {dest}")
                 else:
-                    installed.append(f"Codex: already configured in {dest}")
+                    installed.append(f"Codex (project): already configured in {dest}")
             else:
                 dest.write_text(f"# Agent Instructions{section}", encoding="utf-8")
-                installed.append(f"Codex: created {dest}")
+                installed.append(f"Codex (project): created {dest}")
 
         elif t == "copilot":
             if not copilot_plugin_manifest.exists():
@@ -705,6 +724,9 @@ def setup_cmd(
         for item in installed:
             console.print(f"  [green]\u2713[/green] {item}")
         console.print()
+        if not tool and not project and codex_available:
+            _print_codex_project_note()
+            console.print()
         console.print("Now type [bold]/prefxplain[/bold] in your AI tool to generate a codebase map.")
     else:
         console.print("[yellow]Nothing to install.[/yellow]")

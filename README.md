@@ -72,13 +72,14 @@ curl -fsSL https://raw.githubusercontent.com/PrefOptimize/PrefXplain/main/instal
 That's it. The installer clones PrefXplain to `~/.prefxplain`, builds an
 isolated Python venv, drops a `prefxplain` command on your PATH,
 registers the `/prefxplain` slash command for every AI tool it detects
-(Claude Code, Codex, Cursor/Windsurf, Copilot CLI, Gemini CLI), and
+(Claude Code, Cursor/Windsurf, Copilot CLI, Gemini CLI), and
 auto-installs the bundled preview extension into every VS Code fork it
 finds (VS Code, Cursor, Windsurf, Antigravity, Trae, Void, VSCodium,
 Positron, …). The preview extension is bundled with the Python package,
 so `pipx` / `uv tool` installs can install it too; `npm` is only needed
 if you want to rebuild the extension from source. Re-run the same command
-to upgrade — it's idempotent.
+to upgrade — it's idempotent. Codex is project-local, so run
+`prefxplain setup codex` inside each repo you want to use it in.
 
 > **Inside your AI coding tool?** Paste the line above into Claude Code /
 > Codex / Copilot / Gemini and the agent runs it for you.
@@ -150,7 +151,7 @@ prefxplain setup copilot   # installs a global Copilot CLI plugin
 prefxplain setup gemini    # installs an Agent Skill in ~/.gemini/skills/prefxplain/
 prefxplain setup claude-code
 prefxplain setup cursor
-prefxplain setup codex
+prefxplain setup codex     # installs into the current repo's AGENTS.md
 ```
 
 Each variant installs the same `/prefxplain` slash command — plus a

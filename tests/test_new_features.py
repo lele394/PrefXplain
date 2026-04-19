@@ -342,3 +342,15 @@ class TestGraphMetrics:
         )
         pr = g.pagerank()
         assert pr["c.py"] > pr["a.py"]  # c is most linked to
+
+    def test_pagerank_preserves_probability_mass_with_sink_nodes(self) -> None:
+        g = Graph(
+            nodes=[
+                Node(id="a.py", label="a.py"),
+                Node(id="b.py", label="b.py"),
+            ],
+            edges=[Edge(source="a.py", target="b.py")],
+        )
+        pr = g.pagerank(iterations=20)
+        assert sum(pr.values()) == pytest.approx(1.0, rel=1e-6)
+        assert pr["b.py"] > pr["a.py"]

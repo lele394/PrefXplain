@@ -161,6 +161,50 @@ class TestSetupCommand:
         assert "Preview extension (VS Code): prefxplain-vscode-0.1.0.vsix" in result.output
         assert "No AI coding tools detected, so /prefxplain was not registered yet." in result.output
 
+    def test_setup_autodetect_skips_codex_and_prints_project_note(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        cmd_dir = package_root / "commands"
+        cmd_dir.mkdir(parents=True)
+        (cmd_dir / "prefxplain.md").write_text("prefxplain", encoding="utf-8")
+
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil,
+            "which",
+            lambda name: "/usr/bin/codex" if name == "codex" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0, result.output
+        assert "Codex detected, but its setup is project-local." in result.output
+        assert not (tmp_path / "AGENTS.md").exists()
+
+    def test_setup_codex_installs_into_current_project(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+
+        monkeypatch.chdir(project_dir)
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(
+            cli_mod.shutil,
+            "which",
+            lambda name: "/usr/bin/codex" if name == "codex" else None,
+        )
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+
+        result = runner.invoke(app, ["setup", "codex"])
+        assert result.exit_code == 0, result.output
+        assert "Codex (project):" in result.output
+        dest = project_dir / "AGENTS.md"
+        assert dest.exists()
+        assert "run `prefxplain .` to generate an interactive HTML dependency graph." in dest.read_text()
+
     def test_setup_copilot_installs_plugin(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         package_root = tmp_path / "prefxplain"
         plugin_dir = package_root / "copilot_plugin"

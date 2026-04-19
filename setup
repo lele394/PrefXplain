@@ -6,7 +6,9 @@
 #   2. Installs prefxplain (editable) + runtime deps into that venv.
 #   3. Drops a shell wrapper in ~/.local/bin so `prefxplain` works globally.
 #   4. Calls `prefxplain setup` to register /prefxplain with every detected
-#      AI coding tool (Claude Code / Cursor / Codex / Copilot / Gemini)
+#      AI coding tool (Claude Code / Cursor / Copilot / Gemini).
+#      Codex is project-local, so it is installed per repo via
+#      `prefxplain setup codex`.
 #      AND auto-install the VS Code / Cursor / Windsurf preview extension.
 
 set -euo pipefail
@@ -104,6 +106,10 @@ fi
 echo
 echo "${BOLD}Registering /prefxplain…${NC}"
 "$VENV/bin/prefxplain" setup
+
+if command -v codex >/dev/null 2>&1; then
+  echo "${DIM}Codex note: run 'prefxplain setup codex' inside each repo you want to map.${NC}"
+fi
 
 echo
 echo "${BOLD}${GREEN}Done.${NC}"

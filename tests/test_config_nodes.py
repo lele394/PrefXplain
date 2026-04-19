@@ -8,15 +8,12 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from prefxplain.analyzer import (
+    ALLOWED_DOTDIRS,
+    SKIP_DIRS,
     _collect_files,
     _git_changed_files,
     _is_config_file,
-    ALLOWED_DOTDIRS,
-    CONFIG_NODE_BASENAMES,
-    SKIP_DIRS,
     analyze,
 )
 
@@ -161,6 +158,33 @@ class TestIncludeChanged:
             runner.assert_not_called()
         rels = {str(f.relative_to(tmp_path)) for f in files}
         assert "README.md" not in rels
+
+    def test_include_changed_is_prioritized_under_max_files(self, tmp_path: Path) -> None:
+        (tmp_path / "main.py").write_text("pass\n")
+        for index in range(5):
+            (tmp_path / f"mod_{index}.py").write_text("pass\n")
+        (tmp_path / "notes.txt").write_text("scratch\n")
+
+        fake = (
+            subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="notes.txt\n", stderr="",
+            ),
+            subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr="",
+            ),
+        )
+        it = iter(fake)
+        with patch(
+            "prefxplain.analyzer.subprocess.run",
+            side_effect=lambda *a, **k: next(it),
+        ):
+            files = _collect_files(
+                tmp_path, 3,
+                include_config=True,
+                include_changed=True,
+            )
+        rels = {str(f.relative_to(tmp_path)) for f in files}
+        assert "notes.txt" in rels
 
 
 class TestAnalyzeConfigLang:

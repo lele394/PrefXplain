@@ -432,6 +432,7 @@ class Graph:
         rank: dict[str, float] = {nid: 1.0 / n for nid in node_ids}
 
         for _ in range(iterations):
+            sink_rank = sum(rank[nid] for nid in node_ids if out_count.get(nid, 0) == 0)
             new_rank: dict[str, float] = {}
             for nid in node_ids:
                 incoming = sum(
@@ -439,7 +440,10 @@ class Graph:
                     for src in adj.get(nid, [])
                     if out_count[src] > 0
                 )
-                new_rank[nid] = (1 - damping) / n + damping * incoming
+                new_rank[nid] = (1 - damping) / n + damping * (incoming + (sink_rank / n))
+            total = sum(new_rank.values())
+            if total > 0:
+                new_rank = {nid: value / total for nid, value in new_rank.items()}
             rank = new_rank
 
         return rank

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -402,7 +405,6 @@ class TestElkRenderer:
         the pipeline breaks this test even when the static HTML still looks
         OK.
         """
-        import subprocess, json, shutil
         if not shutil.which("node"):
             pytest.skip("node binary not available")
 

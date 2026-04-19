@@ -182,8 +182,8 @@ def _analyze_python(
     """Return (symbols, imports) for a Python file.
 
     Each import is a (module, level) tuple. `level` is 0 for absolute imports
-    and N for `from ..foo import x` (level N). For `from . import x`, module
-    is an empty string and level >= 1.
+    and N for `from ..foo import x` (level N). For `from . import x`, we store
+    the imported name (`x`) as the module so sibling modules resolve correctly.
 
     Symbol extraction only captures top-level and class-level definitions,
     not nested local functions.
@@ -217,8 +217,11 @@ def _analyze_python(
             elif isinstance(node, ast.ImportFrom):
                 # node.module is None for `from . import x`
                 # node.level is 0 for absolute, N for relative dots
-                module = node.module or ""
-                imports.append((module, node.level))
+                if node.module:
+                    imports.append((node.module, node.level))
+                else:
+                    for alias in node.names:
+                        imports.append((alias.name, node.level))
             elif isinstance(node, ast.If):
                 # Imports can be conditionally declared at top level
                 _scan(node.body, in_class=in_class)
@@ -244,9 +247,9 @@ def _resolve_python_import(
     import is third-party/stdlib.
 
     Relative imports resolve against the source file's parent directory,
-    walking up `level` packages. `from . import x` (module="", level=1) means
-    "import `x` from the current package" — we try `<parent>/x.py` first,
-    then `<parent>/x/__init__.py`.
+    walking up `level` packages. `from . import x` is represented as
+    `(module="x", level=1)`, so we try `<parent>/x.py` first, then
+    `<parent>/x/__init__.py`.
     """
     # Back-compat: allow plain strings (treated as absolute)
     if isinstance(raw, tuple):
@@ -875,12 +878,11 @@ def _collect_files(
     """Walk root and collect files worth surfacing in the graph.
 
     Policy:
-      * Code files (suffix in ALL_EXTS) are always included.
+      * Files returned by git diff / untracked status are prioritized when
+        include_changed=True, so the escape hatch still works under max_files.
+      * Code files (suffix in ALL_EXTS) are otherwise included.
       * High-signal non-code files (see CONFIG_NODE_BASENAMES/CONFIG_NODE_GLOBS)
         are included when include_config=True.
-      * User-modified / untracked files are included when include_changed=True,
-        even if they don't match either filter (escape hatch for
-        "file I just touched is invisible").
 
     Dot-directories are skipped unless they're in ALLOWED_DOTDIRS. SKIP_DIRS
     is always honored. Symlinks are never followed.
@@ -902,6 +904,13 @@ def _collect_files(
         files.append(fpath)
         return len(files) >= max_files
 
+    if include_changed:
+        for fpath in _git_changed_files(root):
+            if not fpath.exists() or fpath.is_dir():
+                continue
+            if _add(fpath):
+                return files
+
     for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
         # Prune skip dirs and symlinked dirs in-place. Dot-directories get a
         # one-shot allowlist check — generic `.cache`, `.idea`, etc. still get
@@ -917,13 +926,6 @@ def _collect_files(
             ext_supported = fpath.suffix.lower() in ALL_EXTS
             is_config = include_config and _is_config_file(fpath, root)
             if not (ext_supported or is_config):
-                continue
-            if _add(fpath):
-                return files
-
-    if include_changed:
-        for fpath in _git_changed_files(root):
-            if not fpath.exists() or fpath.is_dir():
                 continue
             if _add(fpath):
                 return files
@@ -1062,7 +1064,7 @@ def analyze(
             has_real_code = any(
                 s.kind in ("function", "class") for s in n.symbols
             )
-            if not has_real_code and in_deg.get(n.id, 0) + out_deg.get(n.id, 0) <= 1:
+            if not has_real_code and in_deg.get(n.id, 0) == 0 and out_deg.get(n.id, 0) == 0:
                 prune_ids.add(n.id)
 
     if prune_ids:

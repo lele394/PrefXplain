@@ -100,8 +100,21 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
   }
   out += `<text x="${x + w - 9}" y="${y + 17}" font-family="${T.mono}" font-size="9" fill="${mutedCol}" text-anchor="end">${sizeKB}k</text>`;
   if (showBullets && h >= PX.NODE_SIZES.fileBullets.h) {
-    // row 2: subtitle
+    // row 2: subtitle + (optional) semantic-role pill right-aligned.
+    // The pill shows up only when the describer produced a role keyword;
+    // codebases described with older v2-only output look identical to before.
     out += `<text x="${x + 24}" y="${y + 31}" font-family="${T.ui}" font-size="10" fill="${subCol}">${PX.escapeXml(node.short || node.label)}</text>`;
+    const semRole = node.semantic_role || node.semanticRole || '';
+    if (semRole) {
+      const roleTag = semRole.slice(0, 9).toUpperCase();
+      const pillW = roleTag.length * 5.2 + 10;
+      const pillX = x + w - pillW - 10;
+      const pillFill = isSel ? 'rgba(255,255,255,0.16)' : T.panelAlt;
+      const pillStroke = isSel ? 'rgba(255,255,255,0.25)' : T.borderAlt;
+      const pillText = isSel ? '#fff' : T.inkMuted;
+      out += `<rect x="${pillX}" y="${y + 22}" width="${pillW}" height="13" fill="${pillFill}" stroke="${pillStroke}" stroke-width="0.8" rx="6.5"/>`;
+      out += `<text x="${pillX + pillW / 2}" y="${y + 31}" font-family="${T.mono}" font-size="8" font-weight="700" letter-spacing="0.6" fill="${pillText}" text-anchor="middle">${PX.escapeXml(roleTag)}</text>`;
+    }
     // row 3: up to 2 highlights
     (node.highlights || []).slice(0, 2).forEach((h, i) => {
       const maxChars = Math.floor((w - 28) / 5.4);

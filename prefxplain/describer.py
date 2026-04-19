@@ -19,7 +19,7 @@ from typing import Callable
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from .graph import Graph, Node
+from .graph import Graph, GroupSummary, Node
 
 console = Console()
 
@@ -87,7 +87,9 @@ def _normalize_level(level: str | None) -> str:
     return candidate if candidate in VALID_LEVELS else _DEFAULT_LEVEL
 
 
-# v2 system prompt — returns JSON with file description + per-symbol descriptions
+# v3 system prompt — extends v2 with semantic scaffolding (role/flow/extends_at/pattern)
+# so a reader forms a mental model of the file in one glance instead of scrolling
+# code. These fields feed the enriched detail panel; pithy bullets, not essays.
 _SYSTEM_PROMPT_V2_TEMPLATE = """\
 You write block descriptions for an interactive codebase architecture diagram.
 Audience voice: __VOICE__
@@ -105,6 +107,20 @@ render on the diagram card itself, so a reader should grok them at a glance. \
 GOOD: ["Claude Code integration", "Codex CLI support", "SQLite cache"]. \
 BAD: ["handles user commands", "entry point for CLI", "well-structured module"]. \
 Return [] only if truly nothing concrete stands out. Empty is better than generic.
+- "semantic_role": EXACTLY one of these keywords: "hub" (many files depend on this), \
+"gateway" (external entry — CLI/HTTP/API boundary), "pipeline" (orchestrates a sequence \
+of steps), "adapter" (wraps/translates an external service), "sink" (terminal — writes \
+outputs, no consumers), "standalone" (isolated utility). Pick the single best fit, or \
+"" if none apply.
+- "flow": ONE short sentence, max ~15 words, of the form "receives X from Y, produces Z \
+for W" or "reads X, emits Y on Z". Describe the DATA flow as an outsider would observe \
+it. Skip if the file is pure configuration. Empty string "" is better than generic.
+- "extends_at": ONE sentence naming the concrete extension point for someone adding a \
+feature here (e.g. "register a new rule type in RULE_HANDLERS", "add a subclass of \
+Exporter", "add a key to _LEVEL_VOICES"). Empty string "" if not extendable.
+- "pattern": EXACTLY one keyword if obvious: "registry", "pipeline", "state-machine", \
+"visitor", "factory", "strategy", "singleton", "decorator". "" otherwise. One word, \
+lowercase.
 - "flowchart": a flowchart showing the main logic of the file. \
 Use 3-7 nodes. Each node has "id" (string "1","2"...), "label" (3-6 words describing the step), \
 "type" ("start", "end", "decision", or "step"), and "description" (1 concrete sentence \
@@ -116,6 +132,10 @@ Start with one "start" node and end with one "end" node.
 Respond with valid JSON only, no markdown fences.
 Example: {"file": "Manages database connections.", "symbols": {"connect": "opens a database connection"}, \
 "highlights": ["PostgreSQL driver", "pgbouncer pooling", "SSL required"], \
+"semantic_role": "adapter", \
+"flow": "receives query requests from handlers, returns rows via the pool", \
+"extends_at": "add a new dialect by implementing the Driver protocol", \
+"pattern": "pool", \
 "flowchart": {"nodes": [{"id": "1", "label": "Receive query request", "type": "start", \
 "description": "Someone wants to run a database query."}, \
 {"id": "2", "label": "Connection pool available?", "type": "decision", \
@@ -203,6 +223,17 @@ def _init_cache() -> sqlite3.Connection:
     # group_highlights: cached synthesis per group keyed by content signature
     conn.execute("""
         CREATE TABLE IF NOT EXISTS group_highlights (
+            group_label TEXT NOT NULL,
+            signature TEXT NOT NULL,
+            data TEXT NOT NULL,
+            PRIMARY KEY (group_label, signature)
+        )
+    """)
+    # group_summaries_v2: full semantic header (description + role + flow + extends_at
+    # + highlights). Kept in its own table so the schema can evolve without
+    # stomping the highlights-only v1 cache that older versions still populate.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS group_summaries_v2 (
             group_label TEXT NOT NULL,
             signature TEXT NOT NULL,
             data TEXT NOT NULL,
@@ -301,21 +332,36 @@ def _set_cached_v2(conn: sqlite3.Connection, file_path: str, content_hash: str, 
 
 
 _SYSTEM_PROMPT_GROUP_TEMPLATE = """\
-You summarize a group of related files as concrete bullet points for an interactive \
-codebase architecture diagram.
+You write the semantic header for a group of related files in an interactive \
+codebase architecture diagram. The goal: a reader understands the group's role \
+and data flow in 5 seconds without opening files.
 Audience voice: __VOICE__
 Given the group name and a list of its files (with short descriptions and any \
-highlights extracted from each file), output JSON: {"highlights": [...]}.
-The highlights list contains up to 3 CONCRETE, group-wide facts that a user would \
-find genuinely interesting about THIS group in THIS codebase.
+highlights extracted from each file), output JSON:
+{"description": "...", "semantic_role": "...", "flow": "...", \
+"extends_at": "...", "highlights": [...]}.
 Rules:
-- Look for patterns that span multiple files: integrations, supported tools, model \
-names, hyperparameters, cloud providers, protocols, file formats, exact versions.
-- Prefer proper nouns over adjectives. GOOD: ["supports Claude Code + Codex", \
-"SQLite-backed cache", "ANTHROPIC_API_KEY env var"]. BAD: ["handles CLI commands", \
-"well-organized", "modular design"].
-- If nothing concrete and group-worthy is visible, return []. Empty is better than generic.
-- Each highlight must be ≤40 characters — these render on the group card itself.
+- "description": ONE sentence (max ~20 words) starting with a verb describing what \
+this group is responsible for AS A WHOLE. Not a catalog of files. Specific to THIS \
+codebase, not a generic category label. GOOD: "Parses source files and validates \
+architectural rules defined in .prefxplain.yml before a PR merges." \
+BAD: "Contains analysis-related code." / "Exercises the behavior of the codebase."
+- "semantic_role": EXACTLY one keyword: "hub" (core state other groups depend on), \
+"gateway" (external boundary — CLI/HTTP/API), "pipeline" (orchestrates a sequence of \
+stages), "adapter" (wraps/translates an external service), "sink" (terminal outputs), \
+"standalone" (isolated capability). Empty "" if none applies.
+- "flow": ONE short sentence of the form "receives X from Y, produces Z for W", \
+describing how this group exchanges data with other groups. Skip if the group is a \
+shared data model with no inbound flow to describe. Empty "" is better than generic.
+- "extends_at": ONE sentence naming the extension point for someone adding a new \
+capability INSIDE this group (e.g. "add a new rule class under rules/ and register \
+it in RULE_HANDLERS"). Empty "" if not extendable.
+- "highlights": up to 3 CONCRETE, group-wide facts that a user would find genuinely \
+interesting about THIS group in THIS codebase. Proper nouns: integrations, supported \
+tools, model names, protocols, file formats, exact versions. Empty [] is better than \
+generic. Each highlight ≤40 chars — these render on the group card itself. \
+GOOD: ["supports Claude Code + Codex", "SQLite-backed cache", \
+"ANTHROPIC_API_KEY env var"]. BAD: ["handles CLI commands", "well-organized"].
 - Respond with valid JSON only, no markdown fences.
 """
 
@@ -371,6 +417,51 @@ def _set_cached_group(
         (label, signature, json.dumps(highlights, ensure_ascii=False)),
     )
     conn.commit()
+
+
+def _get_cached_group_summary(
+    conn: sqlite3.Connection, label: str, signature: str,
+) -> dict | None:
+    row = conn.execute(
+        "SELECT data FROM group_summaries_v2 WHERE group_label = ? AND signature = ?",
+        (label, signature),
+    ).fetchone()
+    if not row:
+        return None
+    try:
+        parsed = json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _set_cached_group_summary(
+    conn: sqlite3.Connection, label: str, signature: str, summary: dict,
+) -> None:
+    conn.execute(
+        "INSERT OR REPLACE INTO group_summaries_v2 (group_label, signature, data) VALUES (?, ?, ?)",
+        (label, signature, json.dumps(summary, ensure_ascii=False)),
+    )
+    conn.commit()
+
+
+def _parse_group_summary(raw: dict | None) -> tuple[GroupSummary, list[str]]:
+    """Coerce an AI-generated group summary dict into (summary, highlights).
+
+    Returns sanitized fields plus the highlights list so callers can keep
+    storing highlights in the legacy `graph.metadata.group_highlights` map.
+    """
+    if not isinstance(raw, dict):
+        return GroupSummary(), []
+    summary = GroupSummary(
+        description=_sanitize_short_sentence(raw.get("description"), max_len=240),
+        semantic_role=_sanitize_enum(raw.get("semantic_role"), _VALID_SEMANTIC_ROLES),
+        flow=_sanitize_short_sentence(raw.get("flow"), max_len=180),
+        extends_at=_sanitize_short_sentence(raw.get("extends_at"), max_len=200),
+        pattern=_sanitize_enum(raw.get("pattern"), _VALID_PATTERNS),
+    )
+    highlights = _clean_highlights(raw.get("highlights"))
+    return summary, highlights
 
 
 def describe_groups(
@@ -430,6 +521,10 @@ def describe_groups(
     try:
         if not getattr(graph.metadata, "group_highlights", None):
             graph.metadata.group_highlights = {}
+        if not getattr(graph.metadata, "group_summaries", None):
+            graph.metadata.group_summaries = {}
+        if not getattr(graph.metadata, "groups", None):
+            graph.metadata.groups = {}
 
         with Progress(
             SpinnerColumn(),
@@ -439,7 +534,7 @@ def describe_groups(
             TimeElapsedColumn(),
             console=console,
         ) as progress:
-            task = progress.add_task("Synthesizing group highlights...", total=len(eligible))
+            task = progress.add_task("Synthesizing group summaries...", total=len(eligible))
 
             for label, nodes in sorted(eligible.items()):
                 children_payload = []
@@ -450,23 +545,39 @@ def describe_groups(
                             "hash": _content_hash(root / n.id),
                             "description": n.description,
                             "highlights": n.highlights,
+                            "semantic_role": n.semantic_role,
+                            "flow": n.flow,
                         }
                     )
                 signature = _group_signature(label, children_payload, normalized_level)
 
                 if not force:
-                    cached = _get_cached_group(conn, label, signature)
-                    if cached is not None:
-                        graph.metadata.group_highlights[label] = cached
+                    cached_summary = _get_cached_group_summary(conn, label, signature)
+                    if cached_summary is not None:
+                        summary, highlights = _parse_group_summary(cached_summary)
+                        _apply_group_summary(graph, label, summary, highlights)
+                        progress.advance(task)
+                        continue
+                    # Legacy-cache fallback — highlights-only from an older run.
+                    cached_highlights = _get_cached_group(conn, label, signature)
+                    if cached_highlights is not None:
+                        _apply_group_summary(
+                            graph, label, GroupSummary(), cached_highlights,
+                        )
                         progress.advance(task)
                         continue
 
-                # Trim payload for prompt: top 12 files, description + highlights only
+                # Trim payload for prompt: top 12 files, description + highlights +
+                # per-file semantic hints. The per-file role/flow help the model
+                # synthesize a coherent group role without having to re-derive
+                # structure from raw descriptions.
                 trimmed = [
                     {
                         "file": c["id"],
                         "description": c["description"],
                         "highlights": c["highlights"],
+                        "semantic_role": c.get("semantic_role", ""),
+                        "flow": c.get("flow", ""),
                     }
                     for c in children_payload[:12]
                 ]
@@ -474,9 +585,10 @@ def describe_groups(
                     f'Group name: "{label}"\n'
                     f"Files in group: {len(nodes)}\n\n"
                     f"Children (JSON):\n{json.dumps(trimmed, ensure_ascii=False, indent=2)}\n\n"
-                    'Respond with {"highlights": [...]} as described.'
+                    "Respond with the group summary JSON as described."
                 )
 
+                summary = GroupSummary()
                 highlights: list[str] = []
                 try:
                     response = client.chat.completions.create(
@@ -485,7 +597,7 @@ def describe_groups(
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
-                        max_tokens=200,
+                        max_tokens=500,
                         temperature=0.2,
                     )
                     content = response.choices[0].message.content if response.choices else None
@@ -498,19 +610,39 @@ def describe_groups(
                     try:
                         parsed = json.loads(raw)
                     except (json.JSONDecodeError, ValueError):
-                        parsed = {}
-                    highlights = _clean_highlights(parsed.get("highlights") if isinstance(parsed, dict) else None)
+                        parsed = None
+                    summary, highlights = _parse_group_summary(parsed if isinstance(parsed, dict) else None)
                 except Exception as e:
-                    console.print(f"[yellow]  Warning: group highlight call failed for {label}: {e}[/yellow]")
-                    highlights = []
+                    console.print(f"[yellow]  Warning: group summary call failed for {label}: {e}[/yellow]")
 
-                graph.metadata.group_highlights[label] = highlights
+                _apply_group_summary(graph, label, summary, highlights)
+                cache_payload = {**summary.to_dict(), "highlights": highlights}
+                _set_cached_group_summary(conn, label, signature, cache_payload)
+                # Also mirror highlights into the legacy cache so older
+                # binaries reading group_highlights still pick them up.
                 _set_cached_group(conn, label, signature, highlights)
                 progress.advance(task)
     finally:
         conn.close()
 
     return graph
+
+
+def _apply_group_summary(
+    graph: Graph, label: str, summary: GroupSummary, highlights: list[str],
+) -> None:
+    """Write a synthesized group summary into all the places the renderer reads.
+
+    - `group_summaries[label]` carries the full semantic scaffolding.
+    - `groups[label]` mirrors the description so legacy renderers still see it,
+      but ONLY when the LLM produced a real description (empty-string would wipe
+      a helpful static fallback populated by `apply_inferred_groups`).
+    - `group_highlights[label]` stays in sync with the new highlights list.
+    """
+    graph.metadata.group_summaries[label] = summary
+    if summary.description:
+        graph.metadata.groups[label] = summary.description
+    graph.metadata.group_highlights[label] = list(highlights)
 
 
 def describe(
@@ -671,8 +803,40 @@ def _clean_highlights(raw: object) -> list[str]:
     return cleaned
 
 
+_VALID_SEMANTIC_ROLES = frozenset({
+    "hub", "gateway", "pipeline", "adapter", "sink", "standalone",
+})
+_VALID_PATTERNS = frozenset({
+    "registry", "pipeline", "state-machine", "visitor", "factory",
+    "strategy", "singleton", "decorator", "pool", "observer",
+})
+
+
+def _sanitize_short_sentence(raw: object, max_len: int = 160) -> str:
+    """Trim an AI-supplied short sentence: strip, bound length, drop fenced JSON."""
+    if not isinstance(raw, str):
+        return ""
+    text = raw.strip().strip("`").strip()
+    if not text:
+        return ""
+    if len(text) > max_len:
+        text = text[: max_len - 1].rstrip() + "\u2026"
+    return text
+
+
+def _sanitize_enum(raw: object, allowed: frozenset[str]) -> str:
+    if not isinstance(raw, str):
+        return ""
+    token = raw.strip().lower()
+    return token if token in allowed else ""
+
+
 def _apply_v2_data(node: Node, data: dict) -> None:
-    """Apply a v2 JSON response (file desc + symbol descs + flowchart) to a node."""
+    """Apply a v2/v3 JSON response to a node.
+
+    v3 adds semantic_role/flow/extends_at/pattern. Missing fields degrade
+    gracefully to empty strings — the renderer just skips empty slots.
+    """
     node.description = data.get("file", "").strip()
     sym_descs: dict[str, str] = data.get("symbols", {})
     for sym in node.symbols:
@@ -682,6 +846,10 @@ def _apply_v2_data(node: Node, data: dict) -> None:
     if flowchart:
         node.flowchart = flowchart
     node.highlights = _clean_highlights(data.get("highlights"))
+    node.semantic_role = _sanitize_enum(data.get("semantic_role"), _VALID_SEMANTIC_ROLES)
+    node.flow = _sanitize_short_sentence(data.get("flow"), max_len=160)
+    node.extends_at = _sanitize_short_sentence(data.get("extends_at"), max_len=180)
+    node.pattern = _sanitize_enum(data.get("pattern"), _VALID_PATTERNS)
 
 
 def _describe_with_conn(

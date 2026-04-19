@@ -38,6 +38,45 @@ PX.components.detailSummary = function detailSummary({ x, y, w, story, selectedF
   const descBlock = hasDesc
     ? `<div style="margin-top:6px;font-size:12px;line-height:1.5;color:${T.ink2};max-width:820px">${desc}</div>`
     : '';
+  // Semantic scaffolding — the LLM-authored role/flow/extends_at, passed
+  // through by ir.js from `graph.metaGroups[groupId]`. Each line renders only
+  // when populated so groups without enriched data keep the old compact header.
+  const semRole = PX.escapeXml(meta.semantic_role || '');
+  const semFlow = PX.escapeXml(meta.flow || '');
+  const semExtend = PX.escapeXml(meta.extends_at || '');
+  const semPattern = PX.escapeXml(meta.pattern || '');
+  const semanticBits = [];
+  if (semRole) {
+    semanticBits.push(`<span style="display:inline-flex;align-items:center;gap:6px">
+      <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:${T.inkFaint}">role</span>
+      <span style="font-family:${T.mono};font-size:11px;font-weight:700;color:${T.accent2};text-transform:uppercase;letter-spacing:0.4px">${semRole}</span>
+    </span>`);
+  }
+  if (semPattern) {
+    semanticBits.push(`<span style="display:inline-flex;align-items:center;gap:6px">
+      <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:${T.inkFaint}">pattern</span>
+      <span style="font-family:${T.mono};font-size:11px;color:${T.ink2}">${semPattern}</span>
+    </span>`);
+  }
+  const semanticLineRole = semanticBits.length
+    ? `<div style="margin-top:8px;display:flex;gap:18px;flex-wrap:wrap">${semanticBits.join('')}</div>`
+    : '';
+  const semanticFlow = semFlow
+    ? `<div style="margin-top:6px;display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:${T.inkFaint};flex-shrink:0">flow</span>
+        <span style="font-family:${T.ui};font-size:12px;color:${T.ink2};line-height:1.5">${semFlow}</span>
+      </div>`
+    : '';
+  const semanticExtend = semExtend
+    ? `<div style="margin-top:4px;display:flex;align-items:baseline;gap:10px">
+        <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:${T.inkFaint};flex-shrink:0">extend</span>
+        <span style="font-family:${T.ui};font-size:12px;color:${T.ink2};line-height:1.5">${semExtend}</span>
+      </div>`
+    : '';
+  const hasSemantic = !!(semanticLineRole || semanticFlow || semanticExtend);
+  const semanticBlock = hasSemantic
+    ? `${semanticLineRole}${semanticFlow}${semanticExtend}`
+    : '';
   // Selected file name rides inline with the group title — e.g.
   //   "CLI & Integrations  —  cli.py"
   // moved here from the top bar so the top bar stays a stable brand anchor.
@@ -52,6 +91,9 @@ PX.components.detailSummary = function detailSummary({ x, y, w, story, selectedF
   let h = 28;                   // 14px top + 14px bottom padding
   h += 26;                      // title row
   if (hasDesc)   h += 26;       // description line (max-width caps wrap)
+  if (semanticLineRole) h += 22;
+  if (semanticFlow)     h += 22;
+  if (semanticExtend)   h += 22;
   if (hasRoutes) h += 36;       // routes row — label + 4 spans with wrap budget
   const html = `<div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 16px;font-family:${T.ui};color:${T.ink}">
     <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
@@ -61,6 +103,7 @@ PX.components.detailSummary = function detailSummary({ x, y, w, story, selectedF
       <span style="display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:auto">${pills}</span>
     </div>
     ${descBlock}
+    ${semanticBlock}
     ${routesBlock}
   </div>`;
   const svg = `<g class="detail-summary">

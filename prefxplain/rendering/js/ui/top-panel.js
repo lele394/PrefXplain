@@ -149,6 +149,44 @@ function _roleTag(role) {
   return `<span style="font-family:${T.mono};font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:1px 6px;background:${t.bg};color:${t.col};border-radius:3px">${t.label}</span>`;
 }
 
+// Semantic scaffolding row: Role / Flow / Extends pills. Rendered only when at
+// least one field is populated — older codebases described without v3 fields
+// see the unchanged top-panel layout.
+function _semanticRow(fields) {
+  const T = PX.T;
+  const parts = [];
+  const role = (fields && fields.semantic_role) || '';
+  const flow = (fields && fields.flow) || '';
+  const extend = (fields && fields.extends_at) || '';
+  const pattern = (fields && fields.pattern) || '';
+  if (role) {
+    parts.push(`<span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0">
+      <span style="font-family:${T.mono};font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint}">role</span>
+      <span style="font-family:${T.mono};font-size:10.5px;font-weight:700;color:${T.accent2};text-transform:uppercase;letter-spacing:0.5px">${PX.escapeXml(role)}</span>
+    </span>`);
+  }
+  if (pattern) {
+    parts.push(`<span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0">
+      <span style="font-family:${T.mono};font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint}">pattern</span>
+      <span style="font-family:${T.mono};font-size:10.5px;color:${T.ink2}">${PX.escapeXml(pattern)}</span>
+    </span>`);
+  }
+  if (flow) {
+    parts.push(`<span style="display:inline-flex;align-items:baseline;gap:6px;flex:1;min-width:140px">
+      <span style="font-family:${T.mono};font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint};flex-shrink:0">flow</span>
+      <span style="font-family:${T.ui};font-size:11.5px;color:${T.ink2};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${PX.escapeXml(flow)}</span>
+    </span>`);
+  }
+  if (extend) {
+    parts.push(`<span style="display:inline-flex;align-items:baseline;gap:6px;flex:1;min-width:140px">
+      <span style="font-family:${T.mono};font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint};flex-shrink:0">extend</span>
+      <span style="font-family:${T.ui};font-size:11.5px;color:${T.ink2};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${PX.escapeXml(extend)}</span>
+    </span>`);
+  }
+  if (parts.length === 0) return '';
+  return `<div style="display:flex;flex-wrap:wrap;gap:16px;padding:3px 14px 6px;border-top:1px dashed ${T.borderAlt};font-family:${T.ui}">${parts.join('')}</div>`;
+}
+
 function _renderEmpty(graph) {
   const T = PX.T;
   const v = graph.version || '';
@@ -236,6 +274,7 @@ function _renderFocusedGroup(graph, groupId, index, groupsMeta, selected = null)
       <div style="display:flex;align-items:flex-start;gap:14px;padding:5px 14px;font-size:12px;color:${T.ink2};line-height:1.45">
         ${secondaryRow}
       </div>
+      ${_semanticRow(selInGroup || meta)}
     </div>
   `;
 }
@@ -276,6 +315,7 @@ function _renderSelected(graph, selected, index, groupsMeta) {
           ${highlights.map(h => `<span style="display:inline-flex;align-items:center;background:${T.pill};border:1px solid ${T.pillBorder};border-radius:999px;padding:2px 9px;font-size:11px;color:${T.accent2};font-weight:500">${PX.escapeXml(h)}</span>`).join('')}
         </div>` : ''}
       </div>
+      ${_semanticRow(n)}
     </div>
   `;
 }

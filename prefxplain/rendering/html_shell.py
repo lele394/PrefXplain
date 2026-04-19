@@ -42,6 +42,16 @@ def build_html(graph: Graph) -> str:
     repo = graph.metadata.repo if graph.metadata else "repo"
     payload = _serialize_graph(graph)
     payload_json = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    # Escape `<`, `>`, `&` so HTML-tokenizer regexes (including those run by
+    # the VS Code webview's injectBaseTag/injectVsCodeBridge) can't match
+    # tag-like substrings inside description strings and rewrite our JSON.
+    # JSON.parse decodes \u003c/\u003e/\u0026 back to the original characters.
+    payload_json = (
+        payload_json
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
 
     elk_js = vendor_elk()
     elk_worker_js = vendor_elk_worker()
@@ -65,13 +75,28 @@ def _serialize_graph(graph: Graph) -> dict[str, Any]:
     group_highlights: dict[str, list[str]] = (
         dict(getattr(meta, "group_highlights", {}) or {}) if meta else {}
     )
-    # Merge into the shape the JS renderer expects: { name: { desc, highlights } }.
+    group_summaries = dict(getattr(meta, "group_summaries", {}) or {}) if meta else {}
+    # Merge into the shape the JS renderer expects: { name: { desc, highlights,
+    # semantic_role, flow, extends_at, pattern } }. The enriched fields ride
+    # alongside the legacy `desc`/`highlights` so older consumers keep working.
     meta_groups: dict[str, dict[str, Any]] = {}
-    for name in set(group_descs) | set(group_highlights):
-        meta_groups[name] = {
-            "desc": group_descs.get(name, ""),
+    for name in set(group_descs) | set(group_highlights) | set(group_summaries):
+        summary = group_summaries.get(name)
+        # Prefer the LLM-authored description on the summary over whatever lives
+        # in `groups` — `apply_inferred_groups` may run before `group_summaries`
+        # is preserved on re-runs, leaving `groups[name]` stale with the static
+        # PROFILE_BY_LABEL fallback even when a real synthesis exists.
+        llm_desc = getattr(summary, "description", "") if summary is not None else ""
+        entry: dict[str, Any] = {
+            "desc": llm_desc or group_descs.get(name, ""),
             "highlights": list(group_highlights.get(name, []) or []),
         }
+        if summary is not None:
+            for field_name in ("semantic_role", "flow", "extends_at", "pattern"):
+                value = getattr(summary, field_name, "")
+                if value:
+                    entry[field_name] = value
+        meta_groups[name] = entry
     return {
         "repo": meta.repo if meta else "repo",
         "version": getattr(meta, "version", None) if meta else None,
@@ -81,20 +106,7 @@ def _serialize_graph(graph: Graph) -> dict[str, Any]:
         "health_score": getattr(meta, "health_score", None) if meta else None,
         "health_notes": getattr(meta, "health_notes", "") if meta else "",
         "metaGroups": meta_groups,
-        "nodes": [
-            {
-                "id": n.id,
-                "label": n.label,
-                "short": getattr(n, "short_title", None) or n.label,
-                "description": n.description or "",
-                "role": getattr(n, "role", None) or "undefined",
-                "group": getattr(n, "group", None) or "",
-                "language": getattr(n, "language", None) or "",
-                "size": getattr(n, "size", 0) or 0,
-                "highlights": list(getattr(n, "highlights", []) or []),
-            }
-            for n in graph.nodes
-        ],
+        "nodes": [_serialize_node(n) for n in graph.nodes],
         "edges": [
             {
                 "source": e.source,
@@ -104,6 +116,28 @@ def _serialize_graph(graph: Graph) -> dict[str, Any]:
             for e in graph.edges
         ],
     }
+
+
+def _serialize_node(n: Any) -> dict[str, Any]:
+    """Serialize one node, omitting empty semantic fields so the JS payload
+    stays compact. The renderer treats missing keys the same as empty strings.
+    """
+    payload: dict[str, Any] = {
+        "id": n.id,
+        "label": n.label,
+        "short": getattr(n, "short_title", None) or n.label,
+        "description": n.description or "",
+        "role": getattr(n, "role", None) or "undefined",
+        "group": getattr(n, "group", None) or "",
+        "language": getattr(n, "language", None) or "",
+        "size": getattr(n, "size", 0) or 0,
+        "highlights": list(getattr(n, "highlights", []) or []),
+    }
+    for field_name in ("semantic_role", "flow", "extends_at", "pattern"):
+        value = getattr(n, field_name, "") or ""
+        if value:
+            payload[field_name] = value
+    return payload
 
 
 def _escape_attr(s: str) -> str:

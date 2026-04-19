@@ -282,10 +282,17 @@ def _legend_items() -> list[dict[str, str]]:
 
 
 def apply_inferred_groups(graph: Graph) -> None:
-    """Populate missing architectural groups and descriptions in-place."""
+    """Populate missing architectural groups and descriptions in-place.
+
+    Static fallback descriptions (PROFILE_BY_LABEL) fill the `groups` dict only
+    when no better source exists — an LLM-authored `group_summaries[label]`
+    always wins so running `infer_groups` at render time never clobbers the
+    synthesized description.
+    """
     assignments, descriptions = infer_architectural_groups(graph)
     if not getattr(graph.metadata, "groups", None):
         graph.metadata.groups = {}
+    summaries = getattr(graph.metadata, "group_summaries", None) or {}
 
     for node in graph.nodes:
         inferred = assignments.get(node.id)
@@ -293,9 +300,17 @@ def apply_inferred_groups(graph: Graph) -> None:
             node.group = inferred
 
     for label, description in descriptions.items():
-        if description:
-            if label not in graph.metadata.groups or is_generated_group_label(label):
-                graph.metadata.groups[label] = description
+        if not description:
+            continue
+        # LLM summary present? Mirror its description (may be richer) and skip
+        # the static fallback so we never regress a re-render to the profile
+        # one-liner when a real summary exists.
+        llm_desc = getattr(summaries.get(label), "description", "") if summaries else ""
+        if llm_desc:
+            graph.metadata.groups[label] = llm_desc
+            continue
+        if label not in graph.metadata.groups or is_generated_group_label(label):
+            graph.metadata.groups[label] = description
 
 
 def infer_architectural_groups(graph: Graph) -> tuple[dict[str, str], dict[str, str]]:

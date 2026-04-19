@@ -50,6 +50,15 @@ class Node:
     preview: str = ""  # first ~50 lines of the file content (for sidebar code panel)
     flowchart: dict | None = None  # AI-generated flowchart: {nodes: [...], edges: [...]}
     highlights: list[str] = field(default_factory=list)  # concrete, codebase-specific facts (e.g. integrations, model names, hyperparameters)
+    # v3 semantic fields — LLM-generated mental model scaffolding.
+    # semantic_role: one of hub/gateway/pipeline/adapter/sink/standalone/""
+    # flow: 1 short sentence, "receives X from Y, produces Z for W"
+    # extends_at: 1 sentence, where a user plugs in to extend this file
+    # pattern: registry/pipeline/state-machine/visitor/"" — optional
+    semantic_role: str = ""
+    flow: str = ""
+    extends_at: str = ""
+    pattern: str = ""
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -71,6 +80,14 @@ class Node:
             d["flowchart"] = self.flowchart
         if self.highlights:
             d["highlights"] = self.highlights
+        if self.semantic_role:
+            d["semantic_role"] = self.semantic_role
+        if self.flow:
+            d["flow"] = self.flow
+        if self.extends_at:
+            d["extends_at"] = self.extends_at
+        if self.pattern:
+            d["pattern"] = self.pattern
         return d
 
     @classmethod
@@ -88,6 +105,49 @@ class Node:
             preview=d.get("preview", ""),
             flowchart=d.get("flowchart"),
             highlights=list(d.get("highlights") or []),
+            semantic_role=d.get("semantic_role", ""),
+            flow=d.get("flow", ""),
+            extends_at=d.get("extends_at", ""),
+            pattern=d.get("pattern", ""),
+        )
+
+
+@dataclass
+class GroupSummary:
+    """Per-group semantic scaffolding produced by the group describer.
+
+    Sits alongside the legacy `GraphMetadata.groups` string dict: `description`
+    feeds back into `groups[label]` for backward-compat, while the other
+    fields power the enriched group header in the detail view.
+    """
+    description: str = ""
+    semantic_role: str = ""
+    flow: str = ""
+    extends_at: str = ""
+    pattern: str = ""
+
+    def to_dict(self) -> dict:
+        d: dict = {}
+        if self.description:
+            d["description"] = self.description
+        if self.semantic_role:
+            d["semantic_role"] = self.semantic_role
+        if self.flow:
+            d["flow"] = self.flow
+        if self.extends_at:
+            d["extends_at"] = self.extends_at
+        if self.pattern:
+            d["pattern"] = self.pattern
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> GroupSummary:
+        return cls(
+            description=d.get("description", ""),
+            semantic_role=d.get("semantic_role", ""),
+            flow=d.get("flow", ""),
+            extends_at=d.get("extends_at", ""),
+            pattern=d.get("pattern", ""),
         )
 
 
@@ -128,6 +188,10 @@ class GraphMetadata:
     health_notes: str = ""  # plain-English health interpretation
     groups: dict[str, str] = field(default_factory=dict)  # AI group name → description
     group_highlights: dict[str, list[str]] = field(default_factory=dict)  # AI group name → concrete facts
+    # Per-group semantic scaffolding — role/flow/extends_at/pattern. `description`
+    # is mirrored from here into `groups[label]` on save so legacy callers keep
+    # working (renderer.py/top-panel both read the flat `groups` string map).
+    group_summaries: dict[str, GroupSummary] = field(default_factory=dict)
     level: str = ""  # audience level used for descriptions: newbie | middle | strong | expert
 
     def to_dict(self) -> dict:
@@ -148,12 +212,23 @@ class GraphMetadata:
             d["groups"] = self.groups
         if self.group_highlights:
             d["group_highlights"] = self.group_highlights
+        if self.group_summaries:
+            d["group_summaries"] = {
+                label: summary.to_dict()
+                for label, summary in self.group_summaries.items()
+                if summary.to_dict()
+            }
         if self.level:
             d["level"] = self.level
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> GraphMetadata:
+        raw_summaries = d.get("group_summaries") or {}
+        summaries: dict[str, GroupSummary] = {}
+        for label, payload in raw_summaries.items():
+            if isinstance(payload, dict):
+                summaries[label] = GroupSummary.from_dict(payload)
         return cls(
             repo=d["repo"],
             generated_at=d["generated_at"],
@@ -165,6 +240,7 @@ class GraphMetadata:
             health_notes=d.get("health_notes", ""),
             groups=d.get("groups", {}),
             group_highlights=dict(d.get("group_highlights") or {}),
+            group_summaries=summaries,
             level=d.get("level", ""),
         )
 
@@ -750,11 +826,18 @@ class Graph:
 
         clusters_by_group = self.cluster_by_group()
 
+        group_summaries_payload: dict[str, dict] = {}
+        for label, summary in (self.metadata.group_summaries or {}).items():
+            payload = summary.to_dict()
+            if payload:
+                group_summaries_payload[label] = payload
+
         base.update({
             "clusters": clusters,
             "clusters_by_role": clusters_by_role,
             "clusters_by_group": clusters_by_group,
             "group_descriptions": self.metadata.groups,
+            "group_summaries": group_summaries_payload,
             "semantic_diagram": semantic_diagram.to_dict(),
             "node_semantics": node_semantics,
             "role_order": ROLE_ORDER,

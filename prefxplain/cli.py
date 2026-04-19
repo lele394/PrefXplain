@@ -970,6 +970,13 @@ def _run(
                             node.flowchart = prior.flowchart
                         if prior.highlights:
                             node.highlights = list(prior.highlights)
+                        # v3 semantic fields — carry over so re-runs without
+                        # --no-descriptions or under --no-descriptions keep the
+                        # enriched scaffolding instead of losing it on every render.
+                        for field_name in ("semantic_role", "flow", "extends_at", "pattern"):
+                            value = getattr(prior, field_name, "")
+                            if value:
+                                setattr(node, field_name, value)
                         # Also restore per-symbol descriptions
                         old_sym = {s.name: s.description for s in prior.symbols if s.description}
                         for sym in node.symbols:
@@ -989,6 +996,8 @@ def _run(
                     graph.metadata.health_notes = prior_graph.metadata.health_notes
                 if prior_graph.metadata.group_highlights:
                     graph.metadata.group_highlights = dict(prior_graph.metadata.group_highlights)
+                if prior_graph.metadata.group_summaries:
+                    graph.metadata.group_summaries = dict(prior_graph.metadata.group_summaries)
                 if preserved:
                     console.print(
                         f"    [dim]Preserved {preserved} description(s) from previous run[/dim]"

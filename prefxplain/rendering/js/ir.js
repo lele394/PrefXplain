@@ -476,6 +476,14 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
       name: groupId,
       description: meta.desc || meta.description || '',
       color: PX.groupColor(groupId, meta),
+      // Pass-through of LLM-authored semantic scaffolding so the detail
+      // summary header can render role/flow/extends_at without reaching back
+      // into graph.metaGroups.
+      semantic_role: meta.semantic_role || '',
+      flow: meta.flow || '',
+      extends_at: meta.extends_at || '',
+      pattern: meta.pattern || '',
+      highlights: Array.isArray(meta.highlights) ? meta.highlights : [],
     },
     summary: {
       fileCount: stats.fileCount || 0,

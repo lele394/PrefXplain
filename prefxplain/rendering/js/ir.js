@@ -227,7 +227,9 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
   // "threshold/collapse" guidance — labels stay legible on dense groups.
   const ranked = intraEdges
     .map(([s, t]) => ({ source: s, target: t, count: edgePairCount[`${s}\u0000${t}`] }))
-    .sort((a, b) => b.count - a.count);
+    // Secondary + tertiary keys keep lane-offset assignment deterministic
+    // across runs (edge index drives laneX/laneY in the nested view).
+    .sort((a, b) => (b.count - a.count) || a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
   const labelledIds = new Set();
   for (const e of ranked) {
     if (labelledIds.size >= 5 && e.count < 2) break;
@@ -719,6 +721,21 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
 
   // Build ELK IR with hand-positioned children. Use algorithm=fixed so ELK
   // respects (x, y) and only computes edge polylines. Keep FIXED_SIDE ports.
+  //
+  // Each edge gets UNIQUE per-edge ports on source (SOUTH) and target
+  // (NORTH) so ELK fans them out along the card's bottom/top edges, giving
+  // every arrow its own lane at the port. Shared .in/.out ports collapsed
+  // every edge onto the card's midline — parallel arrows then stacked on
+  // top of each other near the endpoints, which read as a single ribbon.
+  // We keep SOUTH/NORTH everywhere: mixing EAST/WEST on the same card under
+  // algorithm=fixed caused ELK to abort ("edge section count 0") for some
+  // combinations. The card-detour post-pass handles obstacle avoidance.
+  const outPortsByNode = {};
+  const inPortsByNode = {};
+  story.edges.forEach((e, i) => {
+    (outPortsByNode[e.source] = outPortsByNode[e.source] || []).push(`${e.source}.out-gs${i}`);
+    (inPortsByNode[e.target]  = inPortsByNode[e.target]  || []).push(`${e.target}.in-gs${i}`);
+  });
   const children = [];
   for (const band of story.bands) {
     for (const f of band.files) {
@@ -726,13 +743,24 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
       if (!pos) continue;
       const isStandalone = standaloneIds.has(f.id);
       const nodeH = isStandalone ? CH_STANDALONE : ch;
+      const ports = [];
+      for (const pid of outPortsByNode[f.id] || []) {
+        ports.push({ id: pid, properties: { 'port.side': 'SOUTH' } });
+      }
+      for (const pid of inPortsByNode[f.id] || []) {
+        ports.push({ id: pid, properties: { 'port.side': 'NORTH' } });
+      }
+      // Fallback for isolated cards so ELK always has at least one port per side.
+      if (ports.length === 0) {
+        ports.push(_port(f.id, 'NORTH'), _port(f.id, 'SOUTH'));
+      }
       children.push({
         id: f.id,
         x: pos.x,
         y: pos.y,
         width: cw,
         height: nodeH,
-        ports: [_port(f.id, 'NORTH'), _port(f.id, 'SOUTH')],
+        ports,
         properties: {
           'org.eclipse.elk.portConstraints': 'FIXED_SIDE',
           'org.eclipse.elk.position': `(${pos.x},${pos.y})`,
@@ -742,8 +770,8 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
   }
   const edges = story.edges.map((e, i) => ({
     id: `gs${i}`,
-    sources: [`${e.source}.out`],
-    targets: [`${e.target}.in`],
+    sources: [`${e.source}.out-gs${i}`],
+    targets: [`${e.target}.in-gs${i}`],
     count: e.count,
     labelled: e.labelled,
     sourceNode: e.source,
@@ -757,8 +785,12 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
     layoutOptions: {
       'elk.algorithm': 'fixed',
       'elk.edgeRouting': 'ORTHOGONAL',
-      'elk.spacing.edgeEdge': '18',
-      'elk.spacing.edgeNode': '24',
+      // Wider edge-edge spacing stops parallel arrows from collapsing onto
+      // the same horizontal/vertical run (each gets its own visible lane).
+      // edgeNode spacing keeps the routed polylines clear of card borders
+      // so the card-detour pass in the view rarely has to fire.
+      'elk.spacing.edgeEdge': '24',
+      'elk.spacing.edgeNode': '32',
     },
   };
   return {

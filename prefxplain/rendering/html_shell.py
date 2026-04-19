@@ -13,7 +13,6 @@ from typing import Any
 from ..graph import Graph
 from .assets import app_modules, vendor_elk, vendor_elk_worker
 
-
 _APP_MODULES = [
     "tokens.js",
     "graph-utils.js",

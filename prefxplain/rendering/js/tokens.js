@@ -4,6 +4,11 @@
 
 window.PX = window.PX || {};
 
+// Diagnostic logging. Off by default so production renders stay quiet.
+// Flip at runtime via `window.PX.DEBUG = true` from the devtools console.
+PX.DEBUG = false;
+PX.log = function pxLog(...args) { if (PX.DEBUG) console.log(...args); };
+
 PX.T = {
   // surfaces
   bg:        '#0d1117',
@@ -55,6 +60,17 @@ PX.stateColor = function stateColor(state) {
     case 'faded':   return T.borderAlt; // dimmed
     default:        return T.inkFaint;  // baseline
   }
+};
+
+// Selection state → edge/path opacity. Single source of truth so every view
+// (group-map, nested, boundary arrows) reads the same ladder. `variant`
+// picks between the `thick` ambient value used on aggregate arrows and the
+// `thin` value used on single-file arrows; both ladders agree on faded and
+// highlighted states.
+PX.stateOpacity = function stateOpacity(state, variant = 'thick') {
+  if (state === 'faded') return 0.06;
+  if (state === 'normal') return variant === 'thin' ? 0.5 : 0.55;
+  return 0.95;
 };
 
 PX.escapeXml = function escapeXml(s) {

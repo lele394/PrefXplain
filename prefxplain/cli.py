@@ -827,7 +827,7 @@ def _run(
     A change in `level` invalidates prior descriptions so the new voice actually
     shows up on re-run.
     """
-    from .describer import VALID_LEVELS, _DEFAULT_LEVEL
+    from .describer import _DEFAULT_LEVEL, VALID_LEVELS
 
     # Resolve the requested level: CLI arg > prior run's level (from JSON) > default.
     requested_level = (level or "").strip().lower()

@@ -406,10 +406,14 @@
           hoveredGroup: effectiveGroup,
         });
       canvas.innerHTML = view.svg;
-      console.log(`[prefxplain] rendered ${state.viewMode}: ${view.W}x${view.H}`);
+      PX.log(`[prefxplain] rendered ${state.viewMode}: ${view.W}x${view.H}`);
     } catch (err) {
       console.error('[prefxplain] render failed:', err);
-      canvas.innerHTML = `<div style="padding:24px;color:${T.danger};font-family:monospace">Render error: ${err.message}</div>`;
+      canvas.innerHTML = '';
+      const box = document.createElement('div');
+      box.style.cssText = `padding:24px;color:${T.danger};font-family:monospace`;
+      box.textContent = `Render error: ${err && err.message ? err.message : String(err)}`;
+      canvas.appendChild(box);
     }
   }
 

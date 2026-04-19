@@ -56,7 +56,7 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
 // ── Overview (no group focused): full-canvas nested landscape ──────────
 PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
   const { showBullets, selected, filter, hoveredGroup = null } = opts;
-  const groupsMeta = (graph.metaGroups && graph.metaGroups) || {};
+  const groupsMeta = graph.metaGroups || {};
   const overviewIr = PX.buildIr(graph, 'nested', {
     showBullets,
     index: idx,
@@ -67,10 +67,29 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
   const laid = await PX.runLayout(overviewIr);
   const nodesByIdRaw = PX._collectNodes(laid);
   const edgeMetaById = Object.fromEntries((overviewIr.edges || []).map(e => [e.id, e]));
-  const polylines = PX.extractEdgePolylines(laid).map(e => ({
+  const rawPolylines = PX.extractEdgePolylines(laid).map(e => ({
     ...e,
     ...(edgeMetaById[e.id] || {}),
   }));
+  // Rule: arrows never cross group blocks. Detour any middle segment that
+  // would clip an intermediate group card (source/target cards excluded —
+  // the arrow terminates at their ports).
+  const overviewCardBboxes = (laid.children || []).map(box => ({
+    id: box.id,
+    x1: box.x || 0, y1: box.y || 0,
+    x2: (box.x || 0) + (box.width || 0),
+    y2: (box.y || 0) + (box.height || 0),
+  }));
+  const polylines = rawPolylines.map(e => {
+    const srcId = PX.splitPortId(e.source).nodeId;
+    const tgtId = PX.splitPortId(e.target).nodeId;
+    const obstacles = overviewCardBboxes.filter(b => b.id !== srcId && b.id !== tgtId);
+    if (obstacles.length === 0) return e;
+    return {
+      ...e,
+      points: PX.detourAroundLabels(e.points || [], obstacles, 14, { preserveEndSegments: true }),
+    };
+  });
   const labelled = PX.placeEdgeLabels(polylines, { centerOnPath: true }).map(e => {
     if (!(e.count > 0 && e.sourceGroup && e.targetGroup)) {
       return { ...e, __labelW: 0, __labelH: 0 };
@@ -321,44 +340,122 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     cardGapY: 22,
   });
 
-  // Run ELK in routing-only mode on the hand-positioned tree.
-  let laid = null;
-  let edgesRouted = [];
-  if (layout.ir.edges.length > 0) {
-    try {
-      laid = await PX.runLayout(layout.ir);
-      const polylines = PX.extractEdgePolylines(laid);
-      const edgeMetaById = Object.fromEntries(layout.ir.edges.map(e => [e.id, e]));
-      edgesRouted = polylines.map(p => ({
-        ...p,
-        ...(edgeMetaById[p.id] || {}),
-      }));
-    } catch (err) {
-      console.warn('[prefxplain] edge routing failed, drawing direct lines:', err);
-      edgesRouted = [];
-    }
-  }
+  // Hand-route intra-group edges using the known band/column structure.
+  //
+  // ELK's 'fixed' algorithm proved fragile for this layout — it aborts with
+  // "edge section count 0" on some graphs and leaves zero polylines. Hand-
+  // routing is deterministic, respects the rules, and always succeeds.
+  //
+  // The rules we enforce:
+  //   1. Arrows NEVER cross a card. Horizontal runs sit in the gap BETWEEN
+  //      columns (empty by construction) or BELOW all cards (trunk zone).
+  //      Vertical runs sit in a column's side gap.
+  //   2. The arrowhead tip lands AT the target's border.
+  //   3. Each arrow owns its own corridor (per-edge lane offset).
+  //
+  // Routing strategy (picked per edge from relative position):
+  //   SHORT HOP (same col OR adjacent col, dx ≤ cw + bandGapX):
+  //     4-point C/Z shape flowing horizontally through the gap between
+  //     source and target. Enters target from its WEST or EAST side.
+  //     Short path, stays inside the visible band area — no risk of
+  //     overshooting the canvas top.
+  //   LONG HOP (>1 column apart):
+  //     6-point trunk route: source.SOUTH → down to trunk below all cards
+  //     → across → up in target's side-gap → across above target → DOWN
+  //     into target.NORTH. Only this shape can skip over intermediate
+  //     columns without crossing their cards.
+  const cards = layout.ir.children || [];
+  const cardById = Object.fromEntries(cards.map(c => [c.id, c]));
+  const mainBandsBottomY = cards.length > 0
+    ? Math.max(...cards.map(c => c.y + c.height))
+    : 0;
+  const TRUNK_BASE = mainBandsBottomY + 20;
+  const APPROACH_MARGIN = 18;
+  const GAP_OFFSET = 22;
+  // Column width including the bandGapX that separates parallel columns.
+  // We use this to decide whether a hop crosses zero, one, or many gaps.
+  const BAND_GAP_X = 72;            // matches buildGroupStoryLayoutIr call
+  const CARD_WIDTH = cards.length > 0 ? cards[0].width : 304;
+  const COL_STRIDE = CARD_WIDTH + BAND_GAP_X;
 
-  // If ELK couldn't route (or declined), fall back to direct lines between
-  // port anchors so the panel still shows flow.
-  if (edgesRouted.length === 0 && layout.ir.edges.length > 0) {
-    edgesRouted = layout.ir.edges.map(e => {
-      const srcNode = layout.ir.children.find(c => c.id === e.sourceNode);
-      const tgtNode = layout.ir.children.find(c => c.id === e.targetNode);
-      if (!srcNode || !tgtNode) return null;
-      const sx = srcNode.x + srcNode.width / 2;
-      const sy = srcNode.y + srcNode.height;
-      const tx = tgtNode.x + tgtNode.width / 2;
-      const ty = tgtNode.y;
-      return {
-        ...e,
-        id: e.id,
-        source: `${e.sourceNode}.out`,
-        target: `${e.targetNode}.in`,
-        points: [{ x: sx, y: sy }, { x: sx, y: (sy + ty) / 2 }, { x: tx, y: (sy + ty) / 2 }, { x: tx, y: ty }],
-      };
-    }).filter(Boolean);
-  }
+  const edgesRouted = layout.ir.edges.map((e, i) => {
+    const sNode = cardById[e.sourceNode];
+    const tNode = cardById[e.targetNode];
+    if (!sNode || !tNode) return null;
+
+    const dx = tNode.x - sNode.x;
+    const numColsApart = Math.round(Math.abs(dx) / COL_STRIDE);
+    const laneX = i * 10;
+    const laneY = i * 10;
+
+    const sMidY = sNode.y + sNode.height / 2;
+    const tMidY = tNode.y + tNode.height / 2;
+
+    let points;
+
+    if (numColsApart === 0) {
+      // Same column — 4-point C route in the RIGHT gap of the column.
+      // Enters target from its EAST side, so arrowhead touches the right
+      // border of the card.
+      const gapX = sNode.x + sNode.width + GAP_OFFSET + laneX;
+      const sSideX = sNode.x + sNode.width;
+      const tSideX = tNode.x + tNode.width;
+      points = [
+        { x: sSideX, y: sMidY },     // source.EAST
+        { x: gapX,   y: sMidY },     // horiz into right gap
+        { x: gapX,   y: tMidY },     // vert in right gap
+        { x: tSideX, y: tMidY },     // horiz back into target.EAST
+      ];
+    } else if (numColsApart === 1) {
+      // Adjacent columns — 4-point route through the gap between them.
+      // Arrow flows left→right (or right→left), enters target from the
+      // WEST or EAST side depending on direction.
+      const rightward = dx > 0;
+      const gapCenterX = rightward
+        ? sNode.x + sNode.width + BAND_GAP_X / 2 + laneX - (BAND_GAP_X / 4)
+        : sNode.x - BAND_GAP_X / 2 - laneX + (BAND_GAP_X / 4);
+      const sSideX = rightward ? sNode.x + sNode.width : sNode.x;
+      const tSideX = rightward ? tNode.x : tNode.x + tNode.width;
+      points = [
+        { x: sSideX,    y: sMidY },
+        { x: gapCenterX, y: sMidY },
+        { x: gapCenterX, y: tMidY },
+        { x: tSideX,    y: tMidY },
+      ];
+    } else {
+      // Far hop (skips one or more columns) — 6-point trunk route below
+      // all cards. Only this shape can get past intermediate columns.
+      const sx = sNode.x + sNode.width / 2;
+      const sy = sNode.y + sNode.height;
+      const tx = tNode.x + tNode.width / 2;
+      const ty = tNode.y;
+      const trunkY = TRUNK_BASE + laneY;
+      const approachY = ty - APPROACH_MARGIN;
+      const gapX = dx > 0
+        ? tNode.x - GAP_OFFSET - laneX
+        : tNode.x + tNode.width + GAP_OFFSET + laneX;
+      points = [
+        { x: sx,   y: sy },
+        { x: sx,   y: trunkY },
+        { x: gapX, y: trunkY },
+        { x: gapX, y: approachY },
+        { x: tx,   y: approachY },
+        { x: tx,   y: ty },
+      ];
+    }
+
+    return {
+      ...e,
+      source: `${e.sourceNode}.out-gs${i}`,
+      target: `${e.targetNode}.in-gs${i}`,
+      points,
+    };
+  }).filter(Boolean);
+
+  // Used only for bounding-box computation later (layout.ir.children already
+  // carry absolute coordinates in the pre-translate frame); we no longer
+  // need ELK's laid tree for anything.
+  const laid = null;
 
   // Translate everything by (mainLeft, bandsStartY) so the boundary anchor
   // columns on the left stay clear of the main bands.
@@ -379,8 +476,30 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   }));
   const edgesTranslated = edgesRouted.map(e => _translateEdge(e, mainLeft, bandsStartY));
 
+  // Rule: arrows never cross cards — they must go AROUND them. ELK's router
+  // mostly honors this under FIXED with ORTHOGONAL + generous edgeNode
+  // spacing, but tight band layouts can still produce segments that clip an
+  // intermediate card. We detour any middle segment that would cross a card
+  // (source/target cards excluded since the path terminates at their ports).
+  // preserveEndSegments keeps the port stubs untouched so the arrowhead's
+  // tailTrim sleeve (~14px at stroke-width 2) lands cleanly on the border.
+  const cardObstaclesFor = (e) => {
+    const excluded = new Set([e.sourceNode, e.targetNode]);
+    return Object.entries(nodesById)
+      .filter(([id]) => !excluded.has(id))
+      .map(([id, n]) => ({ id, x1: n.x, y1: n.y, x2: n.x + n.w, y2: n.y + n.h }));
+  };
+  const cardAvoidedEdges = edgesTranslated.map(e => {
+    const obstacles = cardObstaclesFor(e);
+    if (obstacles.length === 0) return e;
+    return {
+      ...e,
+      points: PX.detourAroundLabels(e.points || [], obstacles, 14, { preserveEndSegments: true }),
+    };
+  });
+
   // Edge label placement + collision avoidance — reuse the group-map pipeline.
-  const labelled = PX.placeEdgeLabels(edgesTranslated, { centerOnPath: false });
+  const labelled = PX.placeEdgeLabels(cardAvoidedEdges, { centerOnPath: false });
   const segments = [];
   for (const edge of labelled) {
     const pts = edge.points || [];
@@ -443,7 +562,13 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   const anchorsStackH = maxAnchorCount > 0
     ? maxAnchorCount * ANCHOR_H + Math.max(0, maxAnchorCount - 1) * ANCHOR_GAP_Y
     : 0;
-  const contentH = Math.max(bandsH + USE_ZONE_H, anchorsStackH);
+  // Reserve room below the bands for the hand-routed trunk zone. Without
+  // this, the trunk Y (mainBandsBottomY + 20 + lane*10) can overshoot bandsH
+  // for groups with many edges, pushing the polyline past the canvas.
+  const allEdgeYs = edgesRouted.flatMap(e => (e.points || []).map(p => p.y));
+  const maxEdgeY = allEdgeYs.length > 0 ? Math.max(...allEdgeYs) : 0;
+  const neededH = Math.max(bandsH, maxEdgeY + 20);
+  const contentH = Math.max(neededH + USE_ZONE_H, anchorsStackH);
   const stressPreview = PX.components.stressStrip({
     x: LEFT, y: 0, w: CANVAS - 2 * LEFT, stress: story.stress,
   });
@@ -737,9 +862,7 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   for (const be of boundaryEdges) {
     const state = boundaryEdgeState(be);
     const stroke = PX.stateColor(state);
-    // Non-highlighted edges fade to near-invisible when something is lit
-    // up — keeps the viewer focused on the active path, no ambient noise.
-    const opacity = state === 'faded' ? 0.06 : state === 'normal' ? 0.5 : 0.95;
+    const opacity = PX.stateOpacity(state, 'thin');
     const d = PX.pathD(be.points, 6, 14);
     // Marker matches state so the arrowhead color tracks the path color
     // (was hardcoded normal/faded → arrowheads stayed grey on lit paths).
@@ -845,7 +968,7 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
 
   svg += `</svg>`;
 
-  console.log(`[prefxplain] group-story ${groupId}: ${story.entries.length} entries, ${story.bands.length} bands, ${story.edges.length} edges, stress=${story.stress.length}`);
+  PX.log(`[prefxplain] group-story ${groupId}: ${story.entries.length} entries, ${story.bands.length} bands, ${story.edges.length} edges, stress=${story.stress.length}`);
 
   return {
     svg,

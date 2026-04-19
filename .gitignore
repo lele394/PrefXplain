@@ -57,3 +57,8 @@ design-audit/
 images/
 transcript_*.md
 transcript_*.txt
+qa_screenshots/
+qa_viewport_check.py
+visualReframing.md
+visualReframing.txt
+GEO-AUDIT-REPORT.md

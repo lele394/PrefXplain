@@ -849,7 +849,6 @@ def build_group_edges(
 
 
 def apply_topological_levels(nodes: list[SemanticDiagramNode], edges: list[SemanticDiagramEdge]) -> None:
-    by_id = {node.id: node for node in nodes}
     indegree: dict[str, int] = {node.id: 0 for node in nodes}
     adjacency: dict[str, list[str]] = {node.id: [] for node in nodes}
     for edge in edges:

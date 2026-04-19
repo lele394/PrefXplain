@@ -268,16 +268,16 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
     walkPath = false,
     cardRects = [],
   } = opts;
+  // Inputs are never mutated: each placed edge is a fresh object with
+  // updated labelX/labelY. Returned array order mirrors the input.
   const placed = [];
+  const byId = new Map();
   const sorted = [...edges].sort((a, b) =>
     ((a.labelY || 0) - (b.labelY || 0)) || ((a.labelX || 0) - (b.labelX || 0))
   );
 
   const collides = (e, lx, ly, w, h) => {
     const bbox = { x1: lx - w / 2, y1: ly - h / 2, x2: lx + w / 2, y2: ly + h / 2 };
-    // Card/node obstacle check: labels must never overlap a hero card.
-    // Cards are opaque, and a label underneath would be hidden or visually
-    // merge into the card — hard rejection, no shared-trunk exception.
     for (const c of cardRects) {
       if (!(bbox.x2 < c.x1 || bbox.x1 > c.x2 || bbox.y2 < c.y1 || bbox.y1 > c.y2)) {
         return true;
@@ -290,12 +290,6 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
       const dy = Math.abs(p.labelY - ly);
       if (dx < (pw + w) / 2 + gap && dy < (ph + h) / 2 + gap) return true;
     }
-    // Shared-trunk exception: if one of the edge's own segments already
-    // crosses the label bbox, the label is on-path. Foreign segments that
-    // also cross the bbox are a shared corridor (multiple edges converging
-    // on a common trunk), not a real obstacle. Foreign arrows passing
-    // through the label area are detoured around it by detourAroundLabels
-    // in a separate pass.
     const ownCovers = segments.some(s => s.edgeId === e.id && _overlapsSegment(bbox, s, 0));
     for (const seg of segments) {
       if (seg.edgeId === e.id) continue;
@@ -307,15 +301,9 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
     return false;
   };
 
-  // walkPath=true: candidates come from the edge's own polyline — label is
-  // guaranteed on-path. walkPath=false (legacy): free-float Y-nudge.
   const tryWalkPath = (e, w, h) => {
     const pts = e.points;
     if (!pts || pts.length < 2) return null;
-    // Try t=0.5 first, then fan outward in ~5% arc-length steps, alternating
-    // sides. Max walk range stops at 10% (head) and 90% (tail) so the label
-    // never ends up jammed against a node. Fine granularity (0.025 step) means
-    // the label can shift only a few pixels if needed — tight hug on the arrow.
     const tries = [0.5];
     for (let i = 1; i <= 16; i++) {
       const d = i * 0.025;
@@ -339,46 +327,47 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
     return null;
   };
 
+  const emit = (src, labelX, labelY) => {
+    const copy = { ...src, labelX, labelY };
+    placed.push(copy);
+    byId.set(src.id, copy);
+  };
+
   for (const e of sorted) {
-    if (e.labelX == null || e.labelY == null) { placed.push(e); continue; }
+    if (e.labelX == null || e.labelY == null) { emit(e, e.labelX, e.labelY); continue; }
     const w = labelW(e), h = labelH(e);
     const originalX = e.labelX;
     const originalY = e.labelY;
 
     if (walkPath) {
-      // walk-polyline mode: label stays on the arrow no matter what.
       if (!collides(e, originalX, originalY, w, h)) {
-        placed.push(e);
+        emit(e, originalX, originalY);
         continue;
       }
       const p = tryWalkPath(e, w, h);
-      if (p) { e.labelX = p.x; e.labelY = p.y; placed.push(e); continue; }
-      // No non-colliding position on the polyline: keep midpoint on-path
-      // (accept overlap — label rect bg-fill masks whatever it covers).
-      placed.push(e);
+      if (p) { emit(e, p.x, p.y); continue; }
+      emit(e, originalX, originalY);
       continue;
     }
 
     const yAtOriginalX = tryYNudge(e, originalX, w, h, originalY);
     if (yAtOriginalX != null) {
-      e.labelY = yAtOriginalX;
-      placed.push(e);
+      emit(e, originalX, yAtOriginalX);
       continue;
     }
 
-    // Small X-nudge as last resort
     const dx = w / 2 + gap;
     let solved = false;
     for (const off of [-dx, +dx]) {
       const yy = tryYNudge(e, originalX + off, w, h, originalY);
       if (yy != null) {
-        e.labelX = originalX + off; e.labelY = yy; solved = true; break;
+        emit(e, originalX + off, yy); solved = true; break;
       }
     }
-    if (!solved) e.labelY = originalY;
-    placed.push(e);
+    if (!solved) emit(e, originalX, originalY);
   }
-  return edges;
+  // Return results in input order (callers rely on stable positional mapping).
+  return edges.map(e => byId.get(e.id) || e);
 };
 
 // Detour an orthogonal polyline around foreign label bboxes. For each segment

@@ -14,13 +14,34 @@ PX.views = PX.views || {};
 
 PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
   const { selected = null, index = null, focusedGroup = null, hoveredGroup = null } = opts;
-  const groupsMeta = (graph.metaGroups && graph.metaGroups) || {};
+  const groupsMeta = graph.metaGroups || {};
   const ir = PX.buildIr(graph, 'group-map');
   ir.layoutOptions = { 'elk.aspectRatio': '1.0' };
   const laid = await PX.runLayout(ir);
   const nodesById = PX._collectNodes(laid);
-  const polylines = PX.extractEdgePolylines(laid);
+  const rawPolylines = PX.extractEdgePolylines(laid);
   const irEdgesById = Object.fromEntries((ir.edges || []).map(e => [e.id, e]));
+
+  // Rule: arrows never cross group blocks. Detour any middle segment that
+  // would clip an intermediate group card (source/target cards excluded —
+  // the arrow terminates at their ports). Matches the same rule applied in
+  // the nested view so aggregate arrows honour block boundaries everywhere.
+  const cardBboxes = (laid.children || []).map(box => ({
+    id: box.id,
+    x1: box.x || 0, y1: box.y || 0,
+    x2: (box.x || 0) + (box.width || 0),
+    y2: (box.y || 0) + (box.height || 0),
+  }));
+  const polylines = rawPolylines.map(p => {
+    const srcId = PX.splitPortId(p.source).nodeId;
+    const tgtId = PX.splitPortId(p.target).nodeId;
+    const obstacles = cardBboxes.filter(b => b.id !== srcId && b.id !== tgtId);
+    if (obstacles.length === 0) return p;
+    return {
+      ...p,
+      points: PX.detourAroundLabels(p.points || [], obstacles, 14, { preserveEndSegments: true }),
+    };
+  });
 
   const withLabelDims = polylines.map(p => {
     const irEdge = irEdgesById[p.id] || {};

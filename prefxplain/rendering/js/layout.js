@@ -84,10 +84,10 @@ PX.runLayout = async function runLayout(ir) {
     } finally {
       console.warn = origWarn;
     }
-    console.log(`[prefxplain] layout: worker path (${nodeCount} nodes)`);
+    PX.log(`[prefxplain] layout: worker path (${nodeCount} nodes)`);
   } else {
     elk = new ELK();
-    console.log(`[prefxplain] layout: main thread (${nodeCount} nodes)`);
+    PX.log(`[prefxplain] layout: main thread (${nodeCount} nodes)`);
   }
   const withOptions = {
     ...ir,
@@ -96,6 +96,6 @@ PX.runLayout = async function runLayout(ir) {
   const t0 = performance.now();
   const laid = await elk.layout(withOptions);
   const t1 = performance.now();
-  console.log(`[prefxplain] layout done in ${(t1 - t0).toFixed(0)} ms`);
+  PX.log(`[prefxplain] layout done in ${(t1 - t0).toFixed(0)} ms`);
   return laid;
 };

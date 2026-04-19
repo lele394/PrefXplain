@@ -19,7 +19,7 @@ from typing import Callable
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from .graph import Graph, Node, Symbol
+from .graph import Graph, Node
 
 console = Console()
 

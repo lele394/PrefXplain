@@ -7,13 +7,13 @@ the modules at render time, in a defined order.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 _JS_DIR = Path(__file__).parent / "js"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _read(rel_path: str) -> str:
     """Read a file under the js/ directory, cached for the process lifetime."""
     return (_JS_DIR / rel_path).read_text(encoding="utf-8")

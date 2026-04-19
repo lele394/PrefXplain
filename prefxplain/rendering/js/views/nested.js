@@ -37,6 +37,7 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     filter = '',
     index = null,
     focusedGroup = null,
+    hoveredGroup = null,
   } = opts;
   const idx = index || PX.buildGraphIndex(graph);
   const focusGroupId = focusedGroup || (selected && idx.byId[selected]
@@ -44,16 +45,16 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     : null);
 
   if (!focusGroupId) {
-    return PX.views._nestedOverview(graph, idx, { showBullets, selected, filter });
+    return PX.views._nestedOverview(graph, idx, { showBullets, selected, filter, hoveredGroup });
   }
   return PX.views._nestedFocused(graph, idx, focusGroupId, {
-    showBullets, selected, filter,
+    showBullets, selected, filter, hoveredGroup,
   });
 };
 
 // ── Overview (no group focused): full-canvas nested landscape ──────────
 PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
-  const { showBullets, selected, filter } = opts;
+  const { showBullets, selected, filter, hoveredGroup = null } = opts;
   const groupsMeta = (graph.metaGroups && graph.metaGroups) || {};
   const overviewIr = PX.buildIr(graph, 'nested', {
     showBullets,
@@ -116,6 +117,20 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
     prevY = b.y || 0;
   }
 
+  const selectedGroup = hoveredGroup || (selected && idx ? (idx.byId[selected] || {}).group : null);
+  const groupEdgeState = (e) => {
+    if (!selectedGroup) return 'normal';
+    if (e.sourceGroup === selectedGroup) return 'depends';
+    if (e.targetGroup === selectedGroup) return 'imports';
+    return 'faded';
+  };
+  const groupBoxState = (name) => {
+    if (!selectedGroup) return 'normal';
+    if (name === selectedGroup) return 'selected';
+    const involved = edges.some(e => (e.sourceGroup === selectedGroup && e.targetGroup === name) || (e.targetGroup === selectedGroup && e.sourceGroup === name));
+    return involved ? 'normal' : 'faded';
+  };
+
   const LEFT_PAD = 24;
   const TOP_PAD = 28;
   let minX = 0, minY = 0;
@@ -167,9 +182,10 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
   } : null);
 
   for (const e of translated) {
+    const st = groupEdgeState(e);
     svg += PX.components.edge(e, {
       nodesById,
-      state: 'normal',
+      state: st,
       thick: true,
       pathOnly: true,
     });
@@ -178,6 +194,7 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
     const meta = groupsMeta[box.id] || {};
     const stats = ((idx.groupStats || {})[box.id]) || {};
     const color = PX.groupColor(box.id, meta);
+    const st = groupBoxState(box.id);
     svg += PX.components.groupContainer({
       x: (box.x || 0) + dx,
       y: (box.y || 0) + dy,
@@ -194,16 +211,17 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
       strongestOut: stats.strongestOut || null,
       gatewayFiles: (stats.bridgeFiles || []).slice(0, 3),
       expanded: false,
-      selected: false,
-      faded: false,
+      selected: st === 'selected',
+      faded: st === 'faded',
     });
   }
   for (const e of translated) {
+    const st = groupEdgeState(e);
     const label = mkLabel(e);
     if (!label) continue;
     svg += PX.components.edge(e, {
       nodesById,
-      state: 'normal',
+      state: st,
       label,
       thick: true,
       labelOnly: true,
@@ -215,17 +233,17 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
 
 // ── Focused group: ranked architectural narrative ──────────────────────
 PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts) {
-  const { showBullets, selected, filter } = opts;
+  const { showBullets, selected, filter, hoveredGroup = null } = opts;
   const story = PX.buildGroupStory(graph, groupId, idx);
-  const CANVAS = 1280;
-  const LEFT = 28;
+  const CANVAS = 1640;
+  const LEFT = 32;
   const TOP = 20;
   const SUMMARY_H = 84;
   const GAP = 14;
-  const ANCHOR_W = 170;
-  const ANCHOR_H = 44;
-  const ANCHOR_GAP_Y = 14;
-  const ANCHOR_MARGIN = 22;
+  const ANCHOR_W = 180;
+  const ANCHOR_H = 48;
+  const ANCHOR_GAP_Y = 16;
+  const ANCHOR_MARGIN = 36;
 
   // Boundary anchors follow the data-flow convention used in architecture
   // diagrams: UPSTREAM (what this group depends on) sits on the LEFT,
@@ -252,9 +270,9 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     canvasWidth: mainWidth,
     topPad: 0,           // we apply our own top offset below
     leftPad: 0,
-    bandGapY: 60,
-    bandGapX: 36,
-    cardGapY: 18,
+    bandGapY: 72,
+    bandGapX: 72,
+    cardGapY: 22,
   });
 
   // Run ELK in routing-only mode on the hand-positioned tree.
@@ -340,44 +358,6 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     cardRects,
   });
 
-  // Selection-driven file states.
-  const SPOF_MIN = 8;
-  const neighborsOf = (id) => {
-    const n = new Set();
-    for (const e of graph.edges || []) {
-      if (e.source === id) n.add(e.target);
-      if (e.target === id) n.add(e.source);
-    }
-    return n;
-  };
-  const selectedNeighbors = selected ? neighborsOf(selected) : null;
-  const fileState = (id) => {
-    if (filter) {
-      const n = idx.byId[id];
-      if (!n) return 'normal';
-      const q = filter.toLowerCase();
-      const matches = (n.label || '').toLowerCase().includes(q)
-        || (n.description || '').toLowerCase().includes(q)
-        || (n.short || '').toLowerCase().includes(q);
-      if (!selected) return matches ? 'match' : 'dimmed';
-    }
-    if (!selected) return 'normal';
-    if (id === selected) return 'selected';
-    if (selectedNeighbors && selectedNeighbors.has(id)) {
-      for (const e of graph.edges || []) {
-        if (e.source === selected && e.target === id) return 'depends';
-        if (e.target === selected && e.source === id) return 'imports';
-      }
-    }
-    return 'dimmed';
-  };
-  const edgeState = (e) => {
-    if (!selected) return 'normal';
-    if (e.sourceNode === selected) return 'depends';
-    if (e.targetNode === selected) return 'imports';
-    return 'faded';
-  };
-
   // ── Compose SVG ───────────────────────────────────────────────────
   // Compute final canvas size. Bands section height comes from the layout;
   // stress strip adds its own measured height. Anchor columns may be taller
@@ -422,12 +402,12 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   //   file       →  useAnchor (we feed our downstream consumer)
   // Per-group corridors sit just inside each anchor column so the
   // horizontal run never crosses a file card.
-  const DEP_CORRIDOR_BASE = mainLeft - 6;   // just right of LEFT anchors
-  const USE_CORRIDOR_BASE = mainLeft + mainWidth + 6; // just left of RIGHT anchors
+  const DEP_CORRIDOR_BASE = mainLeft - 12;   // just right of LEFT anchors
+  const USE_CORRIDOR_BASE = mainLeft + mainWidth + 12; // just left of RIGHT anchors
   const depCorridorX = {};
-  depAnchors.forEach((a, i) => { depCorridorX[a.groupId] = DEP_CORRIDOR_BASE - i * 4; });
+  depAnchors.forEach((a, i) => { depCorridorX[a.groupId] = DEP_CORRIDOR_BASE - i * 6; });
   const useCorridorX = {};
-  useAnchors.forEach((a, i) => { useCorridorX[a.groupId] = USE_CORRIDOR_BASE + i * 4; });
+  useAnchors.forEach((a, i) => { useCorridorX[a.groupId] = USE_CORRIDOR_BASE + i * 6; });
   const boundaryEdges = [];
   // Dependency edges: arrow tail on the anchor (upstream), arrowhead on our
   // file card (downstream consumer within our group).
@@ -481,13 +461,60 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       ],
     });
   }
+
+  // Selection-driven file states.
+  const neighborsOf = (id) => {
+    const n = new Set();
+    for (const e of graph.edges || []) {
+      if (e.source === id) n.add(e.target);
+      if (e.target === id) n.add(e.source);
+    }
+    return n;
+  };
+  const selectedNeighbors = selected ? neighborsOf(selected) : null;
+  const fileState = (id) => {
+    if (filter) {
+      const n = idx.byId[id];
+      if (!n) return 'normal';
+      const q = filter.toLowerCase();
+      const matches = (n.label || '').toLowerCase().includes(q)
+        || (n.description || '').toLowerCase().includes(q)
+        || (n.short || '').toLowerCase().includes(q);
+      if (!selected) return matches ? 'match' : 'dimmed';
+    }
+    if (hoveredGroup) {
+      const isConnected = boundaryEdges.some(be => be.groupId === hoveredGroup && be.fileId === id);
+      return isConnected ? 'normal' : 'dimmed';
+    }
+    if (!selected) return 'normal';
+    if (id === selected) return 'selected';
+    if (selectedNeighbors && selectedNeighbors.has(id)) {
+      for (const e of graph.edges || []) {
+        if (e.source === selected && e.target === id) return 'depends';
+        if (e.target === selected && e.source === id) return 'imports';
+      }
+    }
+    return 'dimmed';
+  };
+  const edgeState = (e) => {
+    if (hoveredGroup) return 'faded';
+    if (!selected) return 'normal';
+    if (e.sourceNode === selected) return 'depends';
+    if (e.targetNode === selected) return 'imports';
+    return 'faded';
+  };
+
   const boundaryEdgeState = (be) => {
+    if (hoveredGroup === be.groupId) return be.kind === 'boundary-use' ? 'imports' : 'depends';
     if (!selected) return 'normal';
     if (be.fileId === selected) return be.kind === 'boundary-use' ? 'imports' : 'depends';
     return 'faded';
   };
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
+  // Use a natural pixel width (scaled by zoom) so the focused view keeps its
+  // air-per-card budget even when the parent canvas is narrower than CANVAS.
+  // Parent #px-canvas has overflow:auto, so the SVG drives horizontal scroll.
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(${W}px * var(--px-zoom, 1));height:auto;min-width:${W}px" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
   svg += PX.components.markers();
 
   // Summary header. (No breadcrumb here — the top info bar owns the
@@ -536,16 +563,16 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       : state === 'imports' ? PX.stateColor('imports')
       : PX.T.inkFaint;
     const opacity = state === 'faded' ? 0.18 : state === 'normal' ? 0.5 : 0.95;
-    const d = PX.pathD(be.points, 5, 7);
-    svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.2" opacity="${opacity}" marker-end="url(#arr-${state === 'faded' ? 'faded' : 'normal'})" style="transition:all 200ms"/>`;
+    const d = PX.pathD(be.points, 6, 14);
+    svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="2" opacity="${opacity}" marker-end="url(#arr-${state === 'faded' ? 'faded' : 'normal'})" style="transition:all 200ms"/>`;
     if (be.count > 1) {
       const lx = (be.points[1].x + be.points[2].x) / 2;
       const ly = (be.points[1].y + be.points[2].y) / 2;
       const txt = `${be.count}\u00D7`;
-      const lw = txt.length * 6 + 10;
+      const lw = txt.length * 6 + 12;
       svg += `<g pointer-events="none" opacity="${state === 'faded' ? 0.3 : 1}">`
-        + `<rect x="${lx - lw / 2}" y="${ly - 8}" width="${lw}" height="16" fill="${PX.T.bg}" stroke="${stroke}" stroke-width="0.8" stroke-opacity="0.6" rx="8"/>`
-        + `<text x="${lx}" y="${ly + 3.5}" font-family="${PX.T.mono}" font-size="9.5" font-weight="600" fill="${PX.T.inkMuted}" text-anchor="middle">${txt}</text>`
+        + `<rect x="${lx - lw / 2}" y="${ly - 9}" width="${lw}" height="18" fill="${PX.T.bg}" stroke="${stroke}" stroke-width="1" stroke-opacity="0.7" rx="9"/>`
+        + `<text x="${lx}" y="${ly + 4}" font-family="${PX.T.mono}" font-size="10" font-weight="600" fill="${PX.T.inkMuted}" text-anchor="middle">${txt}</text>`
         + `</g>`;
     }
   }
@@ -558,6 +585,8 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     svg += PX.components.ghostAnchor({
       x: p.x, y: p.y, w: p.w, h: p.h,
       groupId: a.groupId, count: a.count, color: a.color, direction: 'dep',
+      selected: hoveredGroup === a.groupId,
+      faded: hoveredGroup && hoveredGroup !== a.groupId,
     });
   }
   for (const a of useAnchors) {
@@ -566,6 +595,8 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     svg += PX.components.ghostAnchor({
       x: p.x, y: p.y, w: p.w, h: p.h,
       groupId: a.groupId, count: a.count, color: a.color, direction: 'use',
+      selected: hoveredGroup === a.groupId,
+      faded: hoveredGroup && hoveredGroup !== a.groupId,
     });
   }
 

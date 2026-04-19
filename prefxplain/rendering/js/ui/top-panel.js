@@ -153,7 +153,7 @@ function _renderEmpty(graph) {
   const T = PX.T;
   const v = graph.version || '';
   return `
-    <div style="padding:10px 14px;background:${T.panel};border-bottom:1px solid ${T.border};display:flex;align-items:center;gap:12px;font-family:${T.ui};flex-shrink:0">
+    <div style="padding:6px 14px;background:${T.panel};border-bottom:1px solid ${T.border};display:flex;align-items:center;gap:12px;font-family:${T.ui};flex-shrink:0">
       <span style="font-size:13px;font-weight:600;color:${T.ink}">prefxplain ${v ? `<span style="color:${T.inkFaint};font-family:${T.mono};font-weight:400">v${PX.escapeXml(v)}</span>` : ''}</span>
       <span style="color:${T.borderAlt}">\u00b7</span>
       ${_pill('FILES', graph.nodes.length)}
@@ -186,7 +186,7 @@ function _renderFocusedGroup(graph, groupId, index, groupsMeta) {
   ).join('');
   return `
     <div style="background:${T.panel};border-bottom:1px solid ${T.border};font-family:${T.ui};flex-shrink:0">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid ${T.borderAlt};white-space:nowrap;overflow-x:auto">
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid ${T.borderAlt};white-space:nowrap;overflow-x:auto">
         <span style="width:3px;height:20px;background:${color};border-radius:1px;flex-shrink:0"></span>
         <span style="font-size:13px;font-weight:700;color:${T.ink};flex-shrink:0">${PX.escapeXml(groupId)}</span>
         <span style="color:${T.borderAlt}">\u00b7</span>
@@ -198,7 +198,7 @@ function _renderFocusedGroup(graph, groupId, index, groupsMeta) {
         <span style="flex:1"></span>
         <button data-action="clear-focus" style="font-family:${T.mono};font-size:10.5px;padding:3px 9px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u2190 back to overview</button>
       </div>
-      <div style="display:flex;align-items:flex-start;gap:14px;padding:8px 14px;font-size:12px;color:${T.ink2};line-height:1.5">
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:5px 14px;font-size:12px;color:${T.ink2};line-height:1.45">
         <div style="flex:1;min-width:0">
           <div>${PX.escapeXml(meta.desc || meta.description || '')}</div>
           <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;color:${T.inkMuted};font-family:${T.mono};font-size:11px">
@@ -224,7 +224,7 @@ function _renderSelected(graph, selected, index, groupsMeta) {
   const kb = ((n.size || 0) / 1024).toFixed(1);
   return `
     <div style="background:${T.panel};border-bottom:1px solid ${T.border};font-family:${T.ui};flex-shrink:0">
-      <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid ${T.borderAlt};white-space:nowrap;overflow-x:auto">
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid ${T.borderAlt};white-space:nowrap;overflow-x:auto">
         <span style="width:3px;height:20px;background:${color};border-radius:1px;flex-shrink:0"></span>
         <span style="font-size:13px;font-weight:700;color:${T.ink};flex-shrink:0">${PX.escapeXml(n.short || n.label)}</span>
         <span style="color:${T.borderAlt}">\u00b7</span>
@@ -239,7 +239,7 @@ function _renderSelected(graph, selected, index, groupsMeta) {
         ${_pill('SIZE', `${kb} kB`)}
         <button data-action="deselect" style="font-family:${T.mono};font-size:10.5px;padding:3px 7px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u00d7</button>
       </div>
-      <div style="display:flex;align-items:flex-start;gap:14px;padding:8px 14px;font-size:12px;color:${T.ink2};line-height:1.5">
+      <div style="display:flex;align-items:flex-start;gap:14px;padding:5px 14px;font-size:12px;color:${T.ink2};line-height:1.45">
         <div style="flex:1;min-width:0">${PX.escapeXml(n.description || '')}</div>
         ${highlights.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0;max-width:360px;justify-content:flex-end">
           ${highlights.map(h => `<span style="display:inline-flex;align-items:center;background:${T.pill};border:1px solid ${T.pillBorder};border-radius:999px;padding:2px 9px;font-size:11px;color:${T.accent2};font-weight:500">${PX.escapeXml(h)}</span>`).join('')}

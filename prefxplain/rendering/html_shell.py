@@ -33,6 +33,7 @@ _APP_MODULES = [
     "ui/flow-modal.js",
     "ui/code-editor.js",
     "ui/legend.js",
+    "ui/minimap.js",
     "main.js",
 ]
 
@@ -150,6 +151,29 @@ _TEMPLATE = """<!doctype html>
     min-height: 30px;
   }}
   .px-explorer-list::-webkit-scrollbar-thumb:hover {{ background: #6e7681; }}
+
+  /* Main canvas: same always-visible scrollbar treatment so users can see
+     when there's more diagram off-screen (focused groups can be much wider
+     than the viewport). */
+  #px-canvas {{ scrollbar-width: thin; scrollbar-color: #484f58 #0d1117; }}
+  #px-canvas::-webkit-scrollbar {{
+    width: 10px;
+    height: 10px;
+    -webkit-appearance: none;
+    background: #0d1117;
+  }}
+  #px-canvas::-webkit-scrollbar-track {{
+    background: #0d1117;
+  }}
+  #px-canvas::-webkit-scrollbar-thumb {{
+    background: #484f58;
+    border-radius: 5px;
+    border: 2px solid #0d1117;
+    min-height: 30px;
+    min-width: 30px;
+  }}
+  #px-canvas::-webkit-scrollbar-thumb:hover {{ background: #6e7681; }}
+  #px-canvas::-webkit-scrollbar-corner {{ background: #0d1117; }}
 
   /* Code editor: inherits the VS Code theme inside the webview (font, colors,
      selection). Falls back to sensible dark defaults when loaded as plain HTML

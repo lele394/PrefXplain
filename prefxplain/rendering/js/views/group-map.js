@@ -13,7 +13,7 @@ window.PX = window.PX || {};
 PX.views = PX.views || {};
 
 PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
-  const { selected = null, index = null, focusedGroup = null } = opts;
+  const { selected = null, index = null, focusedGroup = null, hoveredGroup = null } = opts;
   const groupsMeta = (graph.metaGroups && graph.metaGroups) || {};
   const ir = PX.buildIr(graph, 'group-map');
   ir.layoutOptions = { 'elk.aspectRatio': '1.0' };
@@ -97,7 +97,7 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
     prevY = b.y || 0;
   }
 
-  const selectedGroup = focusedGroup || (selected && index ? (index.byId[selected] || {}).group : null);
+  const selectedGroup = focusedGroup || hoveredGroup || (selected && index ? (index.byId[selected] || {}).group : null);
   const groupEdgeState = (e) => {
     if (!selectedGroup) return 'normal';
     if (e.sourceGroup === selectedGroup) return 'depends';

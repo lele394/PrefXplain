@@ -31,6 +31,7 @@
     selected: null,
     filter: '',
     focusedGroup: null,
+    hoveredGroup: null,
   };
 
   // ── Shell DOM ─────────────────────────────────────────────────────
@@ -45,19 +46,30 @@
   shell.appendChild(middle);
   const sideHost = document.createElement('div'); middle.appendChild(sideHost);
   const canvasWrap = document.createElement('div');
-  canvasWrap.style.cssText = 'flex:1;min-height:0;position:relative;display:flex';
+  canvasWrap.style.cssText = 'flex:1;min-width:0;min-height:0;position:relative;display:flex';
   const canvas = document.createElement('div');
   canvas.id = 'px-canvas';
-  canvas.style.cssText = `flex:1;overflow:auto;min-height:0;padding:24px`;
+  canvas.style.cssText = `flex:1;overflow:auto;min-width:0;min-height:0;padding:24px`;
   canvasWrap.appendChild(canvas);
   middle.appendChild(canvasWrap);
 
-  // ── Zoom control overlay ─────────────────────────────────────────
+  // ── Bottom-right overlay stack: minimap (when focused) + zoom controls ──
+  // Both live in one flex-column so the minimap sits directly above the zoom
+  // buttons. The minimap self-hides when no group is focused.
+  const bottomRight = document.createElement('div');
+  bottomRight.style.cssText = `position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;align-items:flex-end;gap:8px;z-index:2;pointer-events:none`;
+  canvasWrap.appendChild(bottomRight);
+
+  const minimapHost = document.createElement('div');
+  minimapHost.style.cssText = 'pointer-events:auto';
+  bottomRight.appendChild(minimapHost);
+  const miniMap = PX.ui.minimap(minimapHost, { graph, groupsMeta });
+
   // Two buttons in the bottom-right: zoom in to 150% and reset to 100%.
   // Zoom is tracked per view so each keeps its own scale across toggles.
   const zoomState = { 'group-map': 1, nested: 1 };
   const zoomPanel = document.createElement('div');
-  zoomPanel.style.cssText = `position:absolute;right:16px;bottom:16px;display:flex;align-items:center;gap:4px;padding:4px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;font-family:${T.mono};color:${T.ink};box-shadow:0 4px 14px rgba(0,0,0,0.35);user-select:none;z-index:2`;
+  zoomPanel.style.cssText = `display:flex;align-items:center;gap:4px;padding:4px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;font-family:${T.mono};color:${T.ink};box-shadow:0 4px 14px rgba(0,0,0,0.35);user-select:none;pointer-events:auto`;
   const btn = (label, title) => {
     const b = document.createElement('button');
     b.textContent = label;
@@ -70,7 +82,7 @@
   const zIn = btn('150%', 'Zoom in to 150%');
   const zOut = btn('100%', 'Reset to 100%');
   zoomPanel.append(zIn, zOut);
-  canvasWrap.appendChild(zoomPanel);
+  bottomRight.appendChild(zoomPanel);
 
   const applyZoom = () => {
     const effective = zoomState[state.viewMode] ?? 1;
@@ -108,6 +120,9 @@
     side.setSelected(state.selected);
     side.setFocusedGroup(state.focusedGroup);
     switcher.setValue(state.viewMode);
+    // Minimap only relevant inside a focused group in nested mode.
+    const showMinimap = state.viewMode === 'nested' && state.focusedGroup;
+    miniMap.setFocused(showMinimap ? state.focusedGroup : null);
   };
   const setSelected = async (id) => {
     state.selected = id;
@@ -188,6 +203,42 @@
       await setFocusedGroup(null, { switchView: false });
     }
   });
+  // Minimap hover tracking: illuminate the hovered block's group in the
+  // bottom-right overview. Works off mouseover (bubbles) so we only install a
+  // single listener. Targets: file cards (group = file's group), group
+  // containers, ghost anchors (external group), and cluster headers (points
+  // at a file whose group is external).
+  const hoverGroupFromTarget = (target) => {
+    const ghost = target.closest('.ghost-anchor');
+    if (ghost) return ghost.getAttribute('data-anchor-group');
+    const cluster = target.closest('.cluster-header');
+    if (cluster) {
+      const tid = cluster.getAttribute('data-target');
+      const node = tid ? index.byId[tid] : null;
+      if (node) return node.group || 'Ungrouped';
+    }
+    const file = target.closest('.file-card');
+    if (file) {
+      const id = file.getAttribute('data-node');
+      const node = id ? index.byId[id] : null;
+      if (node) return node.group || 'Ungrouped';
+    }
+    const group = target.closest('.group-container,.hero-card');
+    if (group) return group.getAttribute('data-group');
+    return null;
+  };
+  canvas.addEventListener('mouseover', (e) => {
+    if (!(state.viewMode === 'nested' && state.focusedGroup)) return;
+    const g = hoverGroupFromTarget(e.target);
+    if (g) miniMap.setHighlight(g);
+  });
+  canvas.addEventListener('mouseout', (e) => {
+    if (!(state.viewMode === 'nested' && state.focusedGroup)) return;
+    const to = e.relatedTarget;
+    if (to && canvas.contains(to) && hoverGroupFromTarget(to)) return;
+    miniMap.clearHighlight();
+  });
+
   canvas.addEventListener('dblclick', (e) => {
     if (heroClickTimer) { clearTimeout(heroClickTimer); heroClickTimer = null; }
     const hero = e.target.closest('.hero-card');
@@ -201,6 +252,37 @@
       const id = file.getAttribute('data-node');
       if (id) PX.ui.flowModal({ nodeId: id, graph, index, groupsMeta });
     }
+  });
+
+  // Hover: highlight group connections in Overview/GroupMap
+  let hoverTimer = null;
+  canvas.addEventListener('mouseover', (e) => {
+    const hero = e.target.closest('.hero-card');
+    const group = e.target.closest('.group-container');
+    const ghost = e.target.closest('.ghost-anchor');
+    const gid = (hero || group)?.getAttribute('data-group') || ghost?.getAttribute('data-anchor-group');
+    if (gid === state.hoveredGroup) return;
+
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      state.hoveredGroup = gid || null;
+      rerender();
+    }, 40);
+  });
+  canvas.addEventListener('mouseout', (e) => {
+    if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) {
+      const hero = e.relatedTarget.closest('.hero-card');
+      const group = e.relatedTarget.closest('.group-container');
+      const ghost = e.relatedTarget.closest('.ghost-anchor');
+      if (hero || group || ghost) return;
+    }
+    if (hoverTimer) clearTimeout(hoverTimer);
+    hoverTimer = setTimeout(() => {
+      if (state.hoveredGroup !== null) {
+        state.hoveredGroup = null;
+        rerender();
+      }
+    }, 40);
   });
 
   // Editor opener: shared by canvas (space on selected file card) and
@@ -241,7 +323,9 @@
   // ── Render loop ───────────────────────────────────────────────────
   async function rerender() {
     applyZoom();
-    canvas.innerHTML = `<div style="padding:16px;font-family:${T.mono};font-size:11px;color:${T.inkFaint}">Laying out \u2026</div>`;
+    if (!canvas.innerHTML || canvas.innerHTML.includes('Laying out')) {
+      canvas.innerHTML = `<div style="padding:16px;font-family:${T.mono};font-size:11px;color:${T.inkFaint}">Laying out \u2026</div>`;
+    }
     try {
       const view = state.viewMode === 'nested'
         ? await PX.views.nested(graph, {
@@ -250,8 +334,14 @@
           filter: state.filter,
           index,
           focusedGroup: state.focusedGroup,
+          hoveredGroup: state.hoveredGroup,
         })
-        : await PX.views.groupMap(graph, { selected: state.selected, index, focusedGroup: state.focusedGroup });
+        : await PX.views.groupMap(graph, {
+          selected: state.selected,
+          index,
+          focusedGroup: state.focusedGroup,
+          hoveredGroup: state.hoveredGroup,
+        });
       canvas.innerHTML = view.svg;
       console.log(`[prefxplain] rendered ${state.viewMode}: ${view.W}x${view.H}`);
     } catch (err) {

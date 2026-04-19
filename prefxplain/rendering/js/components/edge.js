@@ -26,7 +26,7 @@ PX.components.edge = function edgeSvg(edge, opts = {}) {
   const pts = reverseArrow ? [...rawPts].reverse() : rawPts;
   const strokeW = thick
     ? Math.max(1.8, Math.min(5, 1.4 + (edge.count || 1) * 0.55))
-    : (state === 'normal' ? 1 : 1.6);
+    : (state === 'normal' ? 1.6 : 2.2);
   // Markers use markerUnits="strokeWidth" and a viewBox width of 10. Actual
   // marker length in user units = markerWidth_attr * strokeWidth. Matches
   // the refX=0 markers: stroke ends at arrowhead base, triangle extends

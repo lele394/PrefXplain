@@ -361,6 +361,112 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
     }
   }
 
+  // ─── Test-coverage clustering (groups where tests are the dominant role) ──
+  // For a test-majority group, grouping files by the file they test is
+  // more actionable than "all tests in one pile". Derivation:
+  //   1. For each test file, read its outbound intra-repo imports.
+  //   2. Prefer the one whose filename matches `<test_X.ext → X.ext>`.
+  //   3. Fallback to the most frequent external import target.
+  //   4. No-target tests go to a "General" bucket.
+  const testBand = bands.find(b => b.key === 'test');
+  const totalFiles = bands.reduce((n, b) => n + b.files.length, 0);
+  const testCount = testBand ? testBand.files.length : 0;
+  const isTestMajority = totalFiles > 0 && testBand && testCount / totalFiles >= 0.5;
+  if (isTestMajority) {
+    const importsOf = index.importsOf || {};
+    const stripExt = (s) => String(s).replace(/\.(py|pyi|ts|tsx|js|jsx|mjs|cjs|rb|go|java|kt|rs|swift)$/i, '');
+    const baseOf = (label) => stripExt(label).replace(/^test[_-]/i, '').replace(/[_-]test$/i, '');
+    const clustersByTarget = new Map(); // targetId → { target, tests: [] }
+    const generalTests = [];
+    for (const f of testBand.files) {
+      const outs = (importsOf[f.id] || [])
+        .map(id => byId[id])
+        .filter(n => n && n.id !== f.id);
+      if (outs.length === 0) { generalTests.push(f); continue; }
+      const wanted = baseOf(f.label || f.id);
+      let target = outs.find(n => baseOf(n.label || n.id) === wanted);
+      if (!target) {
+        // Fallback: pick the externally-grouped import with highest pair count,
+        // tiebreak by filename similarity.
+        const extOuts = outs.filter(n => (n.group || 'Ungrouped') !== groupId);
+        target = (extOuts.length ? extOuts : outs)[0];
+      }
+      if (!target) { generalTests.push(f); continue; }
+      if (!clustersByTarget.has(target.id)) {
+        const tg = target.group || 'Ungrouped';
+        const tgMeta = metaGroups[tg] || {};
+        clustersByTarget.set(target.id, {
+          targetId: target.id,
+          targetLabel: target.label || target.id,
+          targetGroup: tg,
+          targetColor: PX.groupColor(tg, tgMeta),
+          tests: [],
+        });
+      }
+      clustersByTarget.get(target.id).tests.push(f);
+    }
+    // Sort clusters: by test-count desc, tiebreak by target filename.
+    const sorted = Array.from(clustersByTarget.values()).sort((a, b) => {
+      if (b.tests.length !== a.tests.length) return b.tests.length - a.tests.length;
+      return a.targetLabel.localeCompare(b.targetLabel);
+    });
+    if (generalTests.length > 0) {
+      sorted.push({
+        targetId: null,
+        targetLabel: 'General',
+        targetGroup: null,
+        targetColor: PX.T.inkMuted,
+        tests: generalTests,
+      });
+    }
+    testBand.clusters = sorted;
+  }
+
+  // ─── External anchors: per-file × per-external-group aggregate ──────
+  // Every edge crossing this group's boundary gets a drawable anchor, so
+  // the viewer sees "which files in this group talk to which outside
+  // group" at a glance. This is what makes boundary groups (CLI, Tests)
+  // legible — their value lives in the outbound arrows, not in internal
+  // cohesion.
+  const outPairCount = {};   // `${fileId}\u0000${externalGroup}` → count
+  const inPairCount = {};    // `${externalGroup}\u0000${fileId}` → count
+  const outGroupTotal = {};  // externalGroup → total count
+  const inGroupTotal = {};
+  for (const e of graph.edges || []) {
+    const sg = (byId[e.source] || {}).group || 'Ungrouped';
+    const tg = (byId[e.target] || {}).group || 'Ungrouped';
+    if (sg === groupId && tg !== groupId) {
+      const key = `${e.source}\u0000${tg}`;
+      outPairCount[key] = (outPairCount[key] || 0) + 1;
+      outGroupTotal[tg] = (outGroupTotal[tg] || 0) + 1;
+    } else if (tg === groupId && sg !== groupId) {
+      const key = `${sg}\u0000${e.target}`;
+      inPairCount[key] = (inPairCount[key] || 0) + 1;
+      inGroupTotal[sg] = (inGroupTotal[sg] || 0) + 1;
+    }
+  }
+  const mkAnchor = (gid, count, dir) => ({
+    groupId: gid,
+    label: gid,
+    color: PX.groupColor(gid, metaGroups[gid] || {}),
+    count,
+    direction: dir,
+  });
+  const externalOut = Object.entries(outGroupTotal)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([gid, count]) => mkAnchor(gid, count, 'out'));
+  const externalIn = Object.entries(inGroupTotal)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([gid, count]) => mkAnchor(gid, count, 'in'));
+  const outEdges = Object.entries(outPairCount).map(([key, count]) => {
+    const [fileId, gid] = key.split('\u0000');
+    return { fileId, groupId: gid, count, direction: 'out' };
+  });
+  const inEdges = Object.entries(inPairCount).map(([key, count]) => {
+    const [gid, fileId] = key.split('\u0000');
+    return { fileId, groupId: gid, count, direction: 'in' };
+  });
+
   return {
     meta: {
       id: groupId,
@@ -384,6 +490,11 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
       labelled: labelledIds.has(`${e.source}\u0000${e.target}`),
     })),
     stress,
+    testMajority: !!isTestMajority,
+    externalIn,
+    externalOut,
+    externalInEdges: inEdges,
+    externalOutEdges: outEdges,
   };
 };
 
@@ -474,34 +585,97 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
       });
       if (bandH > maxColH) maxColH = bandH;
     }
-    cursorY += Math.max(maxColH, ch) + bandGapY;
-    totalW = columnBands.length > 0
-      ? colXs[colXs.length - 1] + cw - leftPad
-      : 0;
+    if (columnBands.length > 0) {
+      cursorY += Math.max(maxColH, ch) + bandGapY;
+      totalW = colXs[colXs.length - 1] + cw - leftPad;
+    }
   }
 
-  // Tests band: always its own horizontal strip, as wide as needed, below.
+  // Tests band: always spans the FULL canvas width (bug-fix for single-band
+  // groups that previously inherited totalW=0 and degenerated to one column).
   if (testBand && testBand.files.length > 0) {
-    const perRow = Math.max(1, Math.floor((Math.max(totalW, cw) + bandGapX) / (cw + bandGapX)));
-    const rows = Math.ceil(testBand.files.length / perRow);
-    const bandH = rows * ch + (rows - 1) * cardGapY;
-    for (let i = 0; i < testBand.files.length; i++) {
-      const col = i % perRow;
-      const row = Math.floor(i / perRow);
-      positions[testBand.files[i].id] = {
-        x: leftPad + col * (cw + bandGapX),
-        y: cursorY + row * (ch + cardGapY),
-      };
+    const usableW = canvasWidth - 2 * leftPad;
+    const perRow = Math.max(1, Math.floor((usableW + bandGapX) / (cw + bandGapX)));
+
+    // Clustered layout: one sub-column per test target ("tests for analyzer.py").
+    // Falls through to the flat layout if no clusters were computed.
+    const SUBHEADER_H = 26;
+    if (Array.isArray(testBand.clusters) && testBand.clusters.length > 0) {
+      const clusters = testBand.clusters;
+      const totalRows = Math.ceil(clusters.length / perRow);
+      let bandTop = cursorY;
+      for (let r = 0; r < totalRows; r++) {
+        let rowMaxH = 0;
+        for (let c = 0; c < perRow; c++) {
+          const idx = r * perRow + c;
+          if (idx >= clusters.length) break;
+          const cluster = clusters[idx];
+          const h = SUBHEADER_H + cluster.tests.length * ch
+            + Math.max(0, cluster.tests.length - 1) * cardGapY;
+          if (h > rowMaxH) rowMaxH = h;
+        }
+        for (let c = 0; c < perRow; c++) {
+          const idx = r * perRow + c;
+          if (idx >= clusters.length) break;
+          const cluster = clusters[idx];
+          const clusterX = leftPad + c * (cw + bandGapX);
+          const cardsStartY = cursorY + SUBHEADER_H;
+          for (let j = 0; j < cluster.tests.length; j++) {
+            positions[cluster.tests[j].id] = {
+              x: clusterX,
+              y: cardsStartY + j * (ch + cardGapY),
+            };
+          }
+          bandRects.push({
+            key: 'test-cluster',
+            kind: 'cluster',
+            name: cluster.targetLabel,
+            targetId: cluster.targetId,
+            targetGroup: cluster.targetGroup,
+            targetColor: cluster.targetColor,
+            x: clusterX,
+            y: cursorY,
+            w: cw,
+            h: SUBHEADER_H + cluster.tests.length * ch
+              + Math.max(0, cluster.tests.length - 1) * cardGapY,
+            count: cluster.tests.length,
+          });
+        }
+        cursorY += rowMaxH + (r < totalRows - 1 ? bandGapY : 0);
+      }
+      bandRects.push({
+        key: 'test',
+        kind: 'band',
+        name: testBand.name,
+        x: leftPad, y: bandTop,
+        w: usableW,
+        h: cursorY - bandTop,
+        count: testBand.files.length,
+      });
+      cursorY += bandGapY;
+    } else {
+      // Flat grid across the full canvas — fixes the pile-of-cards bug.
+      const rows = Math.ceil(testBand.files.length / perRow);
+      const bandH = rows * ch + (rows - 1) * cardGapY;
+      for (let i = 0; i < testBand.files.length; i++) {
+        const col = i % perRow;
+        const row = Math.floor(i / perRow);
+        positions[testBand.files[i].id] = {
+          x: leftPad + col * (cw + bandGapX),
+          y: cursorY + row * (ch + cardGapY),
+        };
+      }
+      bandRects.push({
+        key: 'test',
+        kind: 'band',
+        name: testBand.name,
+        x: leftPad, y: cursorY,
+        w: usableW,
+        h: bandH,
+        count: testBand.files.length,
+      });
+      cursorY += bandH + bandGapY;
     }
-    bandRects.push({
-      key: 'test',
-      name: testBand.name,
-      x: leftPad, y: cursorY,
-      w: Math.max(totalW, perRow * cw + (perRow - 1) * bandGapX),
-      h: bandH,
-      count: testBand.files.length,
-    });
-    cursorY += bandH + bandGapY;
   }
 
   totalH = cursorY;

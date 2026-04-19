@@ -1,25 +1,10 @@
 // components/group-detail-chrome.js — chrome pieces for the nested detail view.
-// Breadcrumb strip, summary header, "Primary entry paths" ranked strip, band
-// headers, and "Stress points" strip. All SVG via foreignObject so we can
-// lean on HTML/CSS for dense prose layout.
+// Summary header, "Primary entry paths" ranked strip, band headers, and
+// "Stress points" strip. All SVG via foreignObject so we can lean on HTML/CSS
+// for dense prose layout. No breadcrumb — the top info bar owns that role.
 
 window.PX = window.PX || {};
 PX.components = PX.components || {};
-
-PX.components.detailBreadcrumb = function detailBreadcrumb({ x, y, w, groupId, color }) {
-  const T = PX.T;
-  const h = 36;
-  const label = PX.escapeXml(groupId);
-  const accent = color || T.accent2;
-  return `<g class="detail-breadcrumb" data-back-to-overview="1" style="cursor:pointer">
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${T.panel}" stroke="${T.border}" stroke-width="1" rx="6"/>
-    <text x="${x + 14}" y="${y + 22}" font-family="${T.mono}" font-size="10" letter-spacing="1.2" fill="${T.inkFaint}">GROUPS</text>
-    <text x="${x + 68}" y="${y + 22}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}">/</text>
-    <circle cx="${x + 84}" cy="${y + 18}" r="4" fill="${accent}"/>
-    <text x="${x + 94}" y="${y + 22}" font-family="${T.mono}" font-size="12" font-weight="700" fill="${T.ink}">${label}</text>
-    <text x="${x + w - 14}" y="${y + 22}" font-family="${T.mono}" font-size="11" fill="${T.inkMuted}" text-anchor="end">\u2190 back to overview</text>
-  </g>`;
-};
 
 PX.components.detailSummary = function detailSummary({ x, y, w, story }) {
   const T = PX.T;
@@ -110,6 +95,43 @@ PX.components.bandLabel = function bandLabel({ x, y, w, name, count }) {
     <text x="${x}" y="${y - 10}" font-family="${T.mono}" font-size="10" letter-spacing="1.4" fill="${T.inkFaint}">${PX.escapeXml(name.toUpperCase())}</text>
     <text x="${x + w}" y="${y - 10}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="end">${count}</text>
     <line x1="${x}" y1="${y - 4}" x2="${x + w}" y2="${y - 4}" stroke="${T.borderAlt}" stroke-width="1" stroke-dasharray="2 3"/>
+  </g>`;
+};
+
+// Ghost anchor: a muted rectangle on the boundary of the focused-group
+// canvas that represents ONE external group. Edges that cross the group's
+// boundary terminate at (or emanate from) these anchors, so the viewer
+// immediately sees "this group talks to N external groups, with these
+// weights". Clicking an anchor drills focus to that group.
+PX.components.ghostAnchor = function ghostAnchor({ x, y, w, h, groupId, count, color, direction }) {
+  const T = PX.T;
+  const dot = color || T.accent2;
+  const isOut = direction === 'out';
+  const arrow = isOut ? '\u2192' : '\u2190';
+  const label = PX.escapeXml(groupId);
+  return `<g class="ghost-anchor" data-anchor-group="${PX.escapeXml(groupId)}" data-anchor-dir="${direction}" style="cursor:pointer">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${T.bg}" stroke="${T.borderAlt}" stroke-width="1" stroke-dasharray="3 4" rx="6"/>
+    <rect x="${x}" y="${y}" width="3" height="${h}" fill="${dot}" opacity="0.8" rx="1.5"/>
+    <text x="${x + 12}" y="${y + 15}" font-family="${T.mono}" font-size="9" letter-spacing="1.2" fill="${T.inkFaint}">${isOut ? 'OUT' : 'IN'} ${arrow}</text>
+    <text x="${x + 12}" y="${y + 30}" font-family="${T.mono}" font-size="11" font-weight="700" fill="${T.ink}">${label}</text>
+    <text x="${x + w - 10}" y="${y + 30}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="end">${count}\u00d7</text>
+  </g>`;
+};
+
+// Cluster sub-header: used inside a band to label a test-target column
+// ("tests for analyzer.py"). Color dot tracks the target file's group.
+PX.components.clusterHeader = function clusterHeader({ x, y, w, name, count, color, targetId }) {
+  const T = PX.T;
+  const dotColor = color || T.accent2;
+  const nameXml = PX.escapeXml(name);
+  const attrs = targetId
+    ? `class="cluster-header" data-target="${PX.escapeXml(targetId)}" style="cursor:pointer"`
+    : 'class="cluster-header" pointer-events="none"';
+  return `<g ${attrs}>
+    <text x="${x}" y="${y + 8}" font-family="${T.mono}" font-size="9" letter-spacing="1.2" fill="${T.inkFaint}">TESTS FOR</text>
+    <circle cx="${x + 4}" cy="${y + 20}" r="3" fill="${dotColor}"/>
+    <text x="${x + 12}" y="${y + 23}" font-family="${T.mono}" font-size="11" font-weight="700" fill="${T.ink}">${nameXml}</text>
+    <text x="${x + w}" y="${y + 23}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="end">${count}</text>
   </g>`;
 };
 

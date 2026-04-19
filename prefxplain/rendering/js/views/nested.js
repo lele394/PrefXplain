@@ -220,23 +220,34 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   const CANVAS = 1280;
   const LEFT = 28;
   const TOP = 20;
-  const BREADCRUMB_H = 36;
   const SUMMARY_H = 84;
   const GAP = 14;
+  const ANCHOR_W = 170;
+  const ANCHOR_H = 44;
+  const ANCHOR_GAP_Y = 14;
+  const ANCHOR_MARGIN = 22;
 
-  // Entry strip height is dynamic — compute first to know where bands start.
-  const entryPreview = PX.components.entryPathsStrip({
-    x: LEFT, y: 0, w: CANVAS - 2 * LEFT,
-    entries: story.entries, color: story.meta.color,
-  });
-  const ENTRY_H = entryPreview.h;
+  // Boundary anchors: "ghost" rectangles on the left (incoming source groups)
+  // and right (outgoing target groups). They give every inter-group edge a
+  // visible anchor so the viewer sees what the group connects to, even when
+  // intra-group edges are few or absent. Compute early so we know how much
+  // horizontal space the main bands can claim.
+  const inAnchors = (story.externalIn || []);
+  const outAnchors = (story.externalOut || []);
+  const leftReserved = inAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
+  const rightReserved = outAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
+  const mainLeft = LEFT + leftReserved;
+  const mainWidth = CANVAS - 2 * LEFT - leftReserved - rightReserved;
 
-  const bandsStartY = TOP + BREADCRUMB_H + GAP + SUMMARY_H + GAP + (ENTRY_H ? ENTRY_H + GAP : 0);
+  // Top bar (#px-top) already shows the focused group name, description, and a
+  // "back to overview" button — no breadcrumb needed inside the SVG. No
+  // PRIMARY ENTRY PATHS strip either; it duplicated the ENTRY band.
+  const bandsStartY = TOP + SUMMARY_H + GAP;
 
   // Compose the band grid layout (deterministic, hand-positioned).
   const layout = PX.buildGroupStoryLayoutIr(story, {
     showBullets,
-    canvasWidth: CANVAS - 2 * LEFT,
+    canvasWidth: mainWidth,
     topPad: 0,           // we apply our own top offset below
     leftPad: 0,
     bandGapY: 60,
@@ -283,12 +294,13 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     }).filter(Boolean);
   }
 
-  // Translate everything by (LEFT, bandsStartY).
+  // Translate everything by (mainLeft, bandsStartY) so the boundary anchor
+  // columns on the left stay clear of the main bands.
   const nodesById = {};
   for (const c of layout.ir.children) {
     nodesById[c.id] = {
       id: c.id,
-      x: c.x + LEFT,
+      x: c.x + mainLeft,
       y: c.y + bandsStartY,
       w: c.width,
       h: c.height,
@@ -296,10 +308,10 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   }
   const bandRects = layout.bandRects.map(b => ({
     ...b,
-    x: b.x + LEFT,
+    x: b.x + mainLeft,
     y: b.y + bandsStartY,
   }));
-  const edgesTranslated = edgesRouted.map(e => _translateEdge(e, LEFT, bandsStartY));
+  const edgesTranslated = edgesRouted.map(e => _translateEdge(e, mainLeft, bandsStartY));
 
   // Edge label placement + collision avoidance — reuse the group-map pipeline.
   const labelled = PX.placeEdgeLabels(edgesTranslated, { centerOnPath: false });
@@ -366,56 +378,186 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
 
   // ── Compose SVG ───────────────────────────────────────────────────
   // Compute final canvas size. Bands section height comes from the layout;
-  // stress strip adds its own measured height.
+  // stress strip adds its own measured height. Anchor columns may be taller
+  // than the bands for groups with many external neighbors — make canvas
+  // at least as tall as the tallest anchor column.
   const bandsH = layout.canvasH;
+  const maxAnchorCount = Math.max(inAnchors.length, outAnchors.length);
+  const anchorsStackH = maxAnchorCount > 0
+    ? maxAnchorCount * ANCHOR_H + Math.max(0, maxAnchorCount - 1) * ANCHOR_GAP_Y
+    : 0;
+  const contentH = Math.max(bandsH, anchorsStackH);
   const stressPreview = PX.components.stressStrip({
     x: LEFT, y: 0, w: CANVAS - 2 * LEFT, stress: story.stress,
   });
   const STRESS_H = stressPreview.h;
-  const totalH = bandsStartY + bandsH + (STRESS_H ? GAP + STRESS_H : 0) + TOP;
+  const totalH = bandsStartY + contentH + (STRESS_H ? GAP + STRESS_H : 0) + TOP;
   const W = CANVAS;
   const H = totalH;
+
+  // Anchor positions (centered vertically within the content area).
+  const contentCenterY = bandsStartY + contentH / 2;
+  const placeAnchors = (list, startX) => {
+    const positions = {};
+    if (list.length === 0) return positions;
+    const totalStackH = list.length * ANCHOR_H + Math.max(0, list.length - 1) * ANCHOR_GAP_Y;
+    const yTop = Math.max(bandsStartY, contentCenterY - totalStackH / 2);
+    for (let i = 0; i < list.length; i++) {
+      positions[list[i].groupId] = {
+        x: startX,
+        y: yTop + i * (ANCHOR_H + ANCHOR_GAP_Y),
+        w: ANCHOR_W,
+        h: ANCHOR_H,
+      };
+    }
+    return positions;
+  };
+  const inAnchorPos = placeAnchors(inAnchors, LEFT);
+  const outAnchorPos = placeAnchors(outAnchors, CANVAS - LEFT - ANCHOR_W);
+
+  // Boundary edges: file → outAnchor, inAnchor → file. Routed via fixed
+  // corridors just inside each anchor column so the horizontal run never
+  // crosses a file card. Each external group gets its own corridor offset
+  // so fan-in/fan-out arrows from the same group don't overlap.
+  const OUT_CORRIDOR_BASE = mainLeft + mainWidth + 6;
+  const IN_CORRIDOR_BASE = mainLeft - 6;
+  const outCorridorX = {};
+  outAnchors.forEach((a, i) => { outCorridorX[a.groupId] = OUT_CORRIDOR_BASE + i * 4; });
+  const inCorridorX = {};
+  inAnchors.forEach((a, i) => { inCorridorX[a.groupId] = IN_CORRIDOR_BASE - i * 4; });
+  const boundaryEdges = [];
+  for (const e of story.externalOutEdges || []) {
+    const src = nodesById[e.fileId];
+    const anchor = outAnchorPos[e.groupId];
+    if (!src || !anchor) continue;
+    const sx = src.x + src.w;
+    const sy = src.y + src.h / 2;
+    const tx = anchor.x;
+    const ty = anchor.y + anchor.h / 2;
+    const cx = outCorridorX[e.groupId];
+    boundaryEdges.push({
+      id: `bo-${e.fileId}-${e.groupId}`,
+      kind: 'boundary-out',
+      fileId: e.fileId,
+      groupId: e.groupId,
+      count: e.count,
+      color: outAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
+      points: [
+        { x: sx, y: sy },
+        { x: cx, y: sy },
+        { x: cx, y: ty },
+        { x: tx, y: ty },
+      ],
+    });
+  }
+  for (const e of story.externalInEdges || []) {
+    const tgt = nodesById[e.fileId];
+    const anchor = inAnchorPos[e.groupId];
+    if (!tgt || !anchor) continue;
+    const sx = anchor.x + anchor.w;
+    const sy = anchor.y + anchor.h / 2;
+    const tx = tgt.x;
+    const ty = tgt.y + tgt.h / 2;
+    const cx = inCorridorX[e.groupId];
+    boundaryEdges.push({
+      id: `bi-${e.fileId}-${e.groupId}`,
+      kind: 'boundary-in',
+      fileId: e.fileId,
+      groupId: e.groupId,
+      count: e.count,
+      color: inAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
+      points: [
+        { x: sx, y: sy },
+        { x: cx, y: sy },
+        { x: cx, y: ty },
+        { x: tx, y: ty },
+      ],
+    });
+  }
+  const boundaryEdgeState = (be) => {
+    if (!selected) return 'normal';
+    if (be.fileId === selected) return be.kind === 'boundary-out' ? 'depends' : 'imports';
+    return 'faded';
+  };
 
   let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
   svg += PX.components.markers();
 
-  // Breadcrumb.
-  svg += PX.components.detailBreadcrumb({
-    x: LEFT,
-    y: TOP,
-    w: CANVAS - 2 * LEFT,
-    groupId,
-    color: story.meta.color,
-  });
-
-  // Summary header.
+  // Summary header. (No breadcrumb here — the top info bar owns the
+  // "focused group" identity and the back-to-overview button.)
   svg += PX.components.detailSummary({
     x: LEFT,
-    y: TOP + BREADCRUMB_H + GAP,
+    y: TOP,
     w: CANVAS - 2 * LEFT,
     story,
   });
 
-  // Primary entry paths strip.
-  if (ENTRY_H > 0) {
-    const entryStrip = PX.components.entryPathsStrip({
-      x: LEFT,
-      y: TOP + BREADCRUMB_H + GAP + SUMMARY_H + GAP,
-      w: CANVAS - 2 * LEFT,
-      entries: story.entries,
-      color: story.meta.color,
-    });
-    svg += entryStrip.svg;
-  }
-
-  // Band labels (above each band's top edge).
+  // Band & cluster labels. Band labels sit above a band's top edge. Cluster
+  // headers sit INSIDE the test band, one per test-target column. When a
+  // test band has clusters, the outer band label is suppressed (redundant).
+  const hasClusters = bandRects.some(b => b.kind === 'cluster');
   for (const band of bandRects) {
+    if (band.kind === 'cluster') {
+      svg += PX.components.clusterHeader({
+        x: band.x,
+        y: band.y,
+        w: band.w,
+        name: band.name,
+        count: band.count,
+        color: band.targetColor,
+        targetId: band.targetId,
+      });
+      continue;
+    }
+    if (band.key === 'test' && hasClusters) continue; // cluster headers own this band
     svg += PX.components.bandLabel({
       x: band.x,
       y: band.y,
       w: band.w,
       name: band.name,
       count: band.count,
+    });
+  }
+
+  // Boundary edges: drawn BEFORE anchors and file cards so they pass under
+  // the opaque rectangles cleanly. Each edge emits a thin dashed-looking
+  // path plus an optional count chip when count > 1.
+  for (const be of boundaryEdges) {
+    const state = boundaryEdgeState(be);
+    const stroke = state === 'faded' ? PX.T.borderAlt
+      : state === 'depends' ? PX.stateColor('depends')
+      : state === 'imports' ? PX.stateColor('imports')
+      : PX.T.inkFaint;
+    const opacity = state === 'faded' ? 0.18 : state === 'normal' ? 0.5 : 0.95;
+    const d = PX.pathD(be.points, 5, 7);
+    svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="1.2" opacity="${opacity}" marker-end="url(#arr-${state === 'faded' ? 'faded' : 'normal'})" style="transition:all 200ms"/>`;
+    if (be.count > 1) {
+      const lx = (be.points[1].x + be.points[2].x) / 2;
+      const ly = (be.points[1].y + be.points[2].y) / 2;
+      const txt = `${be.count}\u00D7`;
+      const lw = txt.length * 6 + 10;
+      svg += `<g pointer-events="none" opacity="${state === 'faded' ? 0.3 : 1}">`
+        + `<rect x="${lx - lw / 2}" y="${ly - 8}" width="${lw}" height="16" fill="${PX.T.bg}" stroke="${stroke}" stroke-width="0.8" stroke-opacity="0.6" rx="8"/>`
+        + `<text x="${lx}" y="${ly + 3.5}" font-family="${PX.T.mono}" font-size="9.5" font-weight="600" fill="${PX.T.inkMuted}" text-anchor="middle">${txt}</text>`
+        + `</g>`;
+    }
+  }
+
+  // Ghost anchors for external groups.
+  for (const a of inAnchors) {
+    const p = inAnchorPos[a.groupId];
+    if (!p) continue;
+    svg += PX.components.ghostAnchor({
+      x: p.x, y: p.y, w: p.w, h: p.h,
+      groupId: a.groupId, count: a.count, color: a.color, direction: 'in',
+    });
+  }
+  for (const a of outAnchors) {
+    const p = outAnchorPos[a.groupId];
+    if (!p) continue;
+    svg += PX.components.ghostAnchor({
+      x: p.x, y: p.y, w: p.w, h: p.h,
+      groupId: a.groupId, count: a.count, color: a.color, direction: 'out',
     });
   }
 

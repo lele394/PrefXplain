@@ -195,25 +195,37 @@ PX.buildGraphIndex = function buildGraphIndex(graph) {
   // Bands derive from dependency position INSIDE a group. Roles are a
   // tiebreaker, not the primary axis — Codex pushback made this clear.
   //
-  //   entry  = files with inbound bridges from other groups OR role=entry_point|api_route
-  //   test   = role=test (kept in its own band; tests are the consumers of everything)
-  //   leaf   = no intra-group outgoing edges (nothing inside the group depends on them)
-  //   core   = everything else (the coordinating majority)
+  //   entry      = files with inbound bridges from other groups OR role=entry_point|api_route
+  //   test       = role=test (kept in its own band; tests are the consumers of everything)
+  //   leaf       = no intra-group outgoing edges AND some intra-group incoming
+  //   core       = everything else with at least one edge (coordinating majority)
+  //   standalone = no edges anywhere in the graph — belongs to the group by
+  //                classification but doesn't participate in any story. Gets
+  //                a compact bottom grid so it stops piling up in the Core column.
   //
   // Computed once at index time and keyed by groupId for O(1) lookup.
   const groupBands = {};
   for (const g of groupOrder) {
     const intraOut = {}; // fileId → count of intra-group outgoing edges
     const intraIn  = {}; // fileId → count of intra-group incoming edges
-    for (const id of byGroup[g] || []) { intraOut[id] = 0; intraIn[id] = 0; }
+    const extOut   = {}; // fileId → count of outgoing edges to other groups
+    const extIn    = {}; // fileId → count of incoming edges from other groups
+    for (const id of byGroup[g] || []) {
+      intraOut[id] = 0; intraIn[id] = 0; extOut[id] = 0; extIn[id] = 0;
+    }
     for (const e of graph.edges || []) {
       const sg = (byId[e.source] || {}).group || 'Ungrouped';
       const tg = (byId[e.target] || {}).group || 'Ungrouped';
-      if (sg !== g || tg !== g) continue;
-      if (intraOut[e.source] != null) intraOut[e.source] += 1;
-      if (intraIn[e.target]  != null) intraIn[e.target]  += 1;
+      if (sg === g && tg === g) {
+        if (intraOut[e.source] != null) intraOut[e.source] += 1;
+        if (intraIn[e.target]  != null) intraIn[e.target]  += 1;
+      } else if (sg === g) {
+        if (extOut[e.source] != null) extOut[e.source] += 1;
+      } else if (tg === g) {
+        if (extIn[e.target] != null) extIn[e.target] += 1;
+      }
     }
-    const bands = { entry: [], core: [], leaf: [], test: [] };
+    const bands = { entry: [], core: [], leaf: [], test: [], standalone: [] };
     for (const id of byGroup[g] || []) {
       const n = byId[id] || {};
       const role = n.role || 'other';
@@ -222,6 +234,11 @@ PX.buildGraphIndex = function buildGraphIndex(graph) {
       if (role === 'entry_point' || role === 'api_route' || bIn >= 2) {
         bands.entry.push(id); continue;
       }
+      const hasAnyEdge = (intraOut[id] || 0)
+        + (intraIn[id] || 0)
+        + (extOut[id] || 0)
+        + (extIn[id] || 0) > 0;
+      if (!hasAnyEdge) { bands.standalone.push(id); continue; }
       if ((intraOut[id] || 0) === 0 && (intraIn[id] || 0) > 0) {
         bands.leaf.push(id); continue;
       }
@@ -244,6 +261,7 @@ PX.buildGraphIndex = function buildGraphIndex(graph) {
     bands.core.sort(cmp);
     bands.leaf.sort(cmp);
     bands.test.sort(cmp);
+    bands.standalone.sort(cmp);
     groupBands[g] = bands;
   }
 

@@ -16,26 +16,54 @@ PX.ui.minimap = function minimap(container, { graph, groupsMeta }) {
   let _focused = null;
   let _highlight = null;
   let _visible = false;
+  let _collapsed = false;
 
   const wrap = document.createElement('div');
   wrap.style.cssText = `display:none;padding:8px 10px 10px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,0.35);width:260px;user-select:none`;
 
   const header = document.createElement('div');
-  header.style.cssText = `display:flex;align-items:center;justify-content:space-between;margin-bottom:6px`;
+  header.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px`;
+  const titleBox = document.createElement('div');
+  titleBox.style.cssText = `display:flex;flex-direction:column;line-height:1.15;min-width:0`;
   const title = document.createElement('span');
   title.textContent = 'Overview';
   title.style.cssText = `color:${T.inkFaint};font-family:${T.mono};font-size:9px;letter-spacing:1.2px;text-transform:uppercase`;
-  header.appendChild(title);
+  titleBox.appendChild(title);
   const hint = document.createElement('span');
   hint.textContent = 'you are here';
-  hint.style.cssText = `color:${T.inkFaint};font-family:${T.ui};font-size:9.5px;font-style:italic`;
-  header.appendChild(hint);
+  hint.style.cssText = `color:${T.inkFaint};font-family:${T.ui};font-size:9.5px;font-style:italic;margin-top:2px`;
+  titleBox.appendChild(hint);
+  header.appendChild(titleBox);
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.style.cssText = `background:${T.panelAlt};border:1px solid ${T.border};border-radius:4px;color:${T.ink};font-family:${T.mono};font-size:13px;line-height:1;padding:2px 8px;cursor:pointer;flex-shrink:0`;
+  toggleBtn.onmouseenter = () => { toggleBtn.style.background = T.pill || T.panelAlt; };
+  toggleBtn.onmouseleave = () => { toggleBtn.style.background = T.panelAlt; };
+  toggleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _collapsed = !_collapsed;
+    applyCollapsedUi();
+    if (!_collapsed && _visible) render();
+  });
+  header.appendChild(toggleBtn);
   wrap.appendChild(header);
 
   const svgHost = document.createElement('div');
   svgHost.style.cssText = 'line-height:0';
   wrap.appendChild(svgHost);
   container.appendChild(wrap);
+
+  const applyCollapsedUi = () => {
+    toggleBtn.textContent = _collapsed ? '+' : '\u2212';
+    toggleBtn.title = _collapsed ? 'Expand overview' : 'Collapse overview';
+    toggleBtn.setAttribute('aria-label', _collapsed ? 'Expand overview' : 'Collapse overview');
+    toggleBtn.setAttribute('aria-expanded', _collapsed ? 'false' : 'true');
+    hint.style.display = _collapsed ? 'none' : '';
+    svgHost.style.display = _collapsed ? 'none' : '';
+    wrap.style.width = _collapsed ? 'auto' : '260px';
+  };
+  applyCollapsedUi();
 
   const computeLayout = () => {
     if (_layout) return Promise.resolve(_layout);
@@ -90,6 +118,7 @@ PX.ui.minimap = function minimap(container, { graph, groupsMeta }) {
   const render = async () => {
     if (!_visible) { wrap.style.display = 'none'; return; }
     wrap.style.display = 'block';
+    if (_collapsed) return;
     const lay = await computeLayout();
     if (!lay || lay.groups.length === 0) { wrap.style.display = 'none'; return; }
     const pad = 12;

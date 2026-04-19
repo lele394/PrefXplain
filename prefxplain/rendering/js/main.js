@@ -32,6 +32,11 @@
     filter: '',
     focusedGroup: null,
     hoveredGroup: null,
+    // Clicking a ghost anchor pins a group-highlight that persists after
+    // mouseout. Single-click toggles; double-click teleports to that group.
+    pinnedGroup: null,
+    // Hovering a file card lights up its edges transiently (no dim).
+    hoveredFile: null,
   };
 
   // ── Shell DOM ─────────────────────────────────────────────────────
@@ -134,6 +139,10 @@
   };
   const setFocusedGroup = async (groupId, { switchView = true } = {}) => {
     state.focusedGroup = groupId;
+    // Focused-group change invalidates any pinned anchor — the pin belonged
+    // to the previous focus context.
+    state.pinnedGroup = null;
+    state.hoveredFile = null;
     if (!groupId) {
       state.selected = null;
     } else if (state.selected) {
@@ -163,8 +172,13 @@
     const group = e.target.closest('.group-container');
     const file = e.target.closest('.file-card');
     if (ghostAnchor) {
+      // Single-click pins the anchor group so its arrows stay lit up. Click
+      // again (same anchor) to unpin. Double-click teleports — see dblclick.
       const g = ghostAnchor.getAttribute('data-anchor-group');
-      if (g) await setFocusedGroup(g, { switchView: false });
+      if (g) {
+        state.pinnedGroup = state.pinnedGroup === g ? null : g;
+        await rerender();
+      }
       return;
     }
     if (entryChip) {
@@ -198,7 +212,13 @@
       if (id) await setSelected(state.selected === id ? null : id);
       return;
     }
-    // Click on empty canvas background: equivalent to "back to overview".
+    // Click on empty canvas background: first drop any pin, then equivalent
+    // to "back to overview" if still engaged.
+    if (state.pinnedGroup) {
+      state.pinnedGroup = null;
+      await rerender();
+      return;
+    }
     if (state.focusedGroup || state.selected) {
       await setFocusedGroup(null, { switchView: false });
     }
@@ -242,7 +262,15 @@
   canvas.addEventListener('dblclick', (e) => {
     if (heroClickTimer) { clearTimeout(heroClickTimer); heroClickTimer = null; }
     const hero = e.target.closest('.hero-card');
+    const ghost = e.target.closest('.ghost-anchor');
     const file = e.target.closest('.file-card');
+    if (ghost) {
+      // Double-click teleports to the external group. Undo the pin first so
+      // the new focus starts clean (pin belonged to the previous context).
+      const g = ghost.getAttribute('data-anchor-group');
+      if (g) setFocusedGroup(g, { switchView: false });
+      return;
+    }
     if (hero) {
       const groupId = hero.getAttribute('data-group');
       if (groupId) setFocusedGroup(groupId, { switchView: true });
@@ -254,32 +282,37 @@
     }
   });
 
-  // Hover: highlight group connections in Overview/GroupMap
+  // Hover: highlight group connections in Overview/GroupMap AND highlight
+  // per-file arrows when hovering a file card in a focused nested view.
   let hoverTimer = null;
   canvas.addEventListener('mouseover', (e) => {
     const hero = e.target.closest('.hero-card');
     const group = e.target.closest('.group-container');
     const ghost = e.target.closest('.ghost-anchor');
-    const gid = (hero || group)?.getAttribute('data-group') || ghost?.getAttribute('data-anchor-group');
-    if (gid === state.hoveredGroup) return;
+    const file = e.target.closest('.file-card');
+    const gid = (hero || group)?.getAttribute('data-group')
+      || ghost?.getAttribute('data-anchor-group')
+      || null;
+    const fid = file?.getAttribute('data-node') || null;
+    if (gid === state.hoveredGroup && fid === state.hoveredFile) return;
 
     if (hoverTimer) clearTimeout(hoverTimer);
     hoverTimer = setTimeout(() => {
-      state.hoveredGroup = gid || null;
+      state.hoveredGroup = gid;
+      state.hoveredFile = fid;
       rerender();
     }, 40);
   });
   canvas.addEventListener('mouseout', (e) => {
     if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) {
-      const hero = e.relatedTarget.closest('.hero-card');
-      const group = e.relatedTarget.closest('.group-container');
-      const ghost = e.relatedTarget.closest('.ghost-anchor');
-      if (hero || group || ghost) return;
+      const rel = e.relatedTarget;
+      if (rel.closest('.hero-card,.group-container,.ghost-anchor,.file-card')) return;
     }
     if (hoverTimer) clearTimeout(hoverTimer);
     hoverTimer = setTimeout(() => {
-      if (state.hoveredGroup !== null) {
+      if (state.hoveredGroup !== null || state.hoveredFile !== null) {
         state.hoveredGroup = null;
+        state.hoveredFile = null;
         rerender();
       }
     }, 40);
@@ -312,7 +345,10 @@
     } else if (e.key === 'Escape') {
       const overlay = document.querySelector('#px-shell + *, body > div > div[style*="backdrop-filter"]');
       if (overlay && overlay.textContent.includes('Flow')) { overlay.remove(); return; }
-      if (state.selected) {
+      if (state.pinnedGroup) {
+        state.pinnedGroup = null;
+        rerender();
+      } else if (state.selected) {
         setSelected(null);
       } else if (state.focusedGroup) {
         setFocusedGroup(null, { switchView: false });
@@ -327,6 +363,10 @@
       canvas.innerHTML = `<div style="padding:16px;font-family:${T.mono};font-size:11px;color:${T.inkFaint}">Laying out \u2026</div>`;
     }
     try {
+      // Pinned anchor groups act like a sticky hover — merge into the
+      // effective hoveredGroup passed to views. Transient hover wins while
+      // the cursor is over a group target.
+      const effectiveGroup = state.hoveredGroup || state.pinnedGroup;
       const view = state.viewMode === 'nested'
         ? await PX.views.nested(graph, {
           showBullets: state.showBullets,
@@ -334,13 +374,14 @@
           filter: state.filter,
           index,
           focusedGroup: state.focusedGroup,
-          hoveredGroup: state.hoveredGroup,
+          hoveredGroup: effectiveGroup,
+          hoveredFile: state.hoveredFile,
         })
         : await PX.views.groupMap(graph, {
           selected: state.selected,
           index,
           focusedGroup: state.focusedGroup,
-          hoveredGroup: state.hoveredGroup,
+          hoveredGroup: effectiveGroup,
         });
       canvas.innerHTML = view.svg;
       console.log(`[prefxplain] rendered ${state.viewMode}: ${view.W}x${view.H}`);

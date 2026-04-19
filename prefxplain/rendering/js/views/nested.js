@@ -38,6 +38,7 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     index = null,
     focusedGroup = null,
     hoveredGroup = null,
+    hoveredFile = null,
   } = opts;
   const idx = index || PX.buildGraphIndex(graph);
   const focusGroupId = focusedGroup || (selected && idx.byId[selected]
@@ -48,7 +49,7 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     return PX.views._nestedOverview(graph, idx, { showBullets, selected, filter, hoveredGroup });
   }
   return PX.views._nestedFocused(graph, idx, focusGroupId, {
-    showBullets, selected, filter, hoveredGroup,
+    showBullets, selected, filter, hoveredGroup, hoveredFile,
   });
 };
 
@@ -93,7 +94,7 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
     x2: (box.x || 0) + (box.width || 0),
     y2: (box.y || 0) + (box.height || 0),
   }));
-  const edges = PX.avoidLabelCollisions(labelled, {
+  const placed = PX.avoidLabelCollisions(labelled, {
     labelW: (e) => e.__labelW || 180,
     labelH: (e) => e.__labelH || 50,
     gap: 18,
@@ -105,6 +106,26 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
     sourceGroup: PX.splitPortId(e.source).nodeId,
     targetGroup: PX.splitPortId(e.target).nodeId,
   }));
+  // Mirror group-map's final detour pass: route each edge around OTHER
+  // edges' label rects so foreign segments don't cross a visible label
+  // when the edge highlights. preserveEndSegments keeps port stubs clean.
+  const labelBboxes = placed
+    .filter(e => e.labelX != null && e.labelY != null && e.count > 0)
+    .map(e => ({
+      id: e.id,
+      x1: e.labelX - (e.__labelW || 0) / 2,
+      y1: e.labelY - (e.__labelH || 0) / 2,
+      x2: e.labelX + (e.__labelW || 0) / 2,
+      y2: e.labelY + (e.__labelH || 0) / 2,
+    }));
+  const edges = placed.map(e => {
+    const foreign = labelBboxes.filter(b => b.id !== e.id);
+    if (foreign.length === 0) return e;
+    return {
+      ...e,
+      points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }),
+    };
+  });
 
   const topBoxes = (laid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
   const layerOf = {};
@@ -233,7 +254,7 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
 
 // ── Focused group: ranked architectural narrative ──────────────────────
 PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts) {
-  const { showBullets, selected, filter, hoveredGroup = null } = opts;
+  const { showBullets, selected, filter, hoveredGroup = null, hoveredFile = null } = opts;
   const story = PX.buildGroupStory(graph, groupId, idx);
   const CANVAS = 1640;
   const LEFT = 32;
@@ -254,15 +275,34 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   //   useAnchors = story.externalIn  (they import from us) → RIGHT
   const depAnchors = (story.externalOut || []);  // upstream dependencies
   const useAnchors = (story.externalIn || []);   // downstream consumers
-  const leftReserved = depAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
-  const rightReserved = useAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
+  // Anchor margin scales with anchor count so the USE last-segment stub
+  // (anchorCorridor → anchorLeft-PAD) always leaves ≥14px of visible
+  // horizontal shaft between the Q-rounded bend and the arrowhead base.
+  // Without that clearance, the vertical trunk appears to fuse with the
+  // arrowhead triangle — looks like the shaft "enters through the tip".
+  // Budget: stub must be > tailTrim (14) + bend radius (6) + visible shaft
+  // (14) = 34 for the FURTHEST anchor (i=N-1). Each added anchor pushes
+  // its corridor 12px further in, so the margin grows in lockstep.
+  const maxAnchorCount = Math.max(depAnchors.length, useAnchors.length);
+  const ANCHOR_MARGIN_DYN = Math.max(60, 48 + maxAnchorCount * 12);
+  const leftReserved = depAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN_DYN : 0;
+  const rightReserved = useAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN_DYN : 0;
   const mainLeft = LEFT + leftReserved;
   const mainWidth = CANVAS - 2 * LEFT - leftReserved - rightReserved;
+
+  // Boundary edges route as:  anchor → corridor → vertical → target
+  // They pick up local detours around intermediate cards only where the
+  // horizontal-at-target-Y leg actually crosses one. No global trunk
+  // above/below — that created a U-shape (UP to trunk, across, DOWN to
+  // target) which read as "retour en arrière" when target sat between
+  // the anchor and the trunk.
+  const DEP_ZONE_H = 0;
+  const USE_ZONE_H = 0;
 
   // Top bar (#px-top) already shows the focused group name, description, and a
   // "back to overview" button — no breadcrumb needed inside the SVG. No
   // PRIMARY ENTRY PATHS strip either; it duplicated the ENTRY band.
-  const bandsStartY = TOP + SUMMARY_H + GAP;
+  const bandsStartY = TOP + SUMMARY_H + GAP + DEP_ZONE_H;
 
   // Compose the band grid layout (deterministic, hand-positioned).
   const layout = PX.buildGroupStoryLayoutIr(story, {
@@ -349,26 +389,55 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   const cardRects = Object.values(nodesById).map(n => ({
     x1: n.x, y1: n.y, x2: n.x + n.w, y2: n.y + n.h,
   }));
-  const finalEdges = PX.avoidLabelCollisions(labelled, {
-    labelW: (e) => e.labelled ? (String(e.count).length + 8) * 6.4 + 16 : 0,
-    labelH: (e) => e.labelled ? 20 : 0,
+  const labelWFn = (e) => e.labelled ? (String(e.count).length + 8) * 6.4 + 16 : 0;
+  const labelHFn = (e) => e.labelled ? 20 : 0;
+  const placedEdges = PX.avoidLabelCollisions(labelled, {
+    labelW: labelWFn,
+    labelH: labelHFn,
     gap: 14,
     segments,
     walkPath: true,
     cardRects,
   });
 
+  // Final pass: detour each intra-group edge around OTHER edges' label
+  // rects. Same technique as group-map — without it, foreign segments that
+  // pass under a label become visible when the edge highlights (bg-fill
+  // rect can't hide segments from unrelated edges). Uses preserveEndSegments
+  // so port stubs stay clean and the arrowhead tailTrim sleeve is kept.
+  const intraLabelBboxes = placedEdges
+    .filter(e => e.labelled && e.labelX != null && e.labelY != null)
+    .map(e => {
+      const lw = labelWFn(e), lh = labelHFn(e);
+      return {
+        id: e.id,
+        x1: e.labelX - lw / 2,
+        y1: e.labelY - lh / 2,
+        x2: e.labelX + lw / 2,
+        y2: e.labelY + lh / 2,
+      };
+    });
+  const finalEdges = placedEdges.map(e => {
+    const foreign = intraLabelBboxes.filter(b => b.id !== e.id);
+    if (foreign.length === 0) return e;
+    return {
+      ...e,
+      points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }),
+    };
+  });
+
   // ── Compose SVG ───────────────────────────────────────────────────
   // Compute final canvas size. Bands section height comes from the layout;
   // stress strip adds its own measured height. Anchor columns may be taller
   // than the bands for groups with many external neighbors — make canvas
-  // at least as tall as the tallest anchor column.
+  // at least as tall as the tallest anchor column. USE_ZONE_H reserves the
+  // horizontal USE trunk zone below the bands so the stress strip doesn't
+  // collide with below-bands trunks.
   const bandsH = layout.canvasH;
-  const maxAnchorCount = Math.max(depAnchors.length, useAnchors.length);
   const anchorsStackH = maxAnchorCount > 0
     ? maxAnchorCount * ANCHOR_H + Math.max(0, maxAnchorCount - 1) * ANCHOR_GAP_Y
     : 0;
-  const contentH = Math.max(bandsH, anchorsStackH);
+  const contentH = Math.max(bandsH + USE_ZONE_H, anchorsStackH);
   const stressPreview = PX.components.stressStrip({
     x: LEFT, y: 0, w: CANVAS - 2 * LEFT, stress: story.stress,
   });
@@ -400,26 +469,69 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   // Boundary edges ALWAYS flow left → right (data-flow convention):
   //   depAnchor  →  file   (upstream dependency feeds us)
   //   file       →  useAnchor (we feed our downstream consumer)
-  // Per-group corridors sit just inside each anchor column so the
-  // horizontal run never crosses a file card.
-  const DEP_CORRIDOR_BASE = mainLeft - 12;   // just right of LEFT anchors
-  const USE_CORRIDOR_BASE = mainLeft + mainWidth + 12; // just left of RIGHT anchors
+  //
+  // Six-point trunk routing — every vertical drop sits OUTSIDE the column
+  // (in the card-free gap between bands), so it can't slice through the
+  // same-column cards above/below the endpoint:
+  //
+  //   DEP: anchor.right @ anchor.y
+  //     →  corridorX @ anchor.y             (horiz into LEFT corridor)
+  //     →  corridorX @ depTrunkY            (vert in corridor to DEP trunk)
+  //     →  (target.left - APPROACH) @ depTrunkY  (horiz in DEP trunk)
+  //     →  (target.left - APPROACH) @ target.midY  (vert in LEFT gap of target column)
+  //     →  target.left @ target.midY        (short stub into target)
+  //
+  //   USE: source.right @ source.midY
+  //     →  (source.right + APPROACH) @ source.midY
+  //     →  (source.right + APPROACH) @ useTrunkY  (vert in RIGHT gap of source column)
+  //     →  corridorX @ useTrunkY
+  //     →  corridorX @ anchor.y
+  //     →  anchor.left @ anchor.y
+  //
+  // Per-anchor trunk Y and corridor X offsets keep parallel boundary edges
+  // separated. APPROACH must be large enough that the final stub
+  // (APPROACH − PAD) leaves ≥14px of clean horizontal shaft AFTER tailTrim
+  // (14) AND the Q-rounded corner (6). Budget: APPROACH ≥ PAD + 14 + 6 + 14
+  // = PAD + 34. With PAD=10 → APPROACH=44. PAD is the breathing gap
+  // between the arrowhead tip and the target card's border.
+  const APPROACH = 44;
+  const PAD = 10;
+  const DEP_CORRIDOR_BASE = mainLeft - 14;   // just right of LEFT anchors
+  const USE_CORRIDOR_BASE = mainLeft + mainWidth + 14; // just left of RIGHT anchors
   const depCorridorX = {};
-  depAnchors.forEach((a, i) => { depCorridorX[a.groupId] = DEP_CORRIDOR_BASE - i * 6; });
+  depAnchors.forEach((a, i) => { depCorridorX[a.groupId] = DEP_CORRIDOR_BASE - i * 12; });
   const useCorridorX = {};
-  useAnchors.forEach((a, i) => { useCorridorX[a.groupId] = USE_CORRIDOR_BASE + i * 6; });
+  useAnchors.forEach((a, i) => { useCorridorX[a.groupId] = USE_CORRIDOR_BASE + i * 12; });
   const boundaryEdges = [];
-  // Dependency edges: arrow tail on the anchor (upstream), arrowhead on our
-  // file card (downstream consumer within our group).
+  // Dependency edges: arrow tail on the anchor (upstream), arrowhead lands
+  // on the LEFT side of the target card via a drop in the LEFT-of-column gap.
   for (const e of story.externalOutEdges || []) {
     const tgt = nodesById[e.fileId];
     const anchor = depAnchorPos[e.groupId];
     if (!tgt || !anchor) continue;
-    const sx = anchor.x + anchor.w;         // anchor's right edge (left column)
+    const sx = anchor.x + anchor.w;              // anchor's right edge
     const sy = anchor.y + anchor.h / 2;
-    const tx = tgt.x;                        // file's left edge (middle area)
-    const ty = tgt.y + tgt.h / 2;
+    const approachX = tgt.x - APPROACH;          // LEFT gap of target column
+    const ty = tgt.y + tgt.h / 2;                // target mid-Y
+    const tipX = tgt.x - PAD;                    // arrow tip lands PAD px OUTSIDE the card
     const cx = depCorridorX[e.groupId];
+    // Normalize: when the target sits next to the anchor column (approachX
+    // would land LEFT of the corridor), collapse the corridor onto the
+    // approach X so every horizontal segment still flows left→right. This
+    // kills the LEFT-going jog that reads as "retour en arrière".
+    const effectiveCx = Math.min(cx, approachX);
+    const points = effectiveCx < approachX ? [
+      { x: sx, y: sy },
+      { x: effectiveCx, y: sy },
+      { x: effectiveCx, y: ty },
+      { x: approachX, y: ty },
+      { x: tipX, y: ty },
+    ] : [
+      { x: sx, y: sy },
+      { x: effectiveCx, y: sy },
+      { x: effectiveCx, y: ty },
+      { x: tipX, y: ty },
+    ];
     boundaryEdges.push({
       id: `bd-${e.fileId}-${e.groupId}`,
       kind: 'boundary-dep',
@@ -427,25 +539,37 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       groupId: e.groupId,
       count: e.count,
       color: depAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
-      points: [
-        { x: sx, y: sy },
-        { x: cx, y: sy },
-        { x: cx, y: ty },
-        { x: tx, y: ty },
-      ],
+      points,
     });
   }
-  // Consumer edges: arrow tail on our file, arrowhead on the downstream
-  // anchor (rightward data flow toward whoever imports us).
+  // Consumer edges: arrow tail on the RIGHT side of our file (via a stub
+  // into the RIGHT-of-column gap), arrowhead on the downstream anchor.
   for (const e of story.externalInEdges || []) {
     const src = nodesById[e.fileId];
     const anchor = useAnchorPos[e.groupId];
     if (!src || !anchor) continue;
-    const sx = src.x + src.w;                // file's right edge
-    const sy = src.y + src.h / 2;
-    const tx = anchor.x;                     // anchor's left edge (right column)
+    const sx = src.x + src.w;                    // source's right edge
+    const sy = src.y + src.h / 2;                // source mid-Y
+    const approachX = src.x + src.w + APPROACH;  // RIGHT gap of source column
+    const tipX = anchor.x - PAD;                 // arrow tip lands PAD px OUTSIDE the anchor
     const ty = anchor.y + anchor.h / 2;
     const cx = useCorridorX[e.groupId];
+    // Mirror the DEP normalization: keep every horizontal segment flowing
+    // left → right by clamping approachX so it never sits right of the
+    // anchor-side corridor.
+    const effectiveCx = Math.max(cx, approachX);
+    const points = effectiveCx > approachX ? [
+      { x: sx, y: sy },
+      { x: approachX, y: sy },
+      { x: effectiveCx, y: sy },
+      { x: effectiveCx, y: ty },
+      { x: tipX, y: ty },
+    ] : [
+      { x: sx, y: sy },
+      { x: effectiveCx, y: sy },
+      { x: effectiveCx, y: ty },
+      { x: tipX, y: ty },
+    ];
     boundaryEdges.push({
       id: `bu-${e.fileId}-${e.groupId}`,
       kind: 'boundary-use',
@@ -453,13 +577,24 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       groupId: e.groupId,
       count: e.count,
       color: useAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
-      points: [
-        { x: sx, y: sy },
-        { x: cx, y: sy },
-        { x: cx, y: ty },
-        { x: tx, y: ty },
-      ],
+      points,
     });
+  }
+
+  // Local detour: any horizontal leg of a boundary edge that clips a card
+  // in an intermediate column bumps around the card's bbox (top or bottom,
+  // whichever is closer to the leg's Y). preserveEndSegments keeps port
+  // stubs clean so the arrowhead shaft stays long enough for tailTrim.
+  for (let i = 0; i < boundaryEdges.length; i++) {
+    const be = boundaryEdges[i];
+    const obstacles = Object.entries(nodesById)
+      .filter(([id]) => id !== be.fileId)
+      .map(([id, n]) => ({ id, x1: n.x, y1: n.y, x2: n.x + n.w, y2: n.y + n.h }));
+    if (obstacles.length === 0) continue;
+    boundaryEdges[i] = {
+      ...be,
+      points: PX.detourAroundLabels(be.points, obstacles, 12, { preserveEndSegments: true }),
+    };
   }
 
   // Selection-driven file states.
@@ -472,6 +607,12 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     return n;
   };
   const selectedNeighbors = selected ? neighborsOf(selected) : null;
+  // Transient hover over a file card: light up its arrows without dimming
+  // the rest. Takes effect only when nothing is selected so clicks win.
+  const effectiveHoverFile = (!selected && hoveredFile && hoveredFile !== selected)
+    ? hoveredFile
+    : null;
+  const hoverNeighbors = effectiveHoverFile ? neighborsOf(effectiveHoverFile) : null;
   const fileState = (id) => {
     if (filter) {
       const n = idx.byId[id];
@@ -486,29 +627,61 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       const isConnected = boundaryEdges.some(be => be.groupId === hoveredGroup && be.fileId === id);
       return isConnected ? 'normal' : 'dimmed';
     }
-    if (!selected) return 'normal';
-    if (id === selected) return 'selected';
-    if (selectedNeighbors && selectedNeighbors.has(id)) {
-      for (const e of graph.edges || []) {
-        if (e.source === selected && e.target === id) return 'depends';
-        if (e.target === selected && e.source === id) return 'imports';
+    if (selected) {
+      if (id === selected) return 'selected';
+      if (selectedNeighbors && selectedNeighbors.has(id)) {
+        for (const e of graph.edges || []) {
+          if (e.source === selected && e.target === id) return 'depends';
+          if (e.target === selected && e.source === id) return 'imports';
+        }
       }
+      return 'dimmed';
     }
-    return 'dimmed';
+    if (effectiveHoverFile) {
+      if (id === effectiveHoverFile) return 'normal';
+      if (hoverNeighbors && hoverNeighbors.has(id)) {
+        for (const e of graph.edges || []) {
+          if (e.source === effectiveHoverFile && e.target === id) return 'depends';
+          if (e.target === effectiveHoverFile && e.source === id) return 'imports';
+        }
+      }
+      return 'normal';
+    }
+    return 'normal';
   };
   const edgeState = (e) => {
     if (hoveredGroup) return 'faded';
-    if (!selected) return 'normal';
-    if (e.sourceNode === selected) return 'depends';
-    if (e.targetNode === selected) return 'imports';
-    return 'faded';
+    if (selected) {
+      if (e.sourceNode === selected) return 'depends';
+      if (e.targetNode === selected) return 'imports';
+      return 'faded';
+    }
+    if (effectiveHoverFile) {
+      if (e.sourceNode === effectiveHoverFile) return 'depends';
+      if (e.targetNode === effectiveHoverFile) return 'imports';
+      // Fade unrelated arrows on hover so the highlighted ones pop.
+      return 'faded';
+    }
+    return 'normal';
   };
 
   const boundaryEdgeState = (be) => {
-    if (hoveredGroup === be.groupId) return be.kind === 'boundary-use' ? 'imports' : 'depends';
-    if (!selected) return 'normal';
-    if (be.fileId === selected) return be.kind === 'boundary-use' ? 'imports' : 'depends';
-    return 'faded';
+    if (hoveredGroup) {
+      return hoveredGroup === be.groupId
+        ? (be.kind === 'boundary-use' ? 'imports' : 'depends')
+        : 'faded';
+    }
+    if (selected) {
+      if (be.fileId === selected) return be.kind === 'boundary-use' ? 'imports' : 'depends';
+      return 'faded';
+    }
+    if (effectiveHoverFile) {
+      if (be.fileId === effectiveHoverFile) {
+        return be.kind === 'boundary-use' ? 'imports' : 'depends';
+      }
+      return 'faded';
+    }
+    return 'normal';
   };
 
   // Use a natural pixel width (scaled by zoom) so the focused view keeps its
@@ -558,19 +731,20 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   // path plus an optional count chip when count > 1.
   for (const be of boundaryEdges) {
     const state = boundaryEdgeState(be);
-    const stroke = state === 'faded' ? PX.T.borderAlt
-      : state === 'depends' ? PX.stateColor('depends')
-      : state === 'imports' ? PX.stateColor('imports')
-      : PX.T.inkFaint;
-    const opacity = state === 'faded' ? 0.18 : state === 'normal' ? 0.5 : 0.95;
+    const stroke = PX.stateColor(state);
+    // Non-highlighted edges fade to near-invisible when something is lit
+    // up — keeps the viewer focused on the active path, no ambient noise.
+    const opacity = state === 'faded' ? 0.06 : state === 'normal' ? 0.5 : 0.95;
     const d = PX.pathD(be.points, 6, 14);
-    svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="2" opacity="${opacity}" marker-end="url(#arr-${state === 'faded' ? 'faded' : 'normal'})" style="transition:all 200ms"/>`;
+    // Marker matches state so the arrowhead color tracks the path color
+    // (was hardcoded normal/faded → arrowheads stayed grey on lit paths).
+    svg += `<path d="${d}" fill="none" stroke="${stroke}" stroke-width="2" opacity="${opacity}" marker-end="url(#arr-${state})" style="transition:all 200ms"/>`;
     if (be.count > 1) {
       const lx = (be.points[1].x + be.points[2].x) / 2;
       const ly = (be.points[1].y + be.points[2].y) / 2;
       const txt = `${be.count}\u00D7`;
       const lw = txt.length * 6 + 12;
-      svg += `<g pointer-events="none" opacity="${state === 'faded' ? 0.3 : 1}">`
+      svg += `<g pointer-events="none" opacity="${state === 'faded' ? 0.1 : 1}">`
         + `<rect x="${lx - lw / 2}" y="${ly - 9}" width="${lw}" height="18" fill="${PX.T.bg}" stroke="${stroke}" stroke-width="1" stroke-opacity="0.7" rx="9"/>`
         + `<text x="${lx}" y="${ly + 4}" font-family="${PX.T.mono}" font-size="10" font-weight="600" fill="${PX.T.inkMuted}" text-anchor="middle">${txt}</text>`
         + `</g>`;
@@ -652,11 +826,12 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     }
   }
 
-  // Stress-points strip (bottom).
+  // Stress-points strip (bottom). Slide past the USE trunk zone so the
+  // below-bands horizontal trunks don't collide with the stress strip.
   if (STRESS_H > 0) {
     const stress = PX.components.stressStrip({
       x: LEFT,
-      y: bandsStartY + bandsH + GAP,
+      y: bandsStartY + bandsH + USE_ZONE_H + GAP,
       w: CANVAS - 2 * LEFT,
       stress: story.stress,
     });

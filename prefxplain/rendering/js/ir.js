@@ -204,7 +204,7 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
   const metaGroups = graph.metaGroups || {};
   const meta = metaGroups[groupId] || {};
   const stats = (index.groupStats || {})[groupId] || {};
-  const bandsRaw = (index.groupBands || {})[groupId] || { entry: [], core: [], leaf: [], test: [] };
+  const bandsRaw = (index.groupBands || {})[groupId] || { entry: [], core: [], leaf: [], test: [], standalone: [] };
   const cycles = (index.groupCycles || {})[groupId] || [];
 
   // Files in a set-of-file-ids that are part of a cycle.
@@ -264,10 +264,11 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
   };
 
   const bandDefs = [
-    { key: 'entry', name: 'Entry / Gateway' },
-    { key: 'core',  name: 'Core'            },
-    { key: 'leaf',  name: 'Leaf / Utility'  },
-    { key: 'test',  name: 'Tests'           },
+    { key: 'entry',      name: 'Entry / Gateway' },
+    { key: 'core',       name: 'Core'            },
+    { key: 'leaf',       name: 'Leaf / Utility'  },
+    { key: 'test',       name: 'Tests'           },
+    { key: 'standalone', name: 'Standalone'      },
   ];
   const bands = bandDefs
     .map(def => ({
@@ -513,10 +514,19 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
 } = {}) {
   const fileSize = showBullets ? PX.NODE_SIZES.fileBullets : PX.NODE_SIZES.fileNoBullets;
   const cw = fileSize.w, ch = fileSize.h;
+  // Standalone cards are always compact (no bullets) — they carry no story,
+  // so the shorter height lets a dense group's orphan grid fit in a few rows
+  // instead of a giant column.
+  const CH_STANDALONE = PX.NODE_SIZES.fileNoBullets.h;
   // Entry, Core, Leaf → 3 parallel columns (side by side). Tests → own row below.
+  // Standalone → compact full-width grid AFTER tests (pure orphans, no story).
   const BAND_ORDER = ['entry', 'core', 'leaf'];
   const columnBands = story.bands.filter(b => BAND_ORDER.includes(b.key));
   const testBand = story.bands.find(b => b.key === 'test') || null;
+  const standaloneBand = story.bands.find(b => b.key === 'standalone') || null;
+  const standaloneIds = new Set(
+    standaloneBand ? standaloneBand.files.map(f => f.id) : []
+  );
 
   // Figure out how many columns fit side-by-side given canvas width.
   // Target: 3 columns when canvas ≥ 3*cw + 2*bandGapX + 2*leftPad.
@@ -678,6 +688,33 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
     }
   }
 
+  // Standalone band: pure orphans (no edges anywhere). Rendered as a compact
+  // full-width grid with shorter cards so they don't dominate the layout.
+  if (standaloneBand && standaloneBand.files.length > 0) {
+    const usableW = canvasWidth - 2 * leftPad;
+    const perRow = Math.max(1, Math.floor((usableW + bandGapX) / (cw + bandGapX)));
+    const rows = Math.ceil(standaloneBand.files.length / perRow);
+    const bandH = rows * CH_STANDALONE + Math.max(0, rows - 1) * cardGapY;
+    for (let i = 0; i < standaloneBand.files.length; i++) {
+      const col = i % perRow;
+      const row = Math.floor(i / perRow);
+      positions[standaloneBand.files[i].id] = {
+        x: leftPad + col * (cw + bandGapX),
+        y: cursorY + row * (CH_STANDALONE + cardGapY),
+      };
+    }
+    bandRects.push({
+      key: 'standalone',
+      kind: 'band',
+      name: standaloneBand.name,
+      x: leftPad, y: cursorY,
+      w: usableW,
+      h: bandH,
+      count: standaloneBand.files.length,
+    });
+    cursorY += bandH + bandGapY;
+  }
+
   totalH = cursorY;
 
   // Build ELK IR with hand-positioned children. Use algorithm=fixed so ELK
@@ -687,12 +724,14 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
     for (const f of band.files) {
       const pos = positions[f.id];
       if (!pos) continue;
+      const isStandalone = standaloneIds.has(f.id);
+      const nodeH = isStandalone ? CH_STANDALONE : ch;
       children.push({
         id: f.id,
         x: pos.x,
         y: pos.y,
         width: cw,
-        height: ch,
+        height: nodeH,
         ports: [_port(f.id, 'NORTH'), _port(f.id, 'SOUTH')],
         properties: {
           'org.eclipse.elk.portConstraints': 'FIXED_SIDE',

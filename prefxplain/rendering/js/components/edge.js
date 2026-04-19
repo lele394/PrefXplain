@@ -34,7 +34,9 @@ PX.components.edge = function edgeSvg(edge, opts = {}) {
   const MARKER_WIDTH_ATTR = 7;
   const tailTrim = MARKER_WIDTH_ATTR * strokeW;
   const d = PX.pathD(pts, 5, tailTrim);
-  const eff = opacity != null ? opacity : (state === 'faded' ? 0.12 : state === 'normal' ? 0.55 : 0.95);
+  // Faded edges are pushed to near-invisible (0.06) so the lit-up path
+  // dominates. Normal (nothing selected) sits mid-tier for ambient context.
+  const eff = opacity != null ? opacity : (state === 'faded' ? 0.06 : state === 'normal' ? 0.55 : 0.95);
   const markerId = `arr-${state}${markerSuffix}`;
   let out = labelOnly
     ? ''

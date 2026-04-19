@@ -99,20 +99,21 @@ PX.components.bandLabel = function bandLabel({ x, y, w, name, count }) {
 };
 
 // Ghost anchor: a muted rectangle on the boundary of the focused-group
-// canvas that represents ONE external group. Edges that cross the group's
-// boundary terminate at (or emanate from) these anchors, so the viewer
-// immediately sees "this group talks to N external groups, with these
-// weights". Clicking an anchor drills focus to that group.
+// canvas that represents ONE external group. Following data-flow convention:
+//   left  = DEPENDS ON (upstream inputs — what this group imports)
+//   right = USED BY    (downstream consumers — who imports this group)
+// Arrows always flow left-to-right (upstream → focused group → downstream).
+// Clicking an anchor drills focus to that group.
 PX.components.ghostAnchor = function ghostAnchor({ x, y, w, h, groupId, count, color, direction }) {
   const T = PX.T;
   const dot = color || T.accent2;
-  const isOut = direction === 'out';
-  const arrow = isOut ? '\u2192' : '\u2190';
+  const isDep = direction === 'dep';  // LEFT anchor: this group imports that one
+  const heading = isDep ? 'DEPENDS ON' : 'USED BY';
   const label = PX.escapeXml(groupId);
   return `<g class="ghost-anchor" data-anchor-group="${PX.escapeXml(groupId)}" data-anchor-dir="${direction}" style="cursor:pointer">
     <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${T.bg}" stroke="${T.borderAlt}" stroke-width="1" stroke-dasharray="3 4" rx="6"/>
     <rect x="${x}" y="${y}" width="3" height="${h}" fill="${dot}" opacity="0.8" rx="1.5"/>
-    <text x="${x + 12}" y="${y + 15}" font-family="${T.mono}" font-size="9" letter-spacing="1.2" fill="${T.inkFaint}">${isOut ? 'OUT' : 'IN'} ${arrow}</text>
+    <text x="${x + 12}" y="${y + 15}" font-family="${T.mono}" font-size="9" letter-spacing="1.2" fill="${T.inkFaint}">${heading}</text>
     <text x="${x + 12}" y="${y + 30}" font-family="${T.mono}" font-size="11" font-weight="700" fill="${T.ink}">${label}</text>
     <text x="${x + w - 10}" y="${y + 30}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="end">${count}\u00d7</text>
   </g>`;

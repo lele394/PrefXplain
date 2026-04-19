@@ -227,15 +227,17 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   const ANCHOR_GAP_Y = 14;
   const ANCHOR_MARGIN = 22;
 
-  // Boundary anchors: "ghost" rectangles on the left (incoming source groups)
-  // and right (outgoing target groups). They give every inter-group edge a
-  // visible anchor so the viewer sees what the group connects to, even when
-  // intra-group edges are few or absent. Compute early so we know how much
-  // horizontal space the main bands can claim.
-  const inAnchors = (story.externalIn || []);
-  const outAnchors = (story.externalOut || []);
-  const leftReserved = inAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
-  const rightReserved = outAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
+  // Boundary anchors follow the data-flow convention used in architecture
+  // diagrams: UPSTREAM (what this group depends on) sits on the LEFT,
+  // DOWNSTREAM (who depends on this group) sits on the RIGHT. Arrows all
+  // flow left → right so the visual reads as a pipeline, independent of
+  // the import-graph edge direction.
+  //   depAnchors = story.externalOut (we import from them) → LEFT
+  //   useAnchors = story.externalIn  (they import from us) → RIGHT
+  const depAnchors = (story.externalOut || []);  // upstream dependencies
+  const useAnchors = (story.externalIn || []);   // downstream consumers
+  const leftReserved = depAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
+  const rightReserved = useAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN : 0;
   const mainLeft = LEFT + leftReserved;
   const mainWidth = CANVAS - 2 * LEFT - leftReserved - rightReserved;
 
@@ -382,7 +384,7 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   // than the bands for groups with many external neighbors — make canvas
   // at least as tall as the tallest anchor column.
   const bandsH = layout.canvasH;
-  const maxAnchorCount = Math.max(inAnchors.length, outAnchors.length);
+  const maxAnchorCount = Math.max(depAnchors.length, useAnchors.length);
   const anchorsStackH = maxAnchorCount > 0
     ? maxAnchorCount * ANCHOR_H + Math.max(0, maxAnchorCount - 1) * ANCHOR_GAP_Y
     : 0;
@@ -412,36 +414,39 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     }
     return positions;
   };
-  const inAnchorPos = placeAnchors(inAnchors, LEFT);
-  const outAnchorPos = placeAnchors(outAnchors, CANVAS - LEFT - ANCHOR_W);
+  const depAnchorPos = placeAnchors(depAnchors, LEFT);
+  const useAnchorPos = placeAnchors(useAnchors, CANVAS - LEFT - ANCHOR_W);
 
-  // Boundary edges: file → outAnchor, inAnchor → file. Routed via fixed
-  // corridors just inside each anchor column so the horizontal run never
-  // crosses a file card. Each external group gets its own corridor offset
-  // so fan-in/fan-out arrows from the same group don't overlap.
-  const OUT_CORRIDOR_BASE = mainLeft + mainWidth + 6;
-  const IN_CORRIDOR_BASE = mainLeft - 6;
-  const outCorridorX = {};
-  outAnchors.forEach((a, i) => { outCorridorX[a.groupId] = OUT_CORRIDOR_BASE + i * 4; });
-  const inCorridorX = {};
-  inAnchors.forEach((a, i) => { inCorridorX[a.groupId] = IN_CORRIDOR_BASE - i * 4; });
+  // Boundary edges ALWAYS flow left → right (data-flow convention):
+  //   depAnchor  →  file   (upstream dependency feeds us)
+  //   file       →  useAnchor (we feed our downstream consumer)
+  // Per-group corridors sit just inside each anchor column so the
+  // horizontal run never crosses a file card.
+  const DEP_CORRIDOR_BASE = mainLeft - 6;   // just right of LEFT anchors
+  const USE_CORRIDOR_BASE = mainLeft + mainWidth + 6; // just left of RIGHT anchors
+  const depCorridorX = {};
+  depAnchors.forEach((a, i) => { depCorridorX[a.groupId] = DEP_CORRIDOR_BASE - i * 4; });
+  const useCorridorX = {};
+  useAnchors.forEach((a, i) => { useCorridorX[a.groupId] = USE_CORRIDOR_BASE + i * 4; });
   const boundaryEdges = [];
+  // Dependency edges: arrow tail on the anchor (upstream), arrowhead on our
+  // file card (downstream consumer within our group).
   for (const e of story.externalOutEdges || []) {
-    const src = nodesById[e.fileId];
-    const anchor = outAnchorPos[e.groupId];
-    if (!src || !anchor) continue;
-    const sx = src.x + src.w;
-    const sy = src.y + src.h / 2;
-    const tx = anchor.x;
-    const ty = anchor.y + anchor.h / 2;
-    const cx = outCorridorX[e.groupId];
+    const tgt = nodesById[e.fileId];
+    const anchor = depAnchorPos[e.groupId];
+    if (!tgt || !anchor) continue;
+    const sx = anchor.x + anchor.w;         // anchor's right edge (left column)
+    const sy = anchor.y + anchor.h / 2;
+    const tx = tgt.x;                        // file's left edge (middle area)
+    const ty = tgt.y + tgt.h / 2;
+    const cx = depCorridorX[e.groupId];
     boundaryEdges.push({
-      id: `bo-${e.fileId}-${e.groupId}`,
-      kind: 'boundary-out',
+      id: `bd-${e.fileId}-${e.groupId}`,
+      kind: 'boundary-dep',
       fileId: e.fileId,
       groupId: e.groupId,
       count: e.count,
-      color: outAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
+      color: depAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
       points: [
         { x: sx, y: sy },
         { x: cx, y: sy },
@@ -450,22 +455,24 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       ],
     });
   }
+  // Consumer edges: arrow tail on our file, arrowhead on the downstream
+  // anchor (rightward data flow toward whoever imports us).
   for (const e of story.externalInEdges || []) {
-    const tgt = nodesById[e.fileId];
-    const anchor = inAnchorPos[e.groupId];
-    if (!tgt || !anchor) continue;
-    const sx = anchor.x + anchor.w;
-    const sy = anchor.y + anchor.h / 2;
-    const tx = tgt.x;
-    const ty = tgt.y + tgt.h / 2;
-    const cx = inCorridorX[e.groupId];
+    const src = nodesById[e.fileId];
+    const anchor = useAnchorPos[e.groupId];
+    if (!src || !anchor) continue;
+    const sx = src.x + src.w;                // file's right edge
+    const sy = src.y + src.h / 2;
+    const tx = anchor.x;                     // anchor's left edge (right column)
+    const ty = anchor.y + anchor.h / 2;
+    const cx = useCorridorX[e.groupId];
     boundaryEdges.push({
-      id: `bi-${e.fileId}-${e.groupId}`,
-      kind: 'boundary-in',
+      id: `bu-${e.fileId}-${e.groupId}`,
+      kind: 'boundary-use',
       fileId: e.fileId,
       groupId: e.groupId,
       count: e.count,
-      color: inAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
+      color: useAnchors.find(a => a.groupId === e.groupId)?.color || PX.T.inkMuted,
       points: [
         { x: sx, y: sy },
         { x: cx, y: sy },
@@ -476,7 +483,7 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   }
   const boundaryEdgeState = (be) => {
     if (!selected) return 'normal';
-    if (be.fileId === selected) return be.kind === 'boundary-out' ? 'depends' : 'imports';
+    if (be.fileId === selected) return be.kind === 'boundary-use' ? 'imports' : 'depends';
     return 'faded';
   };
 
@@ -543,21 +550,22 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     }
   }
 
-  // Ghost anchors for external groups.
-  for (const a of inAnchors) {
-    const p = inAnchorPos[a.groupId];
+  // Ghost anchors for external groups. LEFT = upstream dependencies,
+  // RIGHT = downstream consumers (data-flow convention).
+  for (const a of depAnchors) {
+    const p = depAnchorPos[a.groupId];
     if (!p) continue;
     svg += PX.components.ghostAnchor({
       x: p.x, y: p.y, w: p.w, h: p.h,
-      groupId: a.groupId, count: a.count, color: a.color, direction: 'in',
+      groupId: a.groupId, count: a.count, color: a.color, direction: 'dep',
     });
   }
-  for (const a of outAnchors) {
-    const p = outAnchorPos[a.groupId];
+  for (const a of useAnchors) {
+    const p = useAnchorPos[a.groupId];
     if (!p) continue;
     svg += PX.components.ghostAnchor({
       x: p.x, y: p.y, w: p.w, h: p.h,
-      groupId: a.groupId, count: a.count, color: a.color, direction: 'out',
+      groupId: a.groupId, count: a.count, color: a.color, direction: 'use',
     });
   }
 

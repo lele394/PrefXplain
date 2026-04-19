@@ -133,6 +133,13 @@
     state.selected = id;
     if (id && index.byId[id]) {
       state.focusedGroup = (index.byId[id].group || 'Ungrouped');
+      // Selecting a file overrides any pinned ghost-anchor highlight —
+      // the user's attention has moved to a specific file, so the group
+      // pin shouldn't keep dimming everything else. Also flush any
+      // in-flight hover state so the debounce can't stomp the selection.
+      state.pinnedGroup = null;
+      state.hoveredGroup = null;
+      state.hoveredFile = null;
     }
     syncChrome();
     await rerender();
@@ -174,9 +181,19 @@
     if (ghostAnchor) {
       // Single-click pins the anchor group so its arrows stay lit up. Click
       // again (same anchor) to unpin. Double-click teleports — see dblclick.
+      // Pinning an anchor moves attention to the group level, so any active
+      // file selection is cleared (mirrors how selecting a file clears the
+      // pin). Without this, the file-level `selected` branch dominates in
+      // fileState/edgeState and the pin has no visible effect.
       const g = ghostAnchor.getAttribute('data-anchor-group');
       if (g) {
         state.pinnedGroup = state.pinnedGroup === g ? null : g;
+        if (state.pinnedGroup) {
+          state.selected = null;
+          state.hoveredGroup = null;
+          state.hoveredFile = null;
+        }
+        syncChrome();
         await rerender();
       }
       return;

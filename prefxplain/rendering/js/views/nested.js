@@ -259,8 +259,14 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   const CANVAS = 1640;
   const LEFT = 32;
   const TOP = 20;
-  const SUMMARY_H = 84;
   const GAP = 14;
+  // Selected file (if it belongs to the focused group) gets its name tucked
+  // next to the group title inside the summary banner. The top bar used to
+  // own that text; we moved it here so the top bar stays a stable brand
+  // anchor ("prefxplain"). The in-SVG "detail summary" banner was folded
+  // into the top info bar (#px-top), so no extra vertical space is
+  // reserved here beyond the standard top pad + gap.
+  const SUMMARY_H = 0;
   const ANCHOR_W = 180;
   const ANCHOR_H = 48;
   const ANCHOR_GAP_Y = 16;
@@ -613,6 +619,10 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     ? hoveredFile
     : null;
   const hoverNeighbors = effectiveHoverFile ? neighborsOf(effectiveHoverFile) : null;
+  // Priority: explicit selection wins over any transient group/file hover.
+  // Without this order a stale hoveredGroup — a pin that's about to be
+  // cleared, or a hover debounce that hasn't fired yet — dominates the
+  // just-made file selection and makes the click look like a no-op.
   const fileState = (id) => {
     if (filter) {
       const n = idx.byId[id];
@@ -623,10 +633,6 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
         || (n.short || '').toLowerCase().includes(q);
       if (!selected) return matches ? 'match' : 'dimmed';
     }
-    if (hoveredGroup) {
-      const isConnected = boundaryEdges.some(be => be.groupId === hoveredGroup && be.fileId === id);
-      return isConnected ? 'normal' : 'dimmed';
-    }
     if (selected) {
       if (id === selected) return 'selected';
       if (selectedNeighbors && selectedNeighbors.has(id)) {
@@ -636,6 +642,10 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
         }
       }
       return 'dimmed';
+    }
+    if (hoveredGroup) {
+      const isConnected = boundaryEdges.some(be => be.groupId === hoveredGroup && be.fileId === id);
+      return isConnected ? 'normal' : 'dimmed';
     }
     if (effectiveHoverFile) {
       if (id === effectiveHoverFile) return 'normal';
@@ -650,12 +660,12 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     return 'normal';
   };
   const edgeState = (e) => {
-    if (hoveredGroup) return 'faded';
     if (selected) {
       if (e.sourceNode === selected) return 'depends';
       if (e.targetNode === selected) return 'imports';
       return 'faded';
     }
+    if (hoveredGroup) return 'faded';
     if (effectiveHoverFile) {
       if (e.sourceNode === effectiveHoverFile) return 'depends';
       if (e.targetNode === effectiveHoverFile) return 'imports';
@@ -666,14 +676,14 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   };
 
   const boundaryEdgeState = (be) => {
+    if (selected) {
+      if (be.fileId === selected) return be.kind === 'boundary-use' ? 'imports' : 'depends';
+      return 'faded';
+    }
     if (hoveredGroup) {
       return hoveredGroup === be.groupId
         ? (be.kind === 'boundary-use' ? 'imports' : 'depends')
         : 'faded';
-    }
-    if (selected) {
-      if (be.fileId === selected) return be.kind === 'boundary-use' ? 'imports' : 'depends';
-      return 'faded';
     }
     if (effectiveHoverFile) {
       if (be.fileId === effectiveHoverFile) {
@@ -690,14 +700,9 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(${W}px * var(--px-zoom, 1));height:auto;min-width:${W}px" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
   svg += PX.components.markers();
 
-  // Summary header. (No breadcrumb here — the top info bar owns the
-  // "focused group" identity and the back-to-overview button.)
-  svg += PX.components.detailSummary({
-    x: LEFT,
-    y: TOP,
-    w: CANVAS - 2 * LEFT,
-    story,
-  });
+  // No in-SVG summary banner — the top info bar (#px-top) owns the
+  // "focused group + selected file" identity, the description, and the
+  // back-to-overview button.
 
   // Band & cluster labels. Band labels sit above a band's top edge. Cluster
   // headers sit INSIDE the test band, one per test-target column. When a

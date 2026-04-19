@@ -6,10 +6,9 @@
 window.PX = window.PX || {};
 PX.components = PX.components || {};
 
-PX.components.detailSummary = function detailSummary({ x, y, w, story }) {
+PX.components.detailSummary = function detailSummary({ x, y, w, story, selectedFile = null }) {
   const T = PX.T;
   const { meta, summary } = story;
-  const h = 84;
   const pill = (text, color) => `<span style="display:inline-flex;align-items:center;padding:3px 9px;background:${T.bg};border:1px solid ${T.border};border-radius:999px;font-family:${T.mono};font-size:10.5px;color:${color || T.ink2}">${PX.escapeXml(text)}</span>`;
   const pills = [
     pill(`${summary.fileCount} files`),
@@ -27,30 +26,49 @@ PX.components.detailSummary = function detailSummary({ x, y, w, story }) {
     </span>`;
   };
   const routes = (summary.topRoutes || []).slice(0, 4).map(routeSpan).join('<span style="color:'+T.borderAlt+';margin:0 8px">\u00B7</span>');
-  const routesBlock = routes
+  const hasRoutes = !!routes;
+  const routesBlock = hasRoutes
     ? `<div style="margin-top:10px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 0">
         <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:${T.inkFaint};margin-right:12px">Strongest routes</span>
         ${routes}
       </div>`
     : '';
   const desc = PX.escapeXml(meta.description || '');
-  const descBlock = desc
+  const hasDesc = !!desc;
+  const descBlock = hasDesc
     ? `<div style="margin-top:6px;font-size:12px;line-height:1.5;color:${T.ink2};max-width:820px">${desc}</div>`
     : '';
+  // Selected file name rides inline with the group title — e.g.
+  //   "CLI & Integrations  —  cli.py"
+  // moved here from the top bar so the top bar stays a stable brand anchor.
+  const fileTag = selectedFile
+    ? `<span style="color:${T.borderAlt};font-size:15px;font-weight:400;margin:0 4px">\u2014</span>
+       <span style="font-family:${T.mono};font-size:14px;font-weight:600;color:${T.ink2}">${PX.escapeXml(selectedFile.label || selectedFile.short || '')}</span>`
+    : '';
+  // Compute a snug height that comfortably fits every present block. Padding
+  // is split top/bottom; each present block claims its own slice. Without
+  // this the routes row used to spill below the rounded rectangle (the old
+  // fixed h=84 clipped through it).
+  let h = 28;                   // 14px top + 14px bottom padding
+  h += 26;                      // title row
+  if (hasDesc)   h += 26;       // description line (max-width caps wrap)
+  if (hasRoutes) h += 36;       // routes row — label + 4 spans with wrap budget
   const html = `<div xmlns="http://www.w3.org/1999/xhtml" style="padding:14px 16px;font-family:${T.ui};color:${T.ink}">
     <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
       <span style="width:10px;height:10px;background:${meta.color};border-radius:50%;display:inline-block"></span>
       <span style="font-size:17px;font-weight:700;color:${T.ink}">${PX.escapeXml(meta.name)}</span>
+      ${fileTag}
       <span style="display:inline-flex;flex-wrap:wrap;gap:6px;margin-left:auto">${pills}</span>
     </div>
     ${descBlock}
     ${routesBlock}
   </div>`;
-  return `<g class="detail-summary">
+  const svg = `<g class="detail-summary">
     <rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${T.panel}" stroke="${T.border}" stroke-width="1" rx="8"/>
     <rect x="${x}" y="${y}" width="${w}" height="3" fill="${meta.color}" rx="8"/>
     <foreignObject x="${x}" y="${y + 3}" width="${w}" height="${h - 3}">${html}</foreignObject>
   </g>`;
+  return { svg, h };
 };
 
 PX.components.entryPathsStrip = function entryPathsStrip({ x, y, w, entries, color }) {

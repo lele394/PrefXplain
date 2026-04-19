@@ -169,7 +169,7 @@ function _renderEmpty(graph) {
   `;
 }
 
-function _renderFocusedGroup(graph, groupId, index, groupsMeta) {
+function _renderFocusedGroup(graph, groupId, index, groupsMeta, selected = null) {
   const T = PX.T;
   const stats = ((index.groupStats || {})[groupId]) || null;
   if (!stats) return _renderEmpty(graph);
@@ -184,29 +184,57 @@ function _renderFocusedGroup(graph, groupId, index, groupsMeta) {
   const bridgePills = (stats.bridgeFiles || []).slice(0, 4).map(file =>
     `<span style="display:inline-flex;align-items:center;gap:5px;background:${T.pill};border:1px solid ${T.pillBorder};border-radius:999px;padding:2px 8px;font-size:11px;color:${T.accent2};font-weight:500">${PX.escapeXml(file.label)} <span style="color:${T.inkFaint};font-family:${T.mono}">\u2194${file.count}</span></span>`
   ).join('');
+  // When a file in this group is selected, its name rides inline next to
+  // the group title (same line, monospace) and its pills (BLAST/DEPS/SIZE)
+  // replace the group-level counters. This merges the old floating
+  // "detail summary" banner into the top info bar.
+  const selNode = selected ? index.byId[selected] : null;
+  const selInGroup = selNode && (selNode.group || 'Ungrouped') === groupId ? selNode : null;
+  const selLabel = selInGroup ? (selInGroup.short || selInGroup.label || selInGroup.id) : null;
+  const selDesc = selInGroup ? (selInGroup.description || '') : '';
+  const selHighlights = selInGroup ? (selInGroup.highlights || []) : [];
+  const selKb = selInGroup ? ((selInGroup.size || 0) / 1024).toFixed(1) : null;
+  const selDeps = selInGroup ? (index.importsOf[selInGroup.id] || []).length : 0;
+  const selBlast = selInGroup ? index.blastRadius(selInGroup.id).size : 0;
+  const topRightPills = selInGroup
+    ? `${_pill('BLAST', selBlast, selBlast > 5 ? 'warn' : null)}${_pill('DEPS', selDeps)}${_pill('SIZE', `${selKb} kB`)}
+       <button data-action="deselect" style="font-family:${T.mono};font-size:10.5px;padding:3px 7px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u00d7</button>`
+    : `${_pill('FILES', stats.fileCount)}${_pill('IN', stats.externalIn)}${_pill('OUT', stats.externalOut)}
+       <button data-action="clear-focus" style="font-family:${T.mono};font-size:10.5px;padding:3px 9px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u2190 back to overview</button>`;
+  const titleSuffix = selLabel
+    ? `<span style="color:${T.borderAlt}">\u2014</span>
+       <span style="font-family:${T.mono};font-size:13px;font-weight:700;color:${T.ink};flex-shrink:0">${PX.escapeXml(selLabel)}</span>
+       ${_roleTag(selInGroup.role)}`
+    : '';
+  // Secondary row: if a file is selected show its description + highlights;
+  // otherwise keep the group description + strongest routes + bridge pills.
+  const secondaryRow = selInGroup
+    ? `<div style="flex:1;min-width:0">${PX.escapeXml(selDesc)}</div>
+       ${selHighlights.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0;max-width:360px;justify-content:flex-end">
+         ${selHighlights.map(h => `<span style="display:inline-flex;align-items:center;background:${T.pill};border:1px solid ${T.pillBorder};border-radius:999px;padding:2px 9px;font-size:11px;color:${T.accent2};font-weight:500">${PX.escapeXml(h)}</span>`).join('')}
+       </div>` : ''}`
+    : `<div style="flex:1;min-width:0">
+         <div>${PX.escapeXml(meta.desc || meta.description || '')}</div>
+         <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;color:${T.inkMuted};font-family:${T.mono};font-size:11px">
+           <span>OUT \u2192 ${PX.escapeXml(strongestOut)}</span>
+           <span>IN \u2190 ${PX.escapeXml(strongestIn)}</span>
+         </div>
+       </div>
+       ${bridgePills ? `<div style="display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0;max-width:420px;justify-content:flex-end">${bridgePills}</div>` : ''}`;
   return `
     <div style="background:${T.panel};border-bottom:1px solid ${T.border};font-family:${T.ui};flex-shrink:0">
       <div style="display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid ${T.borderAlt};white-space:nowrap;overflow-x:auto">
-        <span style="width:3px;height:20px;background:${color};border-radius:1px;flex-shrink:0"></span>
+        <span style="width:10px;height:10px;background:${color};border-radius:50%;flex-shrink:0"></span>
         <span style="font-size:13px;font-weight:700;color:${T.ink};flex-shrink:0">${PX.escapeXml(groupId)}</span>
+        ${titleSuffix}
         <span style="color:${T.borderAlt}">\u00b7</span>
-        ${_pill('FILES', stats.fileCount)}
-        ${_pill('IN', stats.externalIn)}
-        ${_pill('OUT', stats.externalOut)}
         <span style="flex:1"></span>
         ${_renderLangBar(graph)}
         <span style="flex:1"></span>
-        <button data-action="clear-focus" style="font-family:${T.mono};font-size:10.5px;padding:3px 9px;background:${T.panelAlt};color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer;flex-shrink:0">\u2190 back to overview</button>
+        ${topRightPills}
       </div>
       <div style="display:flex;align-items:flex-start;gap:14px;padding:5px 14px;font-size:12px;color:${T.ink2};line-height:1.45">
-        <div style="flex:1;min-width:0">
-          <div>${PX.escapeXml(meta.desc || meta.description || '')}</div>
-          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;color:${T.inkMuted};font-family:${T.mono};font-size:11px">
-            <span>OUT \u2192 ${PX.escapeXml(strongestOut)}</span>
-            <span>IN \u2190 ${PX.escapeXml(strongestIn)}</span>
-          </div>
-        </div>
-        ${bridgePills ? `<div style="display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0;max-width:420px;justify-content:flex-end">${bridgePills}</div>` : ''}
+        ${secondaryRow}
       </div>
     </div>
   `;
@@ -222,13 +250,16 @@ function _renderSelected(graph, selected, index, groupsMeta) {
   const deps = index.importsOf[selected] || [];
   const highlights = n.highlights || [];
   const kb = ((n.size || 0) / 1024).toFixed(1);
+  const v = graph.version || '';
+  // Top bar stays anchored on the "prefxplain" brand even when a file is
+  // selected — the file's own name/id now rides inline with the focused
+  // group's title inside the nested view's summary banner, so showing it
+  // up here would duplicate. Colored tick still tracks the file's group.
   return `
     <div style="background:${T.panel};border-bottom:1px solid ${T.border};font-family:${T.ui};flex-shrink:0">
       <div style="display:flex;align-items:center;gap:10px;padding:6px 14px;border-bottom:1px solid ${T.borderAlt};white-space:nowrap;overflow-x:auto">
         <span style="width:3px;height:20px;background:${color};border-radius:1px;flex-shrink:0"></span>
-        <span style="font-size:13px;font-weight:700;color:${T.ink};flex-shrink:0">${PX.escapeXml(n.short || n.label)}</span>
-        <span style="color:${T.borderAlt}">\u00b7</span>
-        <span style="font-size:11px;color:${T.inkFaint};font-family:${T.mono};flex-shrink:0;overflow:hidden;text-overflow:ellipsis;max-width:360px">${PX.escapeXml(n.id)}</span>
+        <span style="font-size:13px;font-weight:700;color:${T.ink};flex-shrink:0">prefxplain ${v ? `<span style="color:${T.inkFaint};font-family:${T.mono};font-weight:400">v${PX.escapeXml(v)}</span>` : ''}</span>
         <span style="color:${T.borderAlt}">\u00b7</span>
         ${_roleTag(n.role)}
         <span style="flex:1"></span>
@@ -258,10 +289,10 @@ PX.ui.topPanel = function topPanel(container, { graph, index, groupsMeta }) {
   const listeners = { onDeselect: [], onClearFocus: [] };
 
   const render = () => {
-    mount.innerHTML = selected
+    mount.innerHTML = focusedGroup
+      ? _renderFocusedGroup(graph, focusedGroup, index, groupsMeta, selected)
+      : selected
       ? _renderSelected(graph, selected, index, groupsMeta)
-      : focusedGroup
-      ? _renderFocusedGroup(graph, focusedGroup, index, groupsMeta)
       : _renderEmpty(graph);
   };
   render();
@@ -279,7 +310,9 @@ PX.ui.topPanel = function topPanel(container, { graph, index, groupsMeta }) {
 
   return {
     setSelected: (id) => { selected = id; render(); },
-    setFocusedGroup: (groupId) => { focusedGroup = groupId; if (selected) return; render(); },
+    // Re-render whenever the focused group changes — the combined group +
+    // file header depends on BOTH values.
+    setFocusedGroup: (groupId) => { focusedGroup = groupId; render(); },
     onDeselect: (fn) => listeners.onDeselect.push(fn),
     onClearFocus: (fn) => listeners.onClearFocus.push(fn),
   };

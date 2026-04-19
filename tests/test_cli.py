@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
 from prefxplain import cli as cli_mod
+from prefxplain.cli import _install_vscode_extension as real_install_vscode_extension
 from prefxplain.cli import app
 
 runner = CliRunner()
@@ -95,6 +97,70 @@ class TestVersion:
 
 
 class TestSetupCommand:
+    @pytest.fixture(autouse=True)
+    def _stub_preview_extension_install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(cli_mod, "_install_vscode_extension", lambda _package_root: None)
+
+    def test_install_vscode_extension_uses_packaged_vsix(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        ext_dir = package_root / "vscode_extension"
+        ext_dir.mkdir(parents=True)
+        vsix = ext_dir / "prefxplain-vscode-0.1.0.vsix"
+        vsix.write_text("stub", encoding="utf-8")
+
+        real_exists = cli_mod.Path.exists
+
+        def fake_exists(path_obj: Path) -> bool:
+            if str(path_obj).startswith("/Applications/"):
+                return False
+            return real_exists(path_obj)
+
+        monkeypatch.setattr(cli_mod.Path, "exists", fake_exists)
+        monkeypatch.setattr(
+            cli_mod.shutil,
+            "which",
+            lambda name: "/usr/bin/code" if name == "code" else None,
+        )
+
+        calls: list[list[str]] = []
+
+        def fake_run(cmd: list[str], **_: object) -> SimpleNamespace:
+            calls.append(cmd)
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(cli_mod.subprocess, "run", fake_run)
+
+        result = real_install_vscode_extension(package_root)
+
+        assert result == "Preview extension (VS Code): prefxplain-vscode-0.1.0.vsix"
+        assert calls == [[
+            "/usr/bin/code",
+            "--install-extension",
+            str(vsix),
+            "--force",
+        ]]
+
+    def test_setup_succeeds_with_preview_extension_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        package_root = tmp_path / "prefxplain"
+        monkeypatch.setattr(cli_mod.Path, "home", staticmethod(lambda: tmp_path))
+        monkeypatch.setattr(cli_mod.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(cli_mod, "__file__", str(package_root / "cli.py"), raising=False)
+        monkeypatch.setattr(
+            cli_mod,
+            "_install_vscode_extension",
+            lambda _package_root: "Preview extension (VS Code): prefxplain-vscode-0.1.0.vsix",
+        )
+
+        result = runner.invoke(app, ["setup"])
+
+        assert result.exit_code == 0, result.output
+        assert "Preview extension (VS Code): prefxplain-vscode-0.1.0.vsix" in result.output
+        assert "No AI coding tools detected, so /prefxplain was not registered yet." in result.output
+
     def test_setup_copilot_installs_plugin(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         package_root = tmp_path / "prefxplain"
         plugin_dir = package_root / "copilot_plugin"

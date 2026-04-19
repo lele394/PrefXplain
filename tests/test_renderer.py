@@ -457,9 +457,9 @@ class TestElkRenderer:
             "if (bussed[0].bus.hub !== 'hub.py' || bussed[0].bus.direction !== 'fanin') throw new Error('hub direction wrong');\n"
             "const floating = PX.placeEdgeLabels([{id:'g0', points:[\n"
             "  {x:402,y:192}, {x:402,y:240}, {x:172,y:240}, {x:172,y:660}, {x:632,y:660}, {x:632,y:852}\n"
-            "], __labelW: 180}], { offsetVertical: true, labelW: (e) => e.__labelW || 180 })[0];\n"
+            "], __labelW: 180}], { centerOnPath: true, labelW: (e) => e.__labelW || 180 })[0];\n"
             "if (!(floating.labelY > 240 && floating.labelY < 660)) throw new Error('label should stay on the vertical trunk midpoint');\n"
-            "if (!(floating.labelX > 220 && floating.labelX < 320)) throw new Error('label should move beside the vertical trunk, not float on the lower detour');\n"
+            "if (floating.labelX !== 172) throw new Error('label should stay on the routed trunk instead of floating beside it');\n"
             "console.log('OK');\n"
         )
         result = subprocess.run(["node", str(script)], capture_output=True, text=True, cwd=Path(".").resolve())

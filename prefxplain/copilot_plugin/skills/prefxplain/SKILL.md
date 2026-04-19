@@ -42,8 +42,7 @@ PREFXPLAIN_PYTHON="$(python3 -c 'import prefxplain' 2>/dev/null && echo python3 
   || echo python3)"
 ```
 
-If empty/exit≠0, tell the user (the **git-clone install is canonical**, pip
-flows skip the IDE preview extension):
+If empty/exit≠0, tell the user (the **git-clone install is canonical**):
 
 > prefxplain isn't installed. Recommended one-liner:
 >
@@ -53,8 +52,8 @@ flows skip the IDE preview extension):
 > tool, and auto-installs the IDE preview extension. Want me to run it? [y/N]
 
 Wait for confirmation. If yes, run the one-liner. If they prefer pip, accept
-`pipx install prefxplain && prefxplain setup` (extension won't auto-install
-in that case — the HTML still works in any browser).
+`pipx install prefxplain && prefxplain setup` (the bundled preview extension
+auto-installs there too).
 
 Use **`$PREFXPLAIN_PYTHON`** (not `python`) for every `python -c "..."` block
 in the workflow below.

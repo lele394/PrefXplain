@@ -604,76 +604,48 @@ If `--output` was passed in `$ARGUMENTS`, use that path instead of the default.
 
 ### 6. Preview in IDE
 
-The goal is zero-friction: preview auto-opens in the IDE. Three-layer strategy:
-a background HTTP server (always runs, for port-detection UX), a `vscode://`
-deeplink triggered via `open` (auto-opens the webview when the extension is
-installed — no user click needed), and the raw http URL as last-resort fallback.
-
-```bash
-cd "$REPO"
-# Kill any previous prefxplain server
-[ -f /tmp/prefxplain.pid ] && kill $(cat /tmp/prefxplain.pid) 2>/dev/null; rm -f /tmp/prefxplain.pid /tmp/prefxplain.port
-
-# Find a free port in 8765-8775
-PORT=$(python3 -c "
-import socket
-for p in range(8765, 8776):
-    s = socket.socket()
-    try:
-        s.bind(('127.0.0.1', p))
-        s.close()
-        print(p)
-        break
-    except OSError:
-        continue
-")
-
-nohup python3 -m http.server $PORT --directory . > /tmp/prefxplain-server.log 2>&1 &
-echo $! > /tmp/prefxplain.pid
-echo $PORT > /tmp/prefxplain.port
-sleep 0.5
-```
-
-Auto-open via the IDE's URI handler. `open` routes the deeplink to whichever
-IDE registered the scheme (Cursor takes `cursor://`, VS Code takes `vscode://`);
-if the extension isn't installed, `open` falls through gracefully and the
-user still has the http URL below as a click-through in the chat output.
+Open the generated HTML in the installed PrefXplain IDE preview:
 
 ```bash
 HTML_ABS="$REPO/prefxplain.html"
 [ -f "$HTML_ABS" ] || HTML_ABS="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$REPO/prefxplain.html")"
-ENCODED_PATH=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))" "$HTML_ABS")
+IDE_SCHEME="$(python3 -c "
+import os
+term = (os.environ.get('TERM_PROGRAM') or '').lower().strip()
+generic = {'', 'apple_terminal', 'iterm.app', 'hyper', 'tmux', 'rxvt', 'xterm', 'xterm-256color', 'alacritty', 'kitty', 'ghostty', 'warp', 'wezterm'}
+print('vscode' if term in generic else term)
+")"
+PREVIEW_URI="$(HTML_ABS="$HTML_ABS" IDE_SCHEME="$IDE_SCHEME" python3 -c "import os, urllib.parse; print(f\"{os.environ['IDE_SCHEME']}://prefxplain.prefxplain-vscode/preview?path={urllib.parse.quote(os.environ['HTML_ABS'])}\")")"
 
-# Prefer Cursor if present, else VS Code. `open` silently no-ops when neither
-# scheme is registered, so we don't need to probe first.
-CURSOR_URI="cursor://prefxplain.prefxplain-vscode/?path=${ENCODED_PATH}"
-VSCODE_URI="vscode://prefxplain.prefxplain-vscode/?path=${ENCODED_PATH}"
-if [ -d "/Applications/Cursor.app" ]; then
-  open "$CURSOR_URI" 2>/dev/null
-  PRIMARY_URI="$CURSOR_URI"
-elif [ -d "/Applications/Visual Studio Code.app" ]; then
-  open "$VSCODE_URI" 2>/dev/null
-  PRIMARY_URI="$VSCODE_URI"
-else
-  PRIMARY_URI="$VSCODE_URI"
-fi
+case "$(uname -s 2>/dev/null)" in
+  Darwin*)
+    command -v open >/dev/null 2>&1 && open "$PREVIEW_URI" 2>/dev/null || true
+    ;;
+  Linux*)
+    if [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && command -v xdg-open >/dev/null 2>&1; then
+      xdg-open "$PREVIEW_URI" 2>/dev/null || true
+    elif command -v wslview >/dev/null 2>&1; then
+      wslview "$PREVIEW_URI" 2>/dev/null || true
+    fi
+    ;;
+  MINGW*|MSYS*|CYGWIN*)
+    command -v start >/dev/null 2>&1 && start "" "$PREVIEW_URI" 2>/dev/null || true
+    ;;
+esac
 ```
 
-Display clickable fallbacks in the chat output so the user always has a
-one-click escape hatch, in case the auto-open failed (no extension, wrong
-IDE focused, etc.):
+Then report the path:
 
 ```bash
-PORT=$(cat /tmp/prefxplain.port)
+printf '\n\033]8;;%s\033\\%s\033]8;;\033\\\n' \
+  "$PREVIEW_URI" "▶ Open preview in IDE (Cmd/Ctrl+click here)"
 echo ""
-echo "Preview auto-opened in IDE. If it didn't appear, click either of:"
-echo "  [IDE webview]   $PRIMARY_URI"
-echo "  [browser]       http://localhost:$PORT/prefxplain.html"
-echo ""
-echo "Server PID: $(cat /tmp/prefxplain.pid) -- kill with: kill \$(cat /tmp/prefxplain.pid)"
+echo "URI:          $PREVIEW_URI"
+echo "HTML on disk: $HTML_ABS"
+echo "Fallback:     Cmd+Shift+P → PrefXplain: Preview diagram"
 ```
 
-Do NOT block on the server. It runs in background. Move on to the report.
+Do not start a localhost server by default. The plugin webview is the primary preview path.
 
 ### 7. Report to the user
 
@@ -685,7 +657,13 @@ Keep this tight. Pull structural insights from the JSON:
 - **Entry points** (in-degree 0, excluding tests) -- where to start reading
 - **Orphans** (no imports in or out) -- if >3, give the count, offer to list
 - **Cycles** if detected -- flag as architectural debt
-- **URL to prefxplain.html** (the localhost URL from step 6)
+- **Preview — MUST be rendered as a Markdown link**, not as a bare URL, because
+  Codex / Claude Code / Copilot / Gemini panes make Markdown links reliably
+  Cmd/Ctrl-clickable. Format exactly like this:
+
+  ```
+  Preview: [▶ Open in IDE]($PREVIEW_URI) ([fallback]: `prefxplain.html` at $HTML_ABS, or `Cmd+Shift+P → PrefXplain: Preview diagram`)
+  ```
 
 Close with: "Happy to walk through any specific file or cluster."
 Don't preempt -- wait for the user to ask.
@@ -698,8 +676,8 @@ Don't preempt -- wait for the user to ask.
   new or changed files — previous descriptions are preserved automatically
 - The HTML renderer already surfaces entry points, core files, orphans, and cycles
   visually -- the text report is a summary for people reading along in chat
-- A background HTTP server runs after the command for IDE preview. It consumes zero
-  CPU at rest but holds a port open. Kill it with `kill $(cat /tmp/prefxplain.pid)`.
+- The IDE extension preview is the default viewing path. Use a localhost server only
+  if the user explicitly asks for browser preview.
 
 ### View modes
 

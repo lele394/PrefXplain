@@ -90,6 +90,35 @@ function injectBaseTag(rawHtml: string, baseHref: string): string {
   return `<head>${baseTag}</head>${rawHtml}`;
 }
 
+function injectVsCodeBridge(rawHtml: string): string {
+  const bridgeScript = `<script>
+(() => {
+  try {
+    if (
+      typeof acquireVsCodeApi === 'function' &&
+      (!window.__prefxplainVsCodeApi ||
+        typeof window.__prefxplainVsCodeApi.postMessage !== 'function')
+    ) {
+      window.__prefxplainVsCodeApi = acquireVsCodeApi();
+    }
+  } catch (error) {
+    console.warn('[prefxplain] unable to acquire VS Code API bridge', error);
+  }
+})();
+</script>`;
+
+  if (/<head\b[^>]*>/i.test(rawHtml)) {
+    return rawHtml.replace(/<head\b[^>]*>/i, (match) => `${match}${bridgeScript}`);
+  }
+  if (/<html\b[^>]*>/i.test(rawHtml)) {
+    return rawHtml.replace(
+      /<html\b[^>]*>/i,
+      (match) => `${match}<head>${bridgeScript}</head>`
+    );
+  }
+  return `${bridgeScript}${rawHtml}`;
+}
+
 function injectResizeBridge(rawHtml: string): string {
   const bridgeScript = `<script>
 (() => {
@@ -236,7 +265,9 @@ function loadHtml(panel: vscode.WebviewPanel, htmlPath: string): void {
       .asWebviewUri(vscode.Uri.file(path.dirname(htmlPath)))
       .toString()}/`;
 
-    panel.webview.html = injectResizeBridge(injectBaseTag(raw, baseHref));
+    panel.webview.html = injectResizeBridge(
+      injectVsCodeBridge(injectBaseTag(raw, baseHref))
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     panel.webview.html = renderStatusHtml(

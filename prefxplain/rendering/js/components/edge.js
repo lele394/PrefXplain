@@ -45,32 +45,38 @@ PX.components.edge = function edgeSvg(edge, opts = {}) {
       lx = (pts[0].x + pts[pts.length - 1].x) / 2;
       ly = (pts[0].y + pts[pts.length - 1].y) / 2;
     }
-    // Faded state only dims text/stroke; the bg rect stays OPAQUE so it
-    // keeps masking foreign arrows that pass behind it. A semi-transparent
-    // faded rect lets highlighted edges "leak through" — the effect the
-    // user flagged as "blue arrow passing under a block".
-    const textOpacity = state === 'faded' ? 0.35 : 1;
-    const strokeOpacity = state === 'faded' ? 0.5 : 1;
+    // Faded state dims text/stroke AND drops the source/target accent colors
+    // to a uniform neutral grey. Keeping the vivid group colors at low opacity
+    // made dimmed labels still visually compete with the highlighted edges —
+    // the "les labels restent colorés" regression.
+    const faded = state === 'faded';
+    const textOpacity = faded ? 0.5 : 1;
+    const strokeOpacity = faded ? 0.5 : 1;
+    const srcFill = faded ? T.inkMuted : (label.sourceColor || color);
+    const tgtFill = faded ? T.inkMuted : (label.targetColor || color);
+    const simpleFill = faded ? T.inkMuted : color;
     if (typeof label === 'object' && label.sourceName && label.targetName) {
       const line1 = `[${label.sourceName}]`;
       const line2 = `imports ${label.count}\u00d7`;
       const line3 = `[${label.targetName}]`;
+      // Width/height/padding must match ir.js → _labelDims. The padding is
+      // sized to cover the thick-stroke shoulder of aggregate edges.
       const charW1 = 8.2, charW2 = 7.6;
-      const w = Math.max(line1.length * charW1, line2.length * charW2, line3.length * charW1) + 26;
-      const h = 50;
+      const w = Math.max(line1.length * charW1, line2.length * charW2, line3.length * charW1) + 36;
+      const h = 56;
       const top = ly - h / 2;
       out += `<g pointer-events="none">`
         +  `<rect x="${lx - w / 2}" y="${top}" width="${w}" height="${h}" fill="${T.bg}" stroke="${color}" stroke-width="1" stroke-opacity="${strokeOpacity}" rx="8"/>`
-        +  `<text x="${lx}" y="${top + 14}" font-family="${T.mono}" font-size="11" fill="${label.sourceColor || color}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="700">${PX.escapeXml(line1)}</text>`
-        +  `<text x="${lx}" y="${top + 28}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" fill-opacity="${textOpacity}" text-anchor="middle">${PX.escapeXml(line2)}</text>`
-        +  `<text x="${lx}" y="${top + 42}" font-family="${T.mono}" font-size="11" fill="${label.targetColor || color}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="700">${PX.escapeXml(line3)}</text>`
+        +  `<text x="${lx}" y="${top + 17}" font-family="${T.mono}" font-size="11" fill="${srcFill}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="700">${PX.escapeXml(line1)}</text>`
+        +  `<text x="${lx}" y="${top + 31}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" fill-opacity="${textOpacity}" text-anchor="middle">${PX.escapeXml(line2)}</text>`
+        +  `<text x="${lx}" y="${top + 45}" font-family="${T.mono}" font-size="11" fill="${tgtFill}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="700">${PX.escapeXml(line3)}</text>`
         +  `</g>`;
     } else {
       const txt = PX.escapeXml(String(label));
       const w = txt.length * 6.4 + 16;
       out += `<g pointer-events="none">`
-        +  `<rect x="${lx - w / 2}" y="${ly - 11}" width="${w}" height="22" fill="${T.bg}" stroke="${color}" stroke-width="1" stroke-opacity="${strokeOpacity}" rx="11"/>`
-        +  `<text x="${lx}" y="${ly + 4.5}" font-family="${T.mono}" font-size="11" fill="${color}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="600">${txt}</text>`
+        +  `<rect x="${lx - w / 2}" y="${ly - 10}" width="${w}" height="20" fill="${T.bg}" stroke="${color}" stroke-width="1" stroke-opacity="${strokeOpacity}" rx="10"/>`
+        +  `<text x="${lx}" y="${ly + 4}" font-family="${T.mono}" font-size="10" fill="${simpleFill}" fill-opacity="${textOpacity}" text-anchor="middle" font-weight="600">${txt}</text>`
         +  `</g>`;
     }
   }

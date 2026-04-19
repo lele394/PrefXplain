@@ -57,7 +57,7 @@ thing is one HTML file — offline, shareable, safe to send.
 
 ## Install — 30 seconds
 
-**Requirements:** `git`, `python3` (3.9+), optionally `npm` (for the in-IDE preview extension — if you installed Claude Code or Codex via npm, you already have it), and one of:
+**Requirements:** `git`, `python3` (3.9+), and one of:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 - [Codex CLI](https://github.com/openai/codex)
 - [GitHub Copilot CLI](https://docs.github.com/copilot/concepts/agents/about-copilot-cli)
@@ -75,14 +75,17 @@ registers the `/prefxplain` slash command for every AI tool it detects
 (Claude Code, Codex, Cursor/Windsurf, Copilot CLI, Gemini CLI), and
 auto-installs the bundled preview extension into every VS Code fork it
 finds (VS Code, Cursor, Windsurf, Antigravity, Trae, Void, VSCodium,
-Positron, …). Re-run the same command to upgrade — it's idempotent.
+Positron, …). The preview extension is bundled with the Python package,
+so `pipx` / `uv tool` installs can install it too; `npm` is only needed
+if you want to rebuild the extension from source. Re-run the same command
+to upgrade — it's idempotent.
 
 > **Inside your AI coding tool?** Paste the line above into Claude Code /
 > Codex / Copilot / Gemini and the agent runs it for you.
 >
 > **Already on pipx / uv?** `pipx install prefxplain && prefxplain setup`
 > (or `uv tool install prefxplain && prefxplain setup`) also works — the
-> pip flow just misses the in-IDE preview extension on some setups.
+> bundled preview extension is installed there too.
 
 ## Use it — 1 line
 
@@ -185,25 +188,49 @@ roadmap.
 
 ## FAQ
 
-### Does PrefXplain upload my code?
+<details>
+<summary>Does PrefXplain upload my code?</summary>
+
 No. The dependency graph is built **locally** — Python AST for Python, regex + `tsconfig` parsing for TypeScript/JavaScript, regex for the rest. The optional LLM step sends only per-file signatures (path, imports, exports, a handful of top-level symbol names) to the model you already use; it never sends file contents. Run `prefxplain create . --no-descriptions` to skip the LLM step entirely and stay fully offline.
 
-### Does it work offline / without an API key?
+</details>
+
+<details>
+<summary>Does it work offline / without an API key?</summary>
+
 Yes. `--no-descriptions` produces a full diagram — structure, blast radius, search — with zero network calls. When you *do* want descriptions, PrefXplain runs inside your existing Claude Code / Codex / Copilot / Gemini session, so there's no extra billing. Only the standalone `prefxplain` CLI requires `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
 
-### How is this different from CodeSee, Sourcegraph, or `tree`?
+</details>
+
+<details>
+<summary>How is this different from CodeSee, Sourcegraph, or `tree`?</summary>
+
 - **`tree` / `madge` / `pydeps`** show the shape of your codebase. PrefXplain adds plain-English descriptions, a layered layout, blast-radius on click, and per-file flowcharts.
 - **Sourcegraph / CodeSee** are SaaS — they require an account, upload source to their servers, and cost money. PrefXplain is one offline HTML file, no account, MIT.
 - PrefXplain is **agent-native**: a single slash command inside the AI coding tool you already use, not a separate UI.
 
-### How accurate are the AI-generated descriptions?
+</details>
+
+<details>
+<summary>How accurate are the AI-generated descriptions?</summary>
+
 Good enough for navigation, not a substitute for reading the code. The LLM sees one file at a time plus its imports and exports, so descriptions are reliable for *what a file does* and less reliable for *subtle contract details*. Descriptions are cached and re-used across runs; `prefxplain update .` preserves them unless you pass `--force`.
 
-### Can I use PrefXplain in CI?
+</details>
+
+<details>
+<summary>Can I use PrefXplain in CI?</summary>
+
 Yes. `prefxplain check .` exits non-zero on circular dependencies — drop it into a GitHub Action to fail the build when new cycles appear. For artifacts, `prefxplain create . --no-descriptions` generates an offline HTML diagram with no API calls, safe to upload as a CI artifact.
 
-### How is it different from a dependency graph I could generate myself?
+</details>
+
+<details>
+<summary>How is it different from a dependency graph I could generate myself?</summary>
+
 `madge`, `pydeps`, and `import-linter` give you edges. PrefXplain adds a description per file, a layered layout that groups files by architectural role, blast-radius on click, per-file flowcharts, and semantic search across descriptions (not just filenames). The output is one self-contained HTML file — shareable, safe to drop into a deck.
+
+</details>
 
 ## Development
 

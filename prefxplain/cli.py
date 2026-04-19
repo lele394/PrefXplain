@@ -513,14 +513,32 @@ def setup_cmd(
     if (home / ".gemini").is_dir() or shutil.which("gemini"):
         detected.append("gemini")
 
+    installed: list[str] = []
+    if not project:
+        ext_result = _install_vscode_extension(package_root)
+        if ext_result:
+            installed.append(ext_result)
+
     targets = [tool] if tool else detected
     if not targets:
+        if installed:
+            console.print("[bold green]Setup complete![/bold green]")
+            for item in installed:
+                console.print(f"  [green]\u2713[/green] {item}")
+            console.print()
+            console.print(
+                "[yellow]No AI coding tools detected, so /prefxplain was not registered yet.[/yellow]"
+            )
+            console.print("Supported: claude-code, cursor, codex, copilot, gemini")
+            console.print(
+                "Run: [bold]prefxplain setup gemini[/bold] (or copilot, claude-code, ...) to install manually."
+            )
+            return
         console.print("[yellow]No AI coding tools detected.[/yellow]")
         console.print("Supported: claude-code, cursor, codex, copilot, gemini")
         console.print("Run: [bold]prefxplain setup gemini[/bold] (or copilot, claude-code, ...) to install manually.")
         raise typer.Exit(1)
 
-    installed: list[str] = []
     failed = False
     for t in targets:
         if t == "claude-code":
@@ -681,13 +699,6 @@ def setup_cmd(
 
         else:
             console.print(f"[yellow]Unknown tool: {t}. Skipping.[/yellow]")
-
-    # Auto-install the VS Code/Cursor/Windsurf preview extension if a pre-built
-    # .vsix exists nearby. Best-effort — silently skipped if no .vsix or IDE CLI.
-    if not tool:
-        ext_result = _install_vscode_extension(package_root)
-        if ext_result:
-            installed.append(ext_result)
 
     if installed:
         console.print("[bold green]Setup complete![/bold green]")

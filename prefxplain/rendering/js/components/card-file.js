@@ -74,7 +74,7 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
   const barMaxW = 44;
   const inBarW = (inDeg / Math.max(1, maxDeg)) * barMaxW;
   const outBarW = (outDeg / Math.max(1, maxDeg)) * barMaxW;
-  const opacity = state === 'faded' ? 0.32 : 1;
+  const opacity = state === 'faded' ? 0.32 : state === 'dimmed' ? 0.55 : 1;
 
   let out = `<g class="file-card" data-node="${PX.escapeXml(node.id)}" opacity="${opacity}" style="cursor:pointer;transition:opacity 200ms">`;
   out += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="${isSel || isHub ? 1.8 : 1}" rx="5"/>`;

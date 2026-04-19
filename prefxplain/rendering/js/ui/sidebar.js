@@ -50,9 +50,11 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
   listHost.style.cssText = `flex:1;min-height:0;overflow-y:scroll;padding:6px 0 30px`;
   aside.appendChild(listHost);
 
-  const listeners = { onSelect: [], onSelectGroup: [], onFilter: [], onToggle: [] };
+  const listeners = { onSelect: [], onSelectGroup: [], onFilter: [], onToggle: [], onOpen: [] };
   let selected = null;
   let focusedGroup = null;
+  let lastNodeClickId = null;
+  let lastNodeClickTs = 0;
   const openGroups = {};
   const groups = ((index && index.groupOrder) || [...new Set((graph.nodes || []).map(n => n.group || 'Ungrouped'))]).slice();
   for (const g of groups) openGroups[g] = true;
@@ -134,8 +136,17 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
     }
     if (btnN) {
       const id = btnN.getAttribute('data-node');
-      const next = selected === id ? null : id;
-      for (const fn of listeners.onSelect) fn(next);
+      const now = Date.now();
+      const isDoubleClick = lastNodeClickId === id && (now - lastNodeClickTs) <= 320;
+      lastNodeClickId = isDoubleClick ? null : id;
+      lastNodeClickTs = isDoubleClick ? 0 : now;
+
+      if (selected !== id) {
+        for (const fn of listeners.onSelect) fn(id);
+      }
+      if (isDoubleClick) {
+        for (const fn of listeners.onOpen) fn(id);
+      }
       return;
     }
   });
@@ -153,6 +164,7 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
     toggle: () => { collapsed = !collapsed; applyCollapsed(); },
     isCollapsed: () => collapsed,
     onSelect: (fn) => listeners.onSelect.push(fn),
+    onOpen: (fn) => listeners.onOpen.push(fn),
     onSelectGroup: (fn) => listeners.onSelectGroup.push(fn),
     onFilter: (fn) => listeners.onFilter.push(fn),
     onToggle: (fn) => listeners.onToggle.push(fn),

@@ -64,6 +64,7 @@ prefxplain = [
     "commands/*.md",
     "copilot_plugin/plugin.json",
     "copilot_plugin/skills/*/SKILL.md",
+    "vscode_extension/*.vsix",
 ]
 
 [tool.ruff]

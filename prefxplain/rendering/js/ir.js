@@ -68,10 +68,15 @@ function _groupsOf(nodes) {
 // with the rendering in components/edge.js — drift between the layout
 // dimensions and the drawn dimensions is what causes labels to overflow
 // their reserved ELK slot.
+// LABEL_PADDING covers: inner text padding + enough slack for the arrow's
+// stroke shoulder. Aggregate edges use up to 5px thick strokes, so a label
+// sitting on-path has a 2.5px perpendicular shoulder poking out of the rect
+// at the entry/exit bend. ≥10px horizontal padding per side (LABEL_PADDING/2)
+// hides the shoulder under the rect's opaque bg fill.
 const LABEL_CH_BOLD = 8.2;
 const LABEL_CH_REG = 7.6;
-const LABEL_HEIGHT = 50;
-const LABEL_PADDING = 26;
+const LABEL_HEIGHT = 56;
+const LABEL_PADDING = 36;
 
 function _labelDims(sourceName, targetName, count) {
   const line1 = `[${sourceName}]`;
@@ -176,6 +181,380 @@ PX.buildGroupDetailIr = function buildGroupDetailIr(graph, groupId, {
     });
   }
   return { id: 'root', children, edges };
+};
+
+// ─── Group Story: composed view over the analyzer's index ─────────────
+// Emits a self-describing object that the nested view renders section by
+// section. Every field is derived from data the analyzer already computes
+// (roles, bridges, cycles, pair stats) — no extra passes at render time.
+//
+// Shape:
+//   {
+//     meta:      { id, name, description, color },
+//     summary:   { fileCount, externalIn, externalOut, internalEdges,
+//                  topRoutes: [{dir:'out'|'in', group, count}, ...] },
+//     entries:   [{ id, label, short, role, fanIn, fanOut }, ... ≤5],
+//     bands:     [{ key, name, files:[{ id, label, short, role, fanIn,
+//                  fanOut, isHub, inCycle, bridgeIn, bridgeOut }] }],
+//     edges:     [{ source, target, count, labelled, verb }],
+//     stress:    [{ kind, text, files:[id, ...] }],
+//   }
+PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
+  const byId = Object.fromEntries((graph.nodes || []).map(n => [n.id, n]));
+  const metaGroups = graph.metaGroups || {};
+  const meta = metaGroups[groupId] || {};
+  const stats = (index.groupStats || {})[groupId] || {};
+  const bandsRaw = (index.groupBands || {})[groupId] || { entry: [], core: [], leaf: [], test: [] };
+  const cycles = (index.groupCycles || {})[groupId] || [];
+
+  // Files in a set-of-file-ids that are part of a cycle.
+  const cycleMembership = new Set();
+  for (const scc of cycles) for (const id of scc) cycleMembership.add(id);
+
+  // Intra-group edges + weights.
+  const edgePairCount = {};
+  const intraEdges = [];
+  for (const e of graph.edges || []) {
+    const sg = (byId[e.source] || {}).group || 'Ungrouped';
+    const tg = (byId[e.target] || {}).group || 'Ungrouped';
+    if (sg !== groupId || tg !== groupId) continue;
+    const key = `${e.source}\u0000${e.target}`;
+    edgePairCount[key] = (edgePairCount[key] || 0) + 1;
+    if (edgePairCount[key] === 1) intraEdges.push([e.source, e.target]);
+  }
+  // Label only the heaviest intra-group edges: top 5 by count OR any
+  // edge with count ≥ 2. Rest render as plain arrows. This is Codex's
+  // "threshold/collapse" guidance — labels stay legible on dense groups.
+  const ranked = intraEdges
+    .map(([s, t]) => ({ source: s, target: t, count: edgePairCount[`${s}\u0000${t}`] }))
+    .sort((a, b) => b.count - a.count);
+  const labelledIds = new Set();
+  for (const e of ranked) {
+    if (labelledIds.size >= 5 && e.count < 2) break;
+    labelledIds.add(`${e.source}\u0000${e.target}`);
+  }
+
+  const inDeg = {}, outDeg = {};
+  for (const n of graph.nodes || []) { inDeg[n.id] = 0; outDeg[n.id] = 0; }
+  for (const e of graph.edges || []) {
+    if (inDeg[e.target]  != null) inDeg[e.target]  += 1;
+    if (outDeg[e.source] != null) outDeg[e.source] += 1;
+  }
+  const SPOF_MIN = 8;
+  const bridgeIn = index.fileBridgeIn || {};
+  const bridgeOut = index.fileBridgeOut || {};
+
+  const fileView = (id) => {
+    const n = byId[id] || {};
+    return {
+      id,
+      label: n.label || id,
+      short: n.short || n.label || id,
+      description: n.description || '',
+      highlights: n.highlights || [],
+      role: n.role || 'other',
+      fanIn: inDeg[id] || 0,
+      fanOut: outDeg[id] || 0,
+      size: n.size || 0,
+      isHub: (inDeg[id] || 0) >= SPOF_MIN,
+      inCycle: cycleMembership.has(id),
+      bridgeIn: bridgeIn[id] || 0,
+      bridgeOut: bridgeOut[id] || 0,
+    };
+  };
+
+  const bandDefs = [
+    { key: 'entry', name: 'Entry / Gateway' },
+    { key: 'core',  name: 'Core'            },
+    { key: 'leaf',  name: 'Leaf / Utility'  },
+    { key: 'test',  name: 'Tests'           },
+  ];
+  const bands = bandDefs
+    .map(def => ({
+      key: def.key,
+      name: def.name,
+      files: (bandsRaw[def.key] || []).map(fileView),
+    }))
+    .filter(b => b.files.length > 0);
+
+  // Primary entry paths — top 5 entry-band files (already ordered by fan-in).
+  const entries = (bandsRaw.entry || []).slice(0, 5).map(fileView);
+
+  // Top external routes, condensed.
+  const topRoutes = [];
+  if (stats.strongestOut) topRoutes.push({ dir: 'out', group: stats.strongestOut.group, count: stats.strongestOut.count });
+  if (stats.strongestIn)  topRoutes.push({ dir: 'in',  group: stats.strongestIn.group,  count: stats.strongestIn.count  });
+  // Add second-strongest out + in for context (if present and distinct).
+  const pairs = (index.groupPairStats || []);
+  const outs = pairs.filter(r => r.sourceGroup === groupId).sort((a, b) => b.count - a.count);
+  const ins  = pairs.filter(r => r.targetGroup === groupId).sort((a, b) => b.count - a.count);
+  if (outs[1]) topRoutes.push({ dir: 'out', group: outs[1].targetGroup, count: outs[1].count });
+  if (ins[1])  topRoutes.push({ dir: 'in',  group: ins[1].sourceGroup,  count: ins[1].count  });
+
+  // Stress points — only surface non-trivial architectural smells.
+  const stress = [];
+  const hubs = [];
+  for (const band of bands) for (const f of band.files) if (f.isHub) hubs.push(f);
+  if (hubs.length > 0) {
+    stress.push({
+      kind: 'hub',
+      text: hubs.length === 1
+        ? `${hubs[0].label} is a hub (${hubs[0].fanIn} importers) — change with care`
+        : `${hubs.length} hub files: ${hubs.slice(0, 3).map(f => f.label).join(', ')}${hubs.length > 3 ? '…' : ''}`,
+      files: hubs.map(f => f.id),
+    });
+  }
+  if (cycles.length > 0) {
+    const biggest = cycles.slice().sort((a, b) => b.length - a.length)[0];
+    stress.push({
+      kind: 'cycle',
+      text: cycles.length === 1
+        ? `Import cycle detected (${biggest.length} files): ${biggest.slice(0, 3).map(id => (byId[id] || {}).label || id).join(' ↔ ')}${biggest.length > 3 ? '…' : ''}`
+        : `${cycles.length} import cycles inside this group — architectural smell`,
+      files: biggest,
+    });
+  }
+  // Dominant single-file bridges to other groups: "describer.py is the sole bridge to Graph Data Model".
+  const dominantBridges = [];
+  for (const pair of outs) {
+    const topFiles = pair.topSourceFiles || [];
+    if (topFiles.length === 1 && topFiles[0].count >= 2 && pair.count === topFiles[0].count) {
+      dominantBridges.push({ file: topFiles[0], direction: 'out', group: pair.targetGroup });
+    }
+  }
+  for (const pair of ins) {
+    const topFiles = pair.topTargetFiles || [];
+    if (topFiles.length === 1 && topFiles[0].count >= 2 && pair.count === topFiles[0].count) {
+      dominantBridges.push({ file: topFiles[0], direction: 'in', group: pair.sourceGroup });
+    }
+  }
+  for (const b of dominantBridges.slice(0, 2)) {
+    stress.push({
+      kind: 'bridge',
+      text: b.direction === 'out'
+        ? `${b.file.label} is the sole bridge to ${b.group}`
+        : `${b.file.label} receives all incoming from ${b.group}`,
+      files: [b.file.id],
+    });
+  }
+  // Untested coverage — only surface for non-test groups with significant file counts.
+  if (groupId !== 'Tests' && (stats.fileCount || 0) >= 5) {
+    const testGroups = ['Tests'];
+    const testEdges = new Set();
+    for (const e of graph.edges || []) {
+      const sg = (byId[e.source] || {}).group || 'Ungrouped';
+      if (!testGroups.includes(sg)) continue;
+      testEdges.add(e.target);
+    }
+    const untested = [];
+    for (const band of bands) {
+      if (band.key === 'test') continue;
+      for (const f of band.files) if (!testEdges.has(f.id)) untested.push(f);
+    }
+    // Only flag if at least 3 files are untested — single-file groups don't need nagging.
+    if (untested.length >= 3) {
+      stress.push({
+        kind: 'untested',
+        text: `${untested.length} files have no direct test coverage`,
+        files: untested.map(f => f.id),
+      });
+    }
+  }
+
+  return {
+    meta: {
+      id: groupId,
+      name: groupId,
+      description: meta.desc || meta.description || '',
+      color: PX.groupColor(groupId, meta),
+    },
+    summary: {
+      fileCount: stats.fileCount || 0,
+      externalIn: stats.externalIn || 0,
+      externalOut: stats.externalOut || 0,
+      internalEdges: stats.internalEdges || 0,
+      topRoutes,
+    },
+    entries,
+    bands,
+    edges: ranked.map(e => ({
+      source: e.source,
+      target: e.target,
+      count: e.count,
+      labelled: labelledIds.has(`${e.source}\u0000${e.target}`),
+    })),
+    stress,
+  };
+};
+
+// ─── Group Story Layout: band grid + ELK for edge routing only ────────
+// Hand-positions cards in bands (deterministic, Codex's guidance), then
+// feeds ELK only the routing job via algorithm=fixed. Returns both the
+// positions (for card rendering) and the ELK IR (for edge polylines).
+PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
+  showBullets = true,
+  canvasWidth = 1280,
+  topPad = 28,
+  leftPad = 28,
+  bandGapY = 52,
+  bandGapX = 44,
+  cardGapY = 18,
+} = {}) {
+  const fileSize = showBullets ? PX.NODE_SIZES.fileBullets : PX.NODE_SIZES.fileNoBullets;
+  const cw = fileSize.w, ch = fileSize.h;
+  // Entry, Core, Leaf → 3 parallel columns (side by side). Tests → own row below.
+  const BAND_ORDER = ['entry', 'core', 'leaf'];
+  const columnBands = story.bands.filter(b => BAND_ORDER.includes(b.key));
+  const testBand = story.bands.find(b => b.key === 'test') || null;
+
+  // Figure out how many columns fit side-by-side given canvas width.
+  // Target: 3 columns when canvas ≥ 3*cw + 2*bandGapX + 2*leftPad.
+  // Narrower → stack vertically (each band becomes its own row).
+  const targetCols = Math.max(1, Math.min(columnBands.length, Math.floor((canvasWidth - 2 * leftPad + bandGapX) / (cw + bandGapX))));
+  const stacked = targetCols < columnBands.length;
+
+  const positions = {}; // fileId → { x, y }
+  let cursorY = topPad;
+  let totalW = 0;
+  let totalH = topPad;
+  const bandRects = [];
+
+  if (stacked) {
+    // Narrow layout: each band is a row, files wrap as 2+ per row.
+    for (const band of columnBands) {
+      const bandX = leftPad;
+      const perRow = Math.max(1, Math.floor((canvasWidth - 2 * leftPad + bandGapX) / (cw + bandGapX)));
+      const rows = Math.ceil(band.files.length / perRow);
+      const bandH = rows * ch + (rows - 1) * cardGapY;
+      for (let i = 0; i < band.files.length; i++) {
+        const col = i % perRow;
+        const row = Math.floor(i / perRow);
+        positions[band.files[i].id] = {
+          x: bandX + col * (cw + bandGapX),
+          y: cursorY + row * (ch + cardGapY),
+        };
+      }
+      bandRects.push({
+        key: band.key,
+        name: band.name,
+        x: bandX, y: cursorY,
+        w: Math.max(cw, perRow * cw + (perRow - 1) * bandGapX),
+        h: bandH,
+        count: band.files.length,
+      });
+      cursorY += bandH + bandGapY;
+    }
+    totalW = canvasWidth - 2 * leftPad;
+  } else {
+    // Wide layout: columnBands side by side. Each column stacks its files
+    // vertically. Row height for this section = tallest column's height.
+    let maxColH = 0;
+    const colXs = [];
+    for (let i = 0; i < columnBands.length; i++) {
+      colXs.push(leftPad + i * (cw + bandGapX));
+    }
+    // If fewer than targetCols bands, still position them left-aligned.
+    for (let i = 0; i < columnBands.length; i++) {
+      const band = columnBands[i];
+      const bandX = colXs[i];
+      for (let j = 0; j < band.files.length; j++) {
+        positions[band.files[j].id] = {
+          x: bandX,
+          y: cursorY + j * (ch + cardGapY),
+        };
+      }
+      const bandH = band.files.length * ch + Math.max(0, band.files.length - 1) * cardGapY;
+      bandRects.push({
+        key: band.key,
+        name: band.name,
+        x: bandX, y: cursorY,
+        w: cw,
+        h: bandH || ch,
+        count: band.files.length,
+      });
+      if (bandH > maxColH) maxColH = bandH;
+    }
+    cursorY += Math.max(maxColH, ch) + bandGapY;
+    totalW = columnBands.length > 0
+      ? colXs[colXs.length - 1] + cw - leftPad
+      : 0;
+  }
+
+  // Tests band: always its own horizontal strip, as wide as needed, below.
+  if (testBand && testBand.files.length > 0) {
+    const perRow = Math.max(1, Math.floor((Math.max(totalW, cw) + bandGapX) / (cw + bandGapX)));
+    const rows = Math.ceil(testBand.files.length / perRow);
+    const bandH = rows * ch + (rows - 1) * cardGapY;
+    for (let i = 0; i < testBand.files.length; i++) {
+      const col = i % perRow;
+      const row = Math.floor(i / perRow);
+      positions[testBand.files[i].id] = {
+        x: leftPad + col * (cw + bandGapX),
+        y: cursorY + row * (ch + cardGapY),
+      };
+    }
+    bandRects.push({
+      key: 'test',
+      name: testBand.name,
+      x: leftPad, y: cursorY,
+      w: Math.max(totalW, perRow * cw + (perRow - 1) * bandGapX),
+      h: bandH,
+      count: testBand.files.length,
+    });
+    cursorY += bandH + bandGapY;
+  }
+
+  totalH = cursorY;
+
+  // Build ELK IR with hand-positioned children. Use algorithm=fixed so ELK
+  // respects (x, y) and only computes edge polylines. Keep FIXED_SIDE ports.
+  const children = [];
+  for (const band of story.bands) {
+    for (const f of band.files) {
+      const pos = positions[f.id];
+      if (!pos) continue;
+      children.push({
+        id: f.id,
+        x: pos.x,
+        y: pos.y,
+        width: cw,
+        height: ch,
+        ports: [_port(f.id, 'NORTH'), _port(f.id, 'SOUTH')],
+        properties: {
+          'org.eclipse.elk.portConstraints': 'FIXED_SIDE',
+          'org.eclipse.elk.position': `(${pos.x},${pos.y})`,
+        },
+      });
+    }
+  }
+  const edges = story.edges.map((e, i) => ({
+    id: `gs${i}`,
+    sources: [`${e.source}.out`],
+    targets: [`${e.target}.in`],
+    count: e.count,
+    labelled: e.labelled,
+    sourceNode: e.source,
+    targetNode: e.target,
+    kind: 'internal',
+  }));
+  const ir = {
+    id: 'root',
+    children,
+    edges,
+    layoutOptions: {
+      'elk.algorithm': 'fixed',
+      'elk.edgeRouting': 'ORTHOGONAL',
+      'elk.spacing.edgeEdge': '18',
+      'elk.spacing.edgeNode': '24',
+    },
+  };
+  return {
+    ir,
+    positions,
+    bandRects,
+    canvasW: Math.max(totalW + 2 * leftPad, canvasWidth),
+    canvasH: totalH + topPad,
+  };
 };
 
 PX.buildIr = function buildIr(graph, viewMode, {

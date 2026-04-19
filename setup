@@ -72,13 +72,13 @@ case ":$PATH:" in
     ;;
 esac
 
-# 4. Build the VS Code / Cursor / Windsurf preview extension if Node is around.
-#    Best-effort — the whole install still succeeds without it (the HTML file
-#    always works in a browser). Most PrefXplain users install Claude Code or
-#    Codex via npm already, so Node is usually available.
+# 4. Ensure the VS Code-family preview extension is bundled and ready to
+#    install. If no prebuilt VSIX exists yet and Node is available, build it.
 EXT_DIR="$REPO_ROOT/prefxplain-vscode"
-if [ -d "$EXT_DIR" ] && command -v npm >/dev/null 2>&1; then
-  if ! ls "$EXT_DIR"/*.vsix >/dev/null 2>&1; then
+PKG_EXT_DIR="$REPO_ROOT/prefxplain/vscode_extension"
+mkdir -p "$PKG_EXT_DIR"
+if [ -d "$EXT_DIR" ]; then
+  if ! ls "$EXT_DIR"/*.vsix >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
     echo
     echo "${BOLD}Building preview extension…${NC}"
     (
@@ -87,18 +87,23 @@ if [ -d "$EXT_DIR" ] && command -v npm >/dev/null 2>&1; then
       npm run compile --silent >/dev/null 2>&1 || true
       npx --yes @vscode/vsce package --allow-missing-repository >/dev/null 2>&1 || true
     )
-    if ls "$EXT_DIR"/*.vsix >/dev/null 2>&1; then
-      echo "${GREEN}✓${NC} Built: $(ls "$EXT_DIR"/*.vsix | head -1)"
-    else
-      echo "${YELLOW}⚠${NC}  Extension build failed (non-blocking). The HTML preview still works in any browser."
-    fi
+  fi
+
+  if ls "$EXT_DIR"/*.vsix >/dev/null 2>&1; then
+    LATEST_VSIX="$(ls -t "$EXT_DIR"/*.vsix | head -1)"
+    cp -f "$LATEST_VSIX" "$PKG_EXT_DIR/"
+    echo "${GREEN}✓${NC} Bundled preview extension: $PKG_EXT_DIR/$(basename "$LATEST_VSIX")"
+  elif ls "$PKG_EXT_DIR"/*.vsix >/dev/null 2>&1; then
+    echo "${GREEN}✓${NC} Bundled preview extension: $(ls -t "$PKG_EXT_DIR"/*.vsix | head -1)"
+  else
+    echo "${YELLOW}⚠${NC}  Preview extension artifact is missing. In-IDE preview/editing will not work until a .vsix is built."
   fi
 fi
 
 # 5. Register /prefxplain for every AI tool found + install VS Code extension.
 echo
 echo "${BOLD}Registering /prefxplain…${NC}"
-"$VENV/bin/prefxplain" setup || true
+"$VENV/bin/prefxplain" setup
 
 echo
 echo "${BOLD}${GREEN}Done.${NC}"

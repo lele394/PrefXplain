@@ -393,11 +393,21 @@ PX.avoidLabelCollisions = function avoidLabelCollisions(edges, opts = {}) {
 // than trying to "enter" at the envelope boundary (which would walk backward).
 //
 // Returns a new points array. Safe to call with empty bboxes (returns input).
-PX.detourAroundLabels = function detourAroundLabels(points, bboxes, gap = 12) {
+PX.detourAroundLabels = function detourAroundLabels(points, bboxes, gap = 12, opts = {}) {
+  const { preserveEndSegments = false } = opts;
   if (!points || points.length < 2 || !bboxes || bboxes.length === 0) return points;
   const out = [points[0]];
   for (let i = 0; i < points.length - 1; i++) {
     const a = points[i], b = points[i + 1];
+    // preserveEndSegments=true: keep the first and last segments untouched so
+    // port connections stay clean AND the last segment is long enough for the
+    // arrowhead's tailTrim sleeve (~35px for a 5px stroke). Detouring those
+    // segments can shorten them and push the marker into the card's opaque
+    // fill, which hides the arrowhead entirely.
+    if (preserveEndSegments && (i === 0 || i === points.length - 2)) {
+      out.push(b);
+      continue;
+    }
     for (const p of _detourSegment(a, b, bboxes, gap)) out.push(p);
   }
   return out;

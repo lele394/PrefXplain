@@ -161,10 +161,15 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     ...(overviewEdgeMetaById[e.id] || {}),
   }));
   // Aggregate edges carry a 3-line colored label (same shape as group-map).
-  // The dims are deterministic from source/target names + count, so ELK
-  // already reserved space in the layered layout (see ir.js → aggregateEdges
-  // with `labels: [{width, height}]`).
-  const overviewLabelled = PX.placeEdgeLabels(PX.detectBus(overviewPolylines, overviewNodesByIdRaw), { centerOnPath: true }).map(e => {
+  // Pipeline mirrors group-map.js:
+  //   - no detectBus: per-edge ports (ir.js → e-agg${i}) already give every
+  //     edge its own corridor. Running detectBus on top rewrites the drawn
+  //     path to a shared trunk while labels stay on the ELK polyline, which
+  //     is what floats labels off-arrow.
+  //   - centerOnPath in placeEdgeLabels so bent edges keep the label on-path.
+  //   - gap=18 + walkPath + cardRects + segments in avoidLabelCollisions so
+  //     labels slide along the arrow away from cards and foreign corridors.
+  const overviewLabelled = PX.placeEdgeLabels(overviewPolylines, { centerOnPath: true }).map(e => {
     if (!(e.count > 0 && e.sourceGroup && e.targetGroup)) {
       return { ...e, __labelW: 0, __labelH: 0 };
     }
@@ -173,7 +178,7 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
   });
   const overviewSegments = [];
   for (const edge of overviewLabelled) {
-    const pts = edge.bus ? PX.buildBusTrunkPath(edge, overviewNodesByIdRaw) : (edge.points || []);
+    const pts = edge.points || [];
     for (let i = 0; i < pts.length - 1; i++) {
       overviewSegments.push({
         x1: pts[i].x, y1: pts[i].y,
@@ -187,10 +192,10 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     x2: (box.x || 0) + (box.width || 0),
     y2: (box.y || 0) + (box.height || 0),
   }));
-  const overviewEdgesRaw = PX.avoidLabelCollisions(overviewLabelled, {
-    labelW: (e) => e.__labelW || 40,
-    labelH: (e) => e.__labelH || 22,
-    gap: 12,
+  const overviewResolved = PX.avoidLabelCollisions(overviewLabelled, {
+    labelW: (e) => e.__labelW || 180,
+    labelH: (e) => e.__labelH || 56,
+    gap: 18,
     segments: overviewSegments,
     walkPath: true,
     cardRects: overviewCardRects,
@@ -199,6 +204,25 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     sourceGroup: PX.splitPortId(e.source).nodeId,
     targetGroup: PX.splitPortId(e.target).nodeId,
   }));
+
+  // Detour each edge's polyline around OTHER edges' label bboxes. Fixes the
+  // "arrows crossing foreign labels" visible once an edge is highlighted.
+  // See group-map.js for the rationale.
+  const overviewLabelBboxes = overviewResolved
+    .filter(e => e.labelX != null && e.labelY != null && e.__labelW > 0 && e.__labelH > 0)
+    .map(e => ({
+      id: e.id,
+      x1: e.labelX - e.__labelW / 2,
+      y1: e.labelY - e.__labelH / 2,
+      x2: e.labelX + e.__labelW / 2,
+      y2: e.labelY + e.__labelH / 2,
+    }));
+  const overviewEdgesRaw = overviewResolved.map(e => {
+    const foreign = overviewLabelBboxes.filter(b => b.id !== e.id);
+    if (foreign.length === 0) return e;
+    // See group-map.js for the rationale on gap=2 + preserveEndSegments.
+    return { ...e, points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }) };
+  });
 
   const detailNodesByIdRaw = detailLaid ? PX._collectNodes(detailLaid) : {};
   const detailEdgeMetaById = Object.fromEntries(((detailIr && detailIr.edges) || []).map(e => [e.id, e]));
@@ -270,8 +294,39 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
   const SECTION_GAP = 28;
   const overviewX = LEFT_PAD;
   const overviewY = TOP_PAD + 18;
-  const overviewW = Math.round((overviewLaid.width || 640) + 40);
-  const overviewH = Math.round((overviewLaid.height || 520) + 40);
+  // Compute the overview's true content bbox (nodes + polyline waypoints +
+  // label rects) — same approach as group-map. ELK's laid.width/height only
+  // covers the node frame, so labels that spill sideways used to overlap the
+  // divider and then get hidden under the detail panel's foreignObject.
+  let ovMinX = 0, ovMinY = 0;
+  let ovMaxX = overviewLaid.width || 640;
+  let ovMaxY = overviewLaid.height || 520;
+  for (const box of (overviewLaid.children || [])) {
+    const bx = box.x || 0, by = box.y || 0;
+    const bw = box.width || 0, bh = box.height || 0;
+    if (bx < ovMinX) ovMinX = bx;
+    if (by < ovMinY) ovMinY = by;
+    if (bx + bw > ovMaxX) ovMaxX = bx + bw;
+    if (by + bh > ovMaxY) ovMaxY = by + bh;
+  }
+  for (const e of overviewEdgesRaw) {
+    for (const p of e.points || []) {
+      if (p.x < ovMinX) ovMinX = p.x;
+      if (p.y < ovMinY) ovMinY = p.y;
+      if (p.x > ovMaxX) ovMaxX = p.x;
+      if (p.y > ovMaxY) ovMaxY = p.y;
+    }
+    if (e.labelX != null && e.labelY != null) {
+      const lw = e.__labelW || 0, lh = e.__labelH || 0;
+      if (e.labelX - lw / 2 < ovMinX) ovMinX = e.labelX - lw / 2;
+      if (e.labelY - lh / 2 < ovMinY) ovMinY = e.labelY - lh / 2;
+      if (e.labelX + lw / 2 > ovMaxX) ovMaxX = e.labelX + lw / 2;
+      if (e.labelY + lh / 2 > ovMaxY) ovMaxY = e.labelY + lh / 2;
+    }
+  }
+  const OV_PAD = 20;
+  const overviewW = Math.ceil(ovMaxX - ovMinX + 2 * OV_PAD);
+  const overviewH = Math.ceil(ovMaxY - ovMinY + 2 * OV_PAD);
   const detailSummaryH = focusGroupId ? 150 : 200;
   const detailBoxX = overviewX + overviewW + SECTION_GAP + 18;
   const detailPanelX = detailBoxX - 18;
@@ -291,8 +346,11 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     : detailSummaryH + 40;
   const W = Math.round(detailPanelX + detailPanelW + LEFT_PAD);
   const H = Math.round(Math.max(overviewY + overviewH + TOP_PAD, detailPanelY + detailPanelH + TOP_PAD));
-  const overviewDx = overviewX;
-  const overviewDy = overviewY;
+  // Shift so the content's min corner lands at (overviewX+OV_PAD, overviewY+OV_PAD).
+  // Without this, a left-spilling label (negative ovMinX) would get clipped
+  // by the LEFT_PAD boundary of the canvas.
+  const overviewDx = overviewX + OV_PAD - ovMinX;
+  const overviewDy = overviewY + OV_PAD - ovMinY;
   const detailDx = detailBoxX + detailBoxInnerPadX;
   const detailDy = detailBoxY + detailBoxInnerPadY;
   const overviewNodesById = _translateNodes(overviewNodesByIdRaw, overviewDx, overviewDy);

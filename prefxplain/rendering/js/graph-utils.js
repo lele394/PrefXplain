@@ -191,6 +191,128 @@ PX.buildGraphIndex = function buildGraphIndex(graph) {
     if (e.target === selected) return 'imports';
     return 'faded';
   };
+  // ─── Intra-group band classification ────────────────────────────────
+  // Bands derive from dependency position INSIDE a group. Roles are a
+  // tiebreaker, not the primary axis — Codex pushback made this clear.
+  //
+  //   entry  = files with inbound bridges from other groups OR role=entry_point|api_route
+  //   test   = role=test (kept in its own band; tests are the consumers of everything)
+  //   leaf   = no intra-group outgoing edges (nothing inside the group depends on them)
+  //   core   = everything else (the coordinating majority)
+  //
+  // Computed once at index time and keyed by groupId for O(1) lookup.
+  const groupBands = {};
+  for (const g of groupOrder) {
+    const intraOut = {}; // fileId → count of intra-group outgoing edges
+    const intraIn  = {}; // fileId → count of intra-group incoming edges
+    for (const id of byGroup[g] || []) { intraOut[id] = 0; intraIn[id] = 0; }
+    for (const e of graph.edges || []) {
+      const sg = (byId[e.source] || {}).group || 'Ungrouped';
+      const tg = (byId[e.target] || {}).group || 'Ungrouped';
+      if (sg !== g || tg !== g) continue;
+      if (intraOut[e.source] != null) intraOut[e.source] += 1;
+      if (intraIn[e.target]  != null) intraIn[e.target]  += 1;
+    }
+    const bands = { entry: [], core: [], leaf: [], test: [] };
+    for (const id of byGroup[g] || []) {
+      const n = byId[id] || {};
+      const role = n.role || 'other';
+      const bIn  = bridgeIn[id]  || 0;
+      if (role === 'test') { bands.test.push(id); continue; }
+      if (role === 'entry_point' || role === 'api_route' || bIn >= 2) {
+        bands.entry.push(id); continue;
+      }
+      if ((intraOut[id] || 0) === 0 && (intraIn[id] || 0) > 0) {
+        bands.leaf.push(id); continue;
+      }
+      bands.core.push(id);
+    }
+    // Deterministic intra-band ordering: fan-in desc → fan-out desc → role → name.
+    const cmp = (a, b) => {
+      const aIn = (importers[a] || []).length;
+      const bIn = (importers[b] || []).length;
+      if (bIn !== aIn) return bIn - aIn;
+      const aOut = (importsOf[a] || []).length;
+      const bOut = (importsOf[b] || []).length;
+      if (bOut !== aOut) return bOut - aOut;
+      const aRole = roleWeight[(byId[a] || {}).role] || 0;
+      const bRole = roleWeight[(byId[b] || {}).role] || 0;
+      if (bRole !== aRole) return bRole - aRole;
+      return String((byId[a] || {}).label || a).localeCompare(String((byId[b] || {}).label || b));
+    };
+    bands.entry.sort(cmp);
+    bands.core.sort(cmp);
+    bands.leaf.sort(cmp);
+    bands.test.sort(cmp);
+    groupBands[g] = bands;
+  }
+
+  // ─── Intra-group cycles (Tarjan's SCC on the group's induced subgraph) ─
+  // Only non-trivial components (size ≥ 2 OR a self-loop) count. Used to
+  // surface architectural smells in the "Stress points" strip.
+  const groupCycles = {};
+  const MAX_EDGES = 500;
+  for (const g of groupOrder) {
+    const fileIds = byGroup[g] || [];
+    if (fileIds.length < 2) { groupCycles[g] = []; continue; }
+    const intraEdges = [];
+    for (const e of graph.edges || []) {
+      const sg = (byId[e.source] || {}).group || 'Ungrouped';
+      const tg = (byId[e.target] || {}).group || 'Ungrouped';
+      if (sg === g && tg === g) intraEdges.push([e.source, e.target]);
+      if (intraEdges.length > MAX_EDGES) break;
+    }
+    if (intraEdges.length === 0) { groupCycles[g] = []; continue; }
+    const adj = {};
+    for (const id of fileIds) adj[id] = [];
+    for (const [s, t] of intraEdges) { if (adj[s]) adj[s].push(t); }
+    // Iterative Tarjan.
+    let idxCounter = 0;
+    const idxMap = {}, lowMap = {}, onStack = {};
+    const stack = [];
+    const sccs = [];
+    const run = (start) => {
+      const frames = [{ v: start, it: 0 }];
+      idxMap[start] = idxCounter;
+      lowMap[start] = idxCounter;
+      idxCounter += 1;
+      stack.push(start); onStack[start] = true;
+      while (frames.length) {
+        const f = frames[frames.length - 1];
+        const succ = adj[f.v] || [];
+        if (f.it < succ.length) {
+          const w = succ[f.it++];
+          if (idxMap[w] === undefined) {
+            idxMap[w] = idxCounter;
+            lowMap[w] = idxCounter;
+            idxCounter += 1;
+            stack.push(w); onStack[w] = true;
+            frames.push({ v: w, it: 0 });
+          } else if (onStack[w]) {
+            lowMap[f.v] = Math.min(lowMap[f.v], idxMap[w]);
+          }
+        } else {
+          if (lowMap[f.v] === idxMap[f.v]) {
+            const comp = [];
+            let w;
+            do { w = stack.pop(); onStack[w] = false; comp.push(w); } while (w !== f.v);
+            if (comp.length > 1) sccs.push(comp);
+            else if ((adj[comp[0]] || []).includes(comp[0])) sccs.push(comp); // self-loop
+          }
+          frames.pop();
+          if (frames.length) {
+            const parent = frames[frames.length - 1];
+            lowMap[parent.v] = Math.min(lowMap[parent.v], lowMap[f.v]);
+          }
+        }
+      }
+    };
+    for (const id of fileIds) {
+      if (idxMap[id] === undefined) run(id);
+    }
+    groupCycles[g] = sccs;
+  }
+
   return {
     byId,
     importers,
@@ -205,6 +327,8 @@ PX.buildGraphIndex = function buildGraphIndex(graph) {
     groupPairStatsByKey: Object.fromEntries(pairList.map(rec => [`${rec.sourceGroup}\u0000${rec.targetGroup}`, rec])),
     fileBridgeIn: bridgeIn,
     fileBridgeOut: bridgeOut,
+    groupBands,
+    groupCycles,
   };
 };
 

@@ -5,10 +5,9 @@
 //
 // Labels participate in layout via the IR (ir.js → _aggregateGroupEdges
 // declares them). ELK reserves space and routes edges aware of label
-// footprints — no post-processing detour (which caused the "F1 circuit"
-// zigzags) is needed. ELKjs doesn't position edge labels automatically,
-// so we still compute label positions with placeEdgeLabels + avoidLabel
-// Collisions AFTER routing. The key win: no polyline rewriting.
+// footprints. ELK's own label placement (with inline=true) was tried and
+// produced all-labels-clustered-at-(0,0) in our setup, so we keep our own
+// placeEdgeLabels + avoidLabelCollisions pass on top of ELK's routing.
 
 window.PX = window.PX || {};
 PX.views = PX.views || {};
@@ -32,7 +31,7 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
       sourceGroup: PX.splitPortId(p.source).nodeId,
       targetGroup: PX.splitPortId(p.target).nodeId,
       __labelW: lbl.width || 180,
-      __labelH: lbl.height || 50,
+      __labelH: lbl.height || 56,
     };
   });
 
@@ -53,7 +52,7 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
     x1: box.x, y1: box.y,
     x2: box.x + box.width, y2: box.y + box.height,
   }));
-  const edges = PX.avoidLabelCollisions(placed, {
+  const labelled = PX.avoidLabelCollisions(placed, {
     labelW: (e) => e.__labelW,
     labelH: (e) => e.__labelH,
     gap: 18,
@@ -62,12 +61,30 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
     cardRects,
   });
 
-  // Detour post-processing removed: unique per-edge ports (ir.js →
-  // _aggregateGroupEdges) give every edge its own corridor, so edges no
-  // longer share trunks with foreign labels. Any remaining label overlaps
-  // are masked visually by the opaque label rect rendered on top of paths.
-  // Bringing back detour at this layer caused "tentacle" jogs where ELK's
-  // clean route was post-edited for tiny overlaps.
+  // Final pass: detour each edge's polyline around the bboxes of OTHER edges'
+  // labels. The shared-trunk exception in avoidLabelCollisions allows foreign
+  // segments within `gap` when the label sits on its own arrow — without this
+  // detour, those foreign segments cross the label rect and become visible
+  // once the edge is highlighted (opacity 0.55 → 0.95). detourAroundLabels
+  // unions all crossed bboxes into a single envelope per segment (no tentacle
+  // jogs) and only activates when the segment actually enters a bbox.
+  const labelBboxes = labelled
+    .filter(e => e.labelX != null && e.labelY != null)
+    .map(e => ({
+      id: e.id,
+      x1: e.labelX - (e.__labelW || 0) / 2,
+      y1: e.labelY - (e.__labelH || 0) / 2,
+      x2: e.labelX + (e.__labelW || 0) / 2,
+      y2: e.labelY + (e.__labelH || 0) / 2,
+    }));
+  const edges = labelled.map(e => {
+    const foreign = labelBboxes.filter(b => b.id !== e.id);
+    if (foreign.length === 0) return e;
+    // gap=2: only detour segments that ACTUALLY cross the label bbox, not
+    // near-misses. preserveEndSegments=true: keep port connections straight
+    // (else the arrowhead hides inside the target card).
+    return { ...e, points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }) };
+  });
 
   const topBoxes = (laid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
   const layerOf = {};

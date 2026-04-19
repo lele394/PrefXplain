@@ -11,8 +11,9 @@
 // Save/load transport:
 //   - Inside the VS Code extension webview: postMessage to the extension host,
 //     which reads/writes the file via node fs.
-//   - Outside VS Code: best-effort fetch for read, File System Access API
-//     (showSaveFilePicker) or download fallback for save.
+//   - Inside the localhost preview server: same-origin HTTP endpoints read/write
+//     the real repo files on disk.
+//   - Outside both: best-effort fetch for read and download fallback for save.
 
 window.PX = window.PX || {};
 PX.ui = PX.ui || {};
@@ -210,12 +211,32 @@ function _highlight(code, lang) {
 let _vscode = null;
 function _getVsCodeApi() {
   if (_vscode) return _vscode;
+  if (
+    window.__prefxplainVsCodeApi &&
+    typeof window.__prefxplainVsCodeApi.postMessage === 'function'
+  ) {
+    _vscode = window.__prefxplainVsCodeApi;
+    return _vscode;
+  }
   try {
     if (typeof acquireVsCodeApi === 'function') {
       _vscode = acquireVsCodeApi();
+      window.__prefxplainVsCodeApi = _vscode;
       return _vscode;
     }
-  } catch { /* already acquired by something else this session */ }
+  } catch {
+    if (
+      window.__prefxplainVsCodeApi &&
+      typeof window.__prefxplainVsCodeApi.postMessage === 'function'
+    ) {
+      _vscode = window.__prefxplainVsCodeApi;
+      return _vscode;
+    }
+  }
+  if (window.vscode && typeof window.vscode.postMessage === 'function') {
+    _vscode = window.vscode;
+    return _vscode;
+  }
   return null;
 }
 
@@ -234,6 +255,41 @@ function _rpc(type, payload, timeoutMs = 15000) {
     _pending.set(id, { resolve, reject, timer });
     api.postMessage({ type, id, ...payload });
   });
+}
+
+function _previewServerFileUrl(relPath) {
+  const origin = window.location && window.location.origin;
+  if (!origin) return null;
+  if (!/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(origin)) return null;
+  return `${origin}/__prefxplain__/file?path=${encodeURIComponent(relPath)}`;
+}
+
+async function _previewServerLoad(relPath) {
+  const url = _previewServerFileUrl(relPath);
+  if (!url) throw new Error('preview-server-unavailable');
+  const res = await fetch(url, { cache: 'no-store' });
+  let payload = null;
+  try { payload = await res.json(); } catch { /* ignore malformed bodies */ }
+  if (!res.ok || !payload || !payload.ok) {
+    throw new Error((payload && payload.error) || `preview-load-failed:${res.status}`);
+  }
+  return { content: payload.content || '', mode: 'preview-server' };
+}
+
+async function _previewServerSave(relPath, content) {
+  const url = _previewServerFileUrl(relPath);
+  if (!url) throw new Error('preview-server-unavailable');
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: relPath, content }),
+  });
+  let payload = null;
+  try { payload = await res.json(); } catch { /* ignore malformed bodies */ }
+  if (!res.ok || !payload || !payload.ok) {
+    throw new Error((payload && payload.error) || `preview-save-failed:${res.status}`);
+  }
+  return { mode: 'preview-server' };
 }
 
 window.addEventListener('message', (event) => {
@@ -255,8 +311,13 @@ async function _loadFile(relPath) {
   } catch (err) {
     if (err.message !== 'host-unavailable') throw err;
   }
+  try {
+    return await _previewServerLoad(relPath);
+  } catch (err) {
+    if (err.message !== 'preview-server-unavailable') throw err;
+  }
   // Fallback for plain browser contexts.
-  const res = await fetch(relPath);
+  const res = await fetch(relPath, { cache: 'no-store' });
   if (!res.ok) throw new Error(`fetch failed: ${res.status}`);
   return { content: await res.text(), mode: 'fetch' };
 }
@@ -267,6 +328,11 @@ async function _saveFile(relPath, content) {
     return { mode: 'vscode' };
   } catch (err) {
     if (err.message !== 'host-unavailable') throw err;
+  }
+  try {
+    return await _previewServerSave(relPath, content);
+  } catch (err) {
+    if (err.message !== 'preview-server-unavailable') throw err;
   }
   // Plain browser fallback: offer a download so the user can replace the file.
   const blob = new Blob([content], { type: 'text/plain' });

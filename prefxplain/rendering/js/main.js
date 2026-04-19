@@ -52,10 +52,10 @@
   canvasWrap.appendChild(canvas);
   middle.appendChild(canvasWrap);
 
-  // ── Zoom control overlay (group-map only) ────────────────────────
+  // ── Zoom control overlay ─────────────────────────────────────────
   // Two buttons in the bottom-right: zoom in to 150% and reset to 100%.
-  // The nested view has its own split layout and does not participate in zoom.
-  const zoomState = { groupMapScale: 1 };
+  // Zoom is tracked per view so each keeps its own scale across toggles.
+  const zoomState = { 'group-map': 1, nested: 1 };
   const zoomPanel = document.createElement('div');
   zoomPanel.style.cssText = `position:absolute;right:16px;bottom:16px;display:flex;align-items:center;gap:4px;padding:4px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;font-family:${T.mono};color:${T.ink};box-shadow:0 4px 14px rgba(0,0,0,0.35);user-select:none;z-index:2`;
   const btn = (label, title) => {
@@ -73,22 +73,19 @@
   canvasWrap.appendChild(zoomPanel);
 
   const applyZoom = () => {
-    const isGroupMap = state.viewMode === 'group-map';
-    const effective = isGroupMap ? zoomState.groupMapScale : 1;
+    const effective = zoomState[state.viewMode] ?? 1;
     canvas.style.setProperty('--px-zoom', effective);
-    zoomPanel.style.display = isGroupMap ? 'flex' : 'none';
   };
   const setZoom = (next) => {
-    zoomState.groupMapScale = next;
+    zoomState[state.viewMode] = next;
     applyZoom();
   };
   zIn.onclick = () => setZoom(1.5);
   zOut.onclick = () => setZoom(1);
   applyZoom();
-  // Pinch shortcut: trackpad pinch emits wheel with ctrlKey set. Only in group-map.
+  // Pinch shortcut: trackpad pinch emits wheel with ctrlKey set.
   canvasWrap.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
-    if (state.viewMode !== 'group-map') return;
     e.preventDefault();
     if (e.deltaY < 0) setZoom(1.5);
     else if (e.deltaY > 0) setZoom(1);
@@ -133,6 +130,7 @@
     await rerender();
   };
   side.onSelect((id) => setSelected(id));
+  side.onOpen((id) => openEditor(id));
   side.onSelectGroup((groupId) => setFocusedGroup(groupId, { switchView: true }));
   side.onFilter((v) => { state.filter = v; rerender(); });
   top.onDeselect(() => setSelected(null));
@@ -193,16 +191,6 @@
     if (!id || !index.byId[id]) return;
     PX.ui.codeEditor({ nodeId: id, graph, index });
   };
-
-  // Double-click on an explorer file entry opens the editor. The explorer
-  // sidebar delegates clicks via its own `onSelect`, so we attach directly
-  // to the aside's DOM here.
-  sideHost.addEventListener('dblclick', (e) => {
-    const btn = e.target.closest('button[data-node]');
-    if (!btn) return;
-    const id = btn.getAttribute('data-node');
-    if (id) openEditor(id);
-  });
 
   // Keyboard
   window.addEventListener('keydown', (e) => {

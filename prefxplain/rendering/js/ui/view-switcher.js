@@ -24,7 +24,17 @@ PX.ui.viewSwitcher = function viewSwitcher(container, {
   reload.title = 'Reload preview';
   reload.textContent = '\u21bb';
   reload.style.cssText = `display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;background:#ffffff;color:#0d1117;border:1px solid #ffffff;border-radius:4px;font-family:${T.mono};font-size:17px;font-weight:700;line-height:1;cursor:pointer;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,0.15)`;
-  reload.addEventListener('click', () => window.location.reload());
+  reload.addEventListener('click', () => {
+    // Inside a VS Code webview, window.location.reload() leaves the panel
+    // blank (the custom vscode-webview:// scheme doesn't reload cleanly).
+    // Ask the extension host to re-set panel.webview.html instead.
+    const bridge = window.__prefxplainVsCodeApi;
+    if (bridge && typeof bridge.postMessage === 'function') {
+      bridge.postMessage({ type: 'prefxplain:reload' });
+      return;
+    }
+    window.location.reload();
+  });
   reload.addEventListener('mouseenter', () => { reload.style.background = T.accent; reload.style.color = '#ffffff'; reload.style.borderColor = T.accent; });
   reload.addEventListener('mouseleave', () => { reload.style.background = '#ffffff'; reload.style.color = '#0d1117'; reload.style.borderColor = '#ffffff'; });
   wrap.appendChild(reload);

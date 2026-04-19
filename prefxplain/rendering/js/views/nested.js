@@ -1,18 +1,17 @@
 // views/nested.js — Nested renderer.
-// Split layout:
-//   - left: compact overview of all groups + aggregate inter-group links
-//   - right: one focused group's file-level detail
+//
+// Two paths:
+//   - Overview (no group focused): the classic multi-group nested overview
+//     with aggregate labelled edges. Unchanged from before.
+//   - Focused group: renders a structured "group story" — breadcrumb,
+//     summary, primary entry paths, dependency-position bands (Entry /
+//     Core / Leaf / Test), intra-group edges with top-N verb labels, and
+//     a "stress points" strip when hubs/cycles/dominant-bridges exist.
+//     Cards are hand-positioned in bands (deterministic across renders);
+//     ELK is used only to route edges between fixed positions.
 
 window.PX = window.PX || {};
 PX.views = PX.views || {};
-
-function _translateNodes(nodesById, dx, dy) {
-  const out = {};
-  for (const [id, node] of Object.entries(nodesById || {})) {
-    out[id] = { ...node, x: (node.x || 0) + dx, y: (node.y || 0) + dy };
-  }
-  return out;
-}
 
 function _translateEdge(edge, dx, dy) {
   const out = {
@@ -31,75 +30,6 @@ function _translateEdge(edge, dx, dy) {
   return out;
 }
 
-function _routePairs(index, groupId) {
-  const pairs = (index && index.groupPairStats) || [];
-  const outgoing = pairs
-    .filter(rec => rec.sourceGroup === groupId)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 4);
-  const incoming = pairs
-    .filter(rec => rec.targetGroup === groupId)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 4);
-  return { outgoing, incoming };
-}
-
-function _detailSummaryHtml(groupId, meta, stats, routes) {
-  const T = PX.T;
-  const desc = PX.escapeXml(meta.desc || meta.description || '');
-  const pills = [
-    `${stats.fileCount || 0} files`,
-    `\u2190 ${stats.externalIn || 0}`,
-    `${stats.externalOut || 0} \u2192`,
-  ].map(text =>
-    `<span style="display:inline-flex;align-items:center;padding:3px 8px;background:${T.bg};border:1px solid ${T.border};border-radius:999px;font-family:${T.mono};font-size:10px;color:${T.inkMuted}">${PX.escapeXml(text)}</span>`
-  ).join('');
-  const routeList = (title, items, tone) => {
-    const color = tone === 'out' ? T.accent2 : T.good;
-    const body = items.length
-      ? items.map(rec => `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px solid ${T.borderAlt}">
-          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${PX.escapeXml(rec[tone === 'out' ? 'targetGroup' : 'sourceGroup'])}</span>
-          <span style="color:${color};font-family:${T.mono};font-weight:600">${rec.count}\u00d7</span>
-        </div>`).join('')
-      : `<div style="color:${T.inkFaint};font-size:11px">No cross-group traffic</div>`;
-    return `<div style="min-width:0">
-      <div style="margin-bottom:6px;font-family:${T.mono};font-size:10px;letter-spacing:0.8px;text-transform:uppercase;color:${T.inkFaint}">${title}</div>
-      ${body}
-    </div>`;
-  };
-  const bridgeFiles = (stats.bridgeFiles || []).slice(0, 4).map(file =>
-    `<span style="display:inline-flex;align-items:center;gap:5px;padding:2px 8px;background:${T.pill};border:1px solid ${T.pillBorder};border-radius:999px;font-size:10px;color:${T.accent2}">
-      ${PX.escapeXml(file.label)}
-      <span style="color:${T.inkFaint};font-family:${T.mono}">\u2194${file.count}</span>
-    </span>`
-  ).join('');
-  return `<div xmlns="http://www.w3.org/1999/xhtml" style="height:100%;display:flex;flex-direction:column;gap:12px;font-family:${T.ui};color:${T.ink2}">
-    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px">
-      <div style="min-width:0;flex:1">
-        <div style="font-family:${T.mono};font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:5px">Selected group</div>
-        <div style="font-size:13px;line-height:1.55">${desc || 'No group description available yet.'}</div>
-      </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end;flex-shrink:0">${pills}</div>
-    </div>
-    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;font-size:11px;line-height:1.45">
-      ${routeList('Outgoing', routes.outgoing, 'out')}
-      ${routeList('Incoming', routes.incoming, 'in')}
-    </div>
-    ${bridgeFiles ? `<div style="display:flex;flex-wrap:wrap;gap:6px">${bridgeFiles}</div>` : ''}
-  </div>`;
-}
-
-function _emptyDetailHtml() {
-  const T = PX.T;
-  return `<div xmlns="http://www.w3.org/1999/xhtml" style="height:100%;display:flex;align-items:center;justify-content:center;text-align:center;font-family:${T.ui};color:${T.inkMuted};padding:24px">
-    <div>
-      <div style="font-family:${T.mono};font-size:10px;letter-spacing:1px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:10px">Detail</div>
-      <div style="font-size:18px;font-weight:700;color:${T.ink};margin-bottom:8px">Select a group</div>
-      <div style="font-size:13px;line-height:1.55;max-width:360px">The left side stays compact so you can keep the whole structure visible. Click any group to open its files here.</div>
-    </div>
-  </div>`;
-}
-
 PX.views.nested = async function renderNested(graph, opts = {}) {
   const {
     showBullets = true,
@@ -109,147 +39,73 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     focusedGroup = null,
   } = opts;
   const idx = index || PX.buildGraphIndex(graph);
+  const focusGroupId = focusedGroup || (selected && idx.byId[selected]
+    ? ((idx.byId[selected].group || 'Ungrouped'))
+    : null);
+
+  if (!focusGroupId) {
+    return PX.views._nestedOverview(graph, idx, { showBullets, selected, filter });
+  }
+  return PX.views._nestedFocused(graph, idx, focusGroupId, {
+    showBullets, selected, filter,
+  });
+};
+
+// ── Overview (no group focused): full-canvas nested landscape ──────────
+PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
+  const { showBullets, selected, filter } = opts;
   const groupsMeta = (graph.metaGroups && graph.metaGroups) || {};
-  const focusGroupId = focusedGroup || (selected && idx.byId[selected] ? ((idx.byId[selected].group || 'Ungrouped')) : null);
-  // When a group is focused, shrink the overview into a rail so the detail
-  // panel keeps real estate. Aspect ratio 0.3 (rail) vs 0.8 (overview-only)
-  // matches the visual role in each mode.
-  const isRail = !!focusGroupId;
   const overviewIr = PX.buildIr(graph, 'nested', {
     showBullets,
     index: idx,
-    compact: isRail,
+    compact: false,
   });
-  overviewIr.layoutOptions = { 'elk.aspectRatio': isRail ? '0.25' : '0.9' };
+  overviewIr.layoutOptions = { 'elk.aspectRatio': '0.9' };
 
-  const detailIr = focusGroupId
-    ? PX.buildGroupDetailIr(graph, focusGroupId, { showBullets, index: idx })
-    : null;
-  if (detailIr) {
-    // Why not 'layered' here: files inside a single group are often
-    // independent (e.g. Tests). Layered would dump all 10 tests into one
-    // layer → one row ~2500 px wide, which then forces the whole SVG to
-    // downscale until text becomes unreadable. When files ARE linked
-    // (Code Analysis, Graph Data Model), we still want them packed in 2D
-    // rather than stretched along the longest chain.
-    //
-    // 'rectpacking' if no edges (pure grid). 'force' otherwise (2D + keeps
-    // edges as straight lines, which is enough for intra-group context).
-    const hasEdges = (detailIr.edges || []).length > 0;
-    detailIr.layoutOptions = hasEdges
-      ? {
-          'elk.algorithm': 'force',
-          'elk.aspectRatio': '0.9',
-          'elk.spacing.nodeNode': '56',
-          'elk.randomSeed': '42',
-        }
-      : {
-          'elk.algorithm': 'rectpacking',
-          'elk.aspectRatio': '0.9',
-          'elk.spacing.nodeNode': '24',
-        };
-  }
-  const [overviewLaid, detailLaid] = await Promise.all([
-    PX.runLayout(overviewIr),
-    detailIr ? PX.runLayout(detailIr) : Promise.resolve(null),
-  ]);
-
-  const overviewNodesByIdRaw = PX._collectNodes(overviewLaid);
-  const overviewEdgeMetaById = Object.fromEntries((overviewIr.edges || []).map(e => [e.id, e]));
-  const overviewPolylines = PX.extractEdgePolylines(overviewLaid).map(e => ({
+  const laid = await PX.runLayout(overviewIr);
+  const nodesByIdRaw = PX._collectNodes(laid);
+  const edgeMetaById = Object.fromEntries((overviewIr.edges || []).map(e => [e.id, e]));
+  const polylines = PX.extractEdgePolylines(laid).map(e => ({
     ...e,
-    ...(overviewEdgeMetaById[e.id] || {}),
+    ...(edgeMetaById[e.id] || {}),
   }));
-  // Aggregate edges carry a 3-line colored label (same shape as group-map).
-  // Pipeline mirrors group-map.js:
-  //   - no detectBus: per-edge ports (ir.js → e-agg${i}) already give every
-  //     edge its own corridor. Running detectBus on top rewrites the drawn
-  //     path to a shared trunk while labels stay on the ELK polyline, which
-  //     is what floats labels off-arrow.
-  //   - centerOnPath in placeEdgeLabels so bent edges keep the label on-path.
-  //   - gap=18 + walkPath + cardRects + segments in avoidLabelCollisions so
-  //     labels slide along the arrow away from cards and foreign corridors.
-  const overviewLabelled = PX.placeEdgeLabels(overviewPolylines, { centerOnPath: true }).map(e => {
+  const labelled = PX.placeEdgeLabels(polylines, { centerOnPath: true }).map(e => {
     if (!(e.count > 0 && e.sourceGroup && e.targetGroup)) {
       return { ...e, __labelW: 0, __labelH: 0 };
     }
     const dims = PX._labelDims(e.sourceGroup, e.targetGroup, e.count);
     return { ...e, __labelW: dims.width, __labelH: dims.height };
   });
-  const overviewSegments = [];
-  for (const edge of overviewLabelled) {
+  const segments = [];
+  for (const edge of labelled) {
     const pts = edge.points || [];
     for (let i = 0; i < pts.length - 1; i++) {
-      overviewSegments.push({
+      segments.push({
         x1: pts[i].x, y1: pts[i].y,
         x2: pts[i + 1].x, y2: pts[i + 1].y,
         edgeId: edge.id,
       });
     }
   }
-  const overviewCardRects = (overviewLaid.children || []).map(box => ({
+  const cardRects = (laid.children || []).map(box => ({
     x1: box.x || 0, y1: box.y || 0,
     x2: (box.x || 0) + (box.width || 0),
     y2: (box.y || 0) + (box.height || 0),
   }));
-  const overviewResolved = PX.avoidLabelCollisions(overviewLabelled, {
+  const edges = PX.avoidLabelCollisions(labelled, {
     labelW: (e) => e.__labelW || 180,
-    labelH: (e) => e.__labelH || 56,
+    labelH: (e) => e.__labelH || 50,
     gap: 18,
-    segments: overviewSegments,
+    segments,
     walkPath: true,
-    cardRects: overviewCardRects,
+    cardRects,
   }).map(e => ({
     ...e,
     sourceGroup: PX.splitPortId(e.source).nodeId,
     targetGroup: PX.splitPortId(e.target).nodeId,
   }));
 
-  // Detour each edge's polyline around OTHER edges' label bboxes. Fixes the
-  // "arrows crossing foreign labels" visible once an edge is highlighted.
-  // See group-map.js for the rationale.
-  const overviewLabelBboxes = overviewResolved
-    .filter(e => e.labelX != null && e.labelY != null && e.__labelW > 0 && e.__labelH > 0)
-    .map(e => ({
-      id: e.id,
-      x1: e.labelX - e.__labelW / 2,
-      y1: e.labelY - e.__labelH / 2,
-      x2: e.labelX + e.__labelW / 2,
-      y2: e.labelY + e.__labelH / 2,
-    }));
-  const overviewEdgesRaw = overviewResolved.map(e => {
-    const foreign = overviewLabelBboxes.filter(b => b.id !== e.id);
-    if (foreign.length === 0) return e;
-    // See group-map.js for the rationale on gap=2 + preserveEndSegments.
-    return { ...e, points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }) };
-  });
-
-  const detailNodesByIdRaw = detailLaid ? PX._collectNodes(detailLaid) : {};
-  const detailEdgeMetaById = Object.fromEntries(((detailIr && detailIr.edges) || []).map(e => [e.id, e]));
-  const detailEdgesRaw = detailLaid
-    ? PX.placeEdgeLabels(PX.detectBus(
-      PX.extractEdgePolylines(detailLaid).map(e => ({
-        ...e,
-        ...(detailEdgeMetaById[e.id] || {}),
-      })),
-      detailNodesByIdRaw,
-    )).map(e => ({
-      ...e,
-      sourceNode: PX.splitPortId(e.source).nodeId,
-      targetNode: PX.splitPortId(e.target).nodeId,
-    }))
-    : [];
-
-  const inDeg = {}, outDeg = {};
-  for (const n of graph.nodes || []) { inDeg[n.id] = 0; outDeg[n.id] = 0; }
-  for (const e of graph.edges || []) {
-    if (inDeg[e.target] != null) inDeg[e.target]++;
-    if (outDeg[e.source] != null) outDeg[e.source]++;
-  }
-  const maxDeg = Math.max(1, ...Object.values(inDeg), ...Object.values(outDeg));
-  const SPOF_MIN = 8;
-
-  const topBoxes = (overviewLaid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
+  const topBoxes = (laid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
   const layerOf = {};
   const rowTol = 40;
   let layer = topBoxes.length;
@@ -260,119 +116,49 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     prevY = b.y || 0;
   }
 
-  const relatedGroups = new Set(focusGroupId ? [focusGroupId] : []);
-  if (focusGroupId) {
-    for (const rec of (idx.groupPairStats || [])) {
-      if (rec.sourceGroup === focusGroupId) relatedGroups.add(rec.targetGroup);
-      if (rec.targetGroup === focusGroupId) relatedGroups.add(rec.sourceGroup);
-    }
-  }
-  if (selected) {
-    for (const e of graph.edges || []) {
-      if (e.source !== selected && e.target !== selected) continue;
-      relatedGroups.add((idx.byId[e.source] || {}).group || 'Ungrouped');
-      relatedGroups.add((idx.byId[e.target] || {}).group || 'Ungrouped');
-    }
-  }
-
-  const fileState = (id) => idx ? idx.fileState(selected, id, filter) : 'normal';
-  const overviewEdgeState = (e) => {
-    if (!focusGroupId) return 'normal';
-    if (e.sourceGroup === focusGroupId) return 'depends';
-    if (e.targetGroup === focusGroupId) return 'imports';
-    return 'faded';
-  };
-  const detailEdgeState = (e) => {
-    if (!selected) return 'normal';
-    if (e.sourceNode === selected) return 'depends';
-    if (e.targetNode === selected) return 'imports';
-    return 'faded';
-  };
-
   const LEFT_PAD = 24;
   const TOP_PAD = 28;
-  const SECTION_GAP = 28;
-  const overviewX = LEFT_PAD;
-  const overviewY = TOP_PAD + 18;
-  // Compute the overview's true content bbox (nodes + polyline waypoints +
-  // label rects) — same approach as group-map. ELK's laid.width/height only
-  // covers the node frame, so labels that spill sideways used to overlap the
-  // divider and then get hidden under the detail panel's foreignObject.
-  let ovMinX = 0, ovMinY = 0;
-  let ovMaxX = overviewLaid.width || 640;
-  let ovMaxY = overviewLaid.height || 520;
-  for (const box of (overviewLaid.children || [])) {
+  let minX = 0, minY = 0;
+  let maxX = laid.width || 640;
+  let maxY = laid.height || 520;
+  for (const box of (laid.children || [])) {
     const bx = box.x || 0, by = box.y || 0;
     const bw = box.width || 0, bh = box.height || 0;
-    if (bx < ovMinX) ovMinX = bx;
-    if (by < ovMinY) ovMinY = by;
-    if (bx + bw > ovMaxX) ovMaxX = bx + bw;
-    if (by + bh > ovMaxY) ovMaxY = by + bh;
+    if (bx < minX) minX = bx;
+    if (by < minY) minY = by;
+    if (bx + bw > maxX) maxX = bx + bw;
+    if (by + bh > maxY) maxY = by + bh;
   }
-  for (const e of overviewEdgesRaw) {
+  for (const e of edges) {
     for (const p of e.points || []) {
-      if (p.x < ovMinX) ovMinX = p.x;
-      if (p.y < ovMinY) ovMinY = p.y;
-      if (p.x > ovMaxX) ovMaxX = p.x;
-      if (p.y > ovMaxY) ovMaxY = p.y;
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
     }
     if (e.labelX != null && e.labelY != null) {
       const lw = e.__labelW || 0, lh = e.__labelH || 0;
-      if (e.labelX - lw / 2 < ovMinX) ovMinX = e.labelX - lw / 2;
-      if (e.labelY - lh / 2 < ovMinY) ovMinY = e.labelY - lh / 2;
-      if (e.labelX + lw / 2 > ovMaxX) ovMaxX = e.labelX + lw / 2;
-      if (e.labelY + lh / 2 > ovMaxY) ovMaxY = e.labelY + lh / 2;
+      if (e.labelX - lw / 2 < minX) minX = e.labelX - lw / 2;
+      if (e.labelY - lh / 2 < minY) minY = e.labelY - lh / 2;
+      if (e.labelX + lw / 2 > maxX) maxX = e.labelX + lw / 2;
+      if (e.labelY + lh / 2 > maxY) maxY = e.labelY + lh / 2;
     }
   }
-  const OV_PAD = 20;
-  const overviewW = Math.ceil(ovMaxX - ovMinX + 2 * OV_PAD);
-  const overviewH = Math.ceil(ovMaxY - ovMinY + 2 * OV_PAD);
-  const detailSummaryH = focusGroupId ? 150 : 200;
-  const detailBoxX = overviewX + overviewW + SECTION_GAP + 18;
-  const detailPanelX = detailBoxX - 18;
-  const detailPanelY = TOP_PAD;
-  const detailBoxY = detailPanelY + detailSummaryH;
-  const detailBoxInnerPadX = 22;
-  const detailBoxInnerPadY = 110;
-  const detailBoxW = focusGroupId
-    ? Math.max(640, Math.round((detailLaid.width || 540) + detailBoxInnerPadX * 2 + 12))
-    : 680;
-  const detailBoxH = focusGroupId
-    ? Math.max(320, Math.round((detailLaid.height || 0) + detailBoxInnerPadY + 28))
-    : 0;
-  const detailPanelW = detailBoxW + 36;
-  const detailPanelH = focusGroupId
-    ? detailSummaryH + detailBoxH + 18
-    : detailSummaryH + 40;
-  const W = Math.round(detailPanelX + detailPanelW + LEFT_PAD);
-  const H = Math.round(Math.max(overviewY + overviewH + TOP_PAD, detailPanelY + detailPanelH + TOP_PAD));
-  // Shift so the content's min corner lands at (overviewX+OV_PAD, overviewY+OV_PAD).
-  // Without this, a left-spilling label (negative ovMinX) would get clipped
-  // by the LEFT_PAD boundary of the canvas.
-  const overviewDx = overviewX + OV_PAD - ovMinX;
-  const overviewDy = overviewY + OV_PAD - ovMinY;
-  const detailDx = detailBoxX + detailBoxInnerPadX;
-  const detailDy = detailBoxY + detailBoxInnerPadY;
-  const overviewNodesById = _translateNodes(overviewNodesByIdRaw, overviewDx, overviewDy);
-  const detailNodesById = _translateNodes(detailNodesByIdRaw, detailDx, detailDy);
-  const overviewEdges = overviewEdgesRaw.map(e => _translateEdge(e, overviewDx, overviewDy));
-  const detailEdges = detailEdgesRaw.map(e => _translateEdge(e, detailDx, detailDy));
-  const routes = focusGroupId ? _routePairs(idx, focusGroupId) : { outgoing: [], incoming: [] };
+  const PAD = 20;
+  const dx = LEFT_PAD + PAD - minX;
+  const dy = TOP_PAD + PAD - minY;
+  const W = Math.ceil(maxX - minX + 2 * PAD + 2 * LEFT_PAD);
+  const H = Math.ceil(maxY - minY + 2 * PAD + 2 * TOP_PAD);
+  const nodesById = {};
+  for (const [id, node] of Object.entries(nodesByIdRaw)) {
+    nodesById[id] = { ...node, x: (node.x || 0) + dx, y: (node.y || 0) + dy };
+  }
+  const translated = edges.map(e => _translateEdge(e, dx, dy));
 
-  // Fill the canvas width (no max-width cap) and apply a user-controlled
-  // zoom via the `--px-zoom` CSS variable. The parent #px-canvas has
-  // `overflow:auto`, so zooming > 1 triggers scrollbars instead of pushing
-  // content off-screen.
   let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}">`;
   svg += PX.components.markers();
 
-  svg += `<text x="${overviewX}" y="${TOP_PAD - 2}" font-family="${PX.T.mono}" font-size="10" letter-spacing="1.2" fill="${PX.T.inkFaint}">GROUPS</text>`;
-  svg += `<text x="${detailPanelX}" y="${TOP_PAD - 2}" font-family="${PX.T.mono}" font-size="10" letter-spacing="1.2" fill="${PX.T.inkFaint}">DETAIL</text>`;
-  svg += `<line x1="${overviewX + overviewW + SECTION_GAP / 2}" y1="${TOP_PAD}" x2="${overviewX + overviewW + SECTION_GAP / 2}" y2="${H - TOP_PAD}" stroke="${PX.T.borderAlt}" stroke-width="1"/>`;
-
-  // Build the rich 3-line label object shape (same as group-map) for each
-  // aggregate edge; paths first, cards next, labels last for clean z-order.
-  const mkOverviewLabel = (e) => (e.count > 0 && e.sourceGroup && e.targetGroup ? {
+  const mkLabel = (e) => (e.count > 0 && e.sourceGroup && e.targetGroup ? {
     sourceName: e.sourceGroup,
     sourceColor: PX.groupColor(e.sourceGroup, groupsMeta[e.sourceGroup] || {}),
     targetName: e.targetGroup,
@@ -380,23 +166,21 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     count: e.count,
   } : null);
 
-  for (const e of overviewEdges) {
+  for (const e of translated) {
     svg += PX.components.edge(e, {
-      nodesById: overviewNodesById,
-      state: overviewEdgeState(e),
+      nodesById,
+      state: 'normal',
       thick: true,
       pathOnly: true,
     });
   }
-
-  for (const box of (overviewLaid.children || [])) {
+  for (const box of (laid.children || [])) {
     const meta = groupsMeta[box.id] || {};
     const stats = ((idx.groupStats || {})[box.id]) || {};
     const color = PX.groupColor(box.id, meta);
-    const faded = !!focusGroupId && box.id !== focusGroupId && !relatedGroups.has(box.id);
     svg += PX.components.groupContainer({
-      x: (box.x || 0) + overviewDx,
-      y: (box.y || 0) + overviewDy,
+      x: (box.x || 0) + dx,
+      y: (box.y || 0) + dy,
       w: box.width,
       h: box.height,
       name: box.id,
@@ -410,91 +194,304 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
       strongestOut: stats.strongestOut || null,
       gatewayFiles: (stats.bridgeFiles || []).slice(0, 3),
       expanded: false,
-      selected: box.id === focusGroupId,
-      faded: !!faded,
+      selected: false,
+      faded: false,
     });
   }
-
-  for (const e of overviewEdges) {
-    const label = mkOverviewLabel(e);
+  for (const e of translated) {
+    const label = mkLabel(e);
     if (!label) continue;
     svg += PX.components.edge(e, {
-      nodesById: overviewNodesById,
-      state: overviewEdgeState(e),
+      nodesById,
+      state: 'normal',
       label,
       thick: true,
       labelOnly: true,
     });
   }
+  svg += `</svg>`;
+  return { svg, laid, nodesById, edges: translated, W, H };
+};
 
-  svg += `<rect x="${detailPanelX}" y="${detailPanelY}" width="${detailPanelW}" height="${detailPanelH}" fill="${PX.T.panel}" stroke="${PX.T.border}" stroke-width="1" rx="12"/>`;
-  if (!focusGroupId) {
-    svg += `<foreignObject x="${detailPanelX + 14}" y="${detailPanelY + 14}" width="${detailPanelW - 28}" height="${detailPanelH - 28}">${_emptyDetailHtml()}</foreignObject>`;
-    svg += `</svg>`;
-    return { svg, laid: overviewLaid, nodesById: overviewNodesById, edges: overviewEdges, W, H };
-  }
+// ── Focused group: ranked architectural narrative ──────────────────────
+PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts) {
+  const { showBullets, selected, filter } = opts;
+  const story = PX.buildGroupStory(graph, groupId, idx);
+  const CANVAS = 1280;
+  const LEFT = 28;
+  const TOP = 20;
+  const BREADCRUMB_H = 36;
+  const SUMMARY_H = 84;
+  const GAP = 14;
 
-  const focusMeta = groupsMeta[focusGroupId] || {};
-  const focusStats = ((idx.groupStats || {})[focusGroupId]) || {};
-  const focusColor = PX.groupColor(focusGroupId, focusMeta);
-  const detailBoxWidth = detailPanelW - 36;
-  svg += `<rect x="${detailPanelX}" y="${detailPanelY}" width="${detailPanelW}" height="4" fill="${focusColor}" rx="12"/>`;
-  svg += `<foreignObject x="${detailPanelX + 14}" y="${detailPanelY + 14}" width="${detailPanelW - 28}" height="${detailSummaryH - 24}">${_detailSummaryHtml(focusGroupId, focusMeta, focusStats, routes)}</foreignObject>`;
-  svg += PX.components.groupContainer({
-    x: detailBoxX,
-    y: detailBoxY,
-    w: detailBoxWidth,
-    h: detailBoxH,
-    name: focusGroupId,
-    color: focusColor,
-    desc: focusMeta.desc || focusMeta.description || '',
-    fileCount: focusStats.fileCount || 0,
-    layer: 0,
-    bridgeIn: focusStats.externalIn || 0,
-    bridgeOut: focusStats.externalOut || 0,
-    strongestIn: focusStats.strongestIn || null,
-    strongestOut: focusStats.strongestOut || null,
-    gatewayFiles: (focusStats.bridgeFiles || []).slice(0, 4),
-    expanded: true,
-    selected: true,
-    faded: false,
+  // Entry strip height is dynamic — compute first to know where bands start.
+  const entryPreview = PX.components.entryPathsStrip({
+    x: LEFT, y: 0, w: CANVAS - 2 * LEFT,
+    entries: story.entries, color: story.meta.color,
+  });
+  const ENTRY_H = entryPreview.h;
+
+  const bandsStartY = TOP + BREADCRUMB_H + GAP + SUMMARY_H + GAP + (ENTRY_H ? ENTRY_H + GAP : 0);
+
+  // Compose the band grid layout (deterministic, hand-positioned).
+  const layout = PX.buildGroupStoryLayoutIr(story, {
+    showBullets,
+    canvasWidth: CANVAS - 2 * LEFT,
+    topPad: 0,           // we apply our own top offset below
+    leftPad: 0,
+    bandGapY: 60,
+    bandGapX: 36,
+    cardGapY: 18,
   });
 
-  for (const e of detailEdges) {
-    svg += PX.components.edge(e, {
-      nodesById: detailNodesById,
-      state: detailEdgeState(e),
-      label: null,
-      thick: false,
+  // Run ELK in routing-only mode on the hand-positioned tree.
+  let laid = null;
+  let edgesRouted = [];
+  if (layout.ir.edges.length > 0) {
+    try {
+      laid = await PX.runLayout(layout.ir);
+      const polylines = PX.extractEdgePolylines(laid);
+      const edgeMetaById = Object.fromEntries(layout.ir.edges.map(e => [e.id, e]));
+      edgesRouted = polylines.map(p => ({
+        ...p,
+        ...(edgeMetaById[p.id] || {}),
+      }));
+    } catch (err) {
+      console.warn('[prefxplain] edge routing failed, drawing direct lines:', err);
+      edgesRouted = [];
+    }
+  }
+
+  // If ELK couldn't route (or declined), fall back to direct lines between
+  // port anchors so the panel still shows flow.
+  if (edgesRouted.length === 0 && layout.ir.edges.length > 0) {
+    edgesRouted = layout.ir.edges.map(e => {
+      const srcNode = layout.ir.children.find(c => c.id === e.sourceNode);
+      const tgtNode = layout.ir.children.find(c => c.id === e.targetNode);
+      if (!srcNode || !tgtNode) return null;
+      const sx = srcNode.x + srcNode.width / 2;
+      const sy = srcNode.y + srcNode.height;
+      const tx = tgtNode.x + tgtNode.width / 2;
+      const ty = tgtNode.y;
+      return {
+        ...e,
+        id: e.id,
+        source: `${e.sourceNode}.out`,
+        target: `${e.targetNode}.in`,
+        points: [{ x: sx, y: sy }, { x: sx, y: (sy + ty) / 2 }, { x: tx, y: (sy + ty) / 2 }, { x: tx, y: ty }],
+      };
+    }).filter(Boolean);
+  }
+
+  // Translate everything by (LEFT, bandsStartY).
+  const nodesById = {};
+  for (const c of layout.ir.children) {
+    nodesById[c.id] = {
+      id: c.id,
+      x: c.x + LEFT,
+      y: c.y + bandsStartY,
+      w: c.width,
+      h: c.height,
+    };
+  }
+  const bandRects = layout.bandRects.map(b => ({
+    ...b,
+    x: b.x + LEFT,
+    y: b.y + bandsStartY,
+  }));
+  const edgesTranslated = edgesRouted.map(e => _translateEdge(e, LEFT, bandsStartY));
+
+  // Edge label placement + collision avoidance — reuse the group-map pipeline.
+  const labelled = PX.placeEdgeLabels(edgesTranslated, { centerOnPath: false });
+  const segments = [];
+  for (const edge of labelled) {
+    const pts = edge.points || [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      segments.push({
+        x1: pts[i].x, y1: pts[i].y,
+        x2: pts[i + 1].x, y2: pts[i + 1].y,
+        edgeId: edge.id,
+      });
+    }
+  }
+  const cardRects = Object.values(nodesById).map(n => ({
+    x1: n.x, y1: n.y, x2: n.x + n.w, y2: n.y + n.h,
+  }));
+  const finalEdges = PX.avoidLabelCollisions(labelled, {
+    labelW: (e) => e.labelled ? (String(e.count).length + 8) * 6.4 + 16 : 0,
+    labelH: (e) => e.labelled ? 20 : 0,
+    gap: 14,
+    segments,
+    walkPath: true,
+    cardRects,
+  });
+
+  // Selection-driven file states.
+  const SPOF_MIN = 8;
+  const neighborsOf = (id) => {
+    const n = new Set();
+    for (const e of graph.edges || []) {
+      if (e.source === id) n.add(e.target);
+      if (e.target === id) n.add(e.source);
+    }
+    return n;
+  };
+  const selectedNeighbors = selected ? neighborsOf(selected) : null;
+  const fileState = (id) => {
+    if (filter) {
+      const n = idx.byId[id];
+      if (!n) return 'normal';
+      const q = filter.toLowerCase();
+      const matches = (n.label || '').toLowerCase().includes(q)
+        || (n.description || '').toLowerCase().includes(q)
+        || (n.short || '').toLowerCase().includes(q);
+      if (!selected) return matches ? 'match' : 'dimmed';
+    }
+    if (!selected) return 'normal';
+    if (id === selected) return 'selected';
+    if (selectedNeighbors && selectedNeighbors.has(id)) {
+      for (const e of graph.edges || []) {
+        if (e.source === selected && e.target === id) return 'depends';
+        if (e.target === selected && e.source === id) return 'imports';
+      }
+    }
+    return 'dimmed';
+  };
+  const edgeState = (e) => {
+    if (!selected) return 'normal';
+    if (e.sourceNode === selected) return 'depends';
+    if (e.targetNode === selected) return 'imports';
+    return 'faded';
+  };
+
+  // ── Compose SVG ───────────────────────────────────────────────────
+  // Compute final canvas size. Bands section height comes from the layout;
+  // stress strip adds its own measured height.
+  const bandsH = layout.canvasH;
+  const stressPreview = PX.components.stressStrip({
+    x: LEFT, y: 0, w: CANVAS - 2 * LEFT, stress: story.stress,
+  });
+  const STRESS_H = stressPreview.h;
+  const totalH = bandsStartY + bandsH + (STRESS_H ? GAP + STRESS_H : 0) + TOP;
+  const W = CANVAS;
+  const H = totalH;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
+  svg += PX.components.markers();
+
+  // Breadcrumb.
+  svg += PX.components.detailBreadcrumb({
+    x: LEFT,
+    y: TOP,
+    w: CANVAS - 2 * LEFT,
+    groupId,
+    color: story.meta.color,
+  });
+
+  // Summary header.
+  svg += PX.components.detailSummary({
+    x: LEFT,
+    y: TOP + BREADCRUMB_H + GAP,
+    w: CANVAS - 2 * LEFT,
+    story,
+  });
+
+  // Primary entry paths strip.
+  if (ENTRY_H > 0) {
+    const entryStrip = PX.components.entryPathsStrip({
+      x: LEFT,
+      y: TOP + BREADCRUMB_H + GAP + SUMMARY_H + GAP,
+      w: CANVAS - 2 * LEFT,
+      entries: story.entries,
+      color: story.meta.color,
+    });
+    svg += entryStrip.svg;
+  }
+
+  // Band labels (above each band's top edge).
+  for (const band of bandRects) {
+    svg += PX.components.bandLabel({
+      x: band.x,
+      y: band.y,
+      w: band.w,
+      name: band.name,
+      count: band.count,
     });
   }
 
-  const byId = Object.fromEntries((graph.nodes || []).map(n => [n.id, n]));
-  for (const c of (detailLaid.children || [])) {
-    const node = byId[c.id];
-    if (!node) continue;
-    const absX = (c.x || 0) + detailDx;
-    const absY = (c.y || 0) + detailDy;
-    svg += PX.components.cardFile(node, { x: absX, y: absY, w: c.width, h: c.height }, {
-      showBullets,
-      groupColor: focusColor,
-      maxDeg,
-      inDeg: inDeg[node.id] || 0,
-      outDeg: outDeg[node.id] || 0,
-      isHub: (inDeg[node.id] || 0) >= SPOF_MIN,
-      bridgeIn: (idx.fileBridgeIn || {})[node.id] || 0,
-      bridgeOut: (idx.fileBridgeOut || {})[node.id] || 0,
-      state: fileState(node.id),
+  // Edges: paths first, then labels (z-order).
+  for (const e of finalEdges) {
+    svg += PX.components.edge(e, {
+      nodesById,
+      state: edgeState(e),
+      thick: false,
+      pathOnly: true,
     });
+  }
+  for (const e of finalEdges) {
+    if (!e.labelled) continue;
+    svg += PX.components.edge(e, {
+      nodesById,
+      state: edgeState(e),
+      label: `${e.count}\u00D7`,
+      thick: false,
+      labelOnly: true,
+    });
+  }
+
+  // File cards (on top of edges/bands).
+  const inDeg = {}, outDeg = {};
+  for (const n of graph.nodes || []) { inDeg[n.id] = 0; outDeg[n.id] = 0; }
+  for (const e of graph.edges || []) {
+    if (inDeg[e.target]  != null) inDeg[e.target]  += 1;
+    if (outDeg[e.source] != null) outDeg[e.source] += 1;
+  }
+  const maxDeg = Math.max(1, ...Object.values(inDeg), ...Object.values(outDeg));
+  const focusColor = story.meta.color;
+  for (const band of story.bands) {
+    for (const f of band.files) {
+      const c = nodesById[f.id];
+      if (!c) continue;
+      const node = idx.byId[f.id] || { id: f.id, label: f.label };
+      svg += PX.components.cardFile(
+        node,
+        { x: c.x, y: c.y, w: c.w, h: c.h },
+        {
+          showBullets,
+          groupColor: focusColor,
+          maxDeg,
+          inDeg: inDeg[f.id] || 0,
+          outDeg: outDeg[f.id] || 0,
+          isHub: f.isHub,
+          bridgeIn: f.bridgeIn,
+          bridgeOut: f.bridgeOut,
+          state: fileState(f.id),
+        },
+      );
+    }
+  }
+
+  // Stress-points strip (bottom).
+  if (STRESS_H > 0) {
+    const stress = PX.components.stressStrip({
+      x: LEFT,
+      y: bandsStartY + bandsH + GAP,
+      w: CANVAS - 2 * LEFT,
+      stress: story.stress,
+    });
+    svg += stress.svg;
   }
 
   svg += `</svg>`;
+
+  console.log(`[prefxplain] group-story ${groupId}: ${story.entries.length} entries, ${story.bands.length} bands, ${story.edges.length} edges, stress=${story.stress.length}`);
+
   return {
     svg,
-    laid: overviewLaid,
-    nodesById: { ...overviewNodesById, ...detailNodesById },
-    edges: [...overviewEdges, ...detailEdges],
-    W,
-    H,
+    laid,
+    nodesById,
+    edges: finalEdges,
+    W, H,
+    story,
   };
 };

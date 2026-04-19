@@ -141,9 +141,21 @@
   // single-click so dblclick preempts it without flicker.
   let heroClickTimer = null;
   canvas.addEventListener('click', async (e) => {
+    const breadcrumb = e.target.closest('.detail-breadcrumb');
+    const entryChip = e.target.closest('.entry-chip');
     const hero = e.target.closest('.hero-card');
     const group = e.target.closest('.group-container');
     const file = e.target.closest('.file-card');
+    if (breadcrumb) {
+      // Breadcrumb = "back to overview" from the focused group story.
+      await setFocusedGroup(null, { switchView: false });
+      return;
+    }
+    if (entryChip) {
+      const id = entryChip.getAttribute('data-node');
+      if (id) await setSelected(state.selected === id ? null : id);
+      return;
+    }
     if (hero) {
       const groupId = hero.getAttribute('data-group');
       if (!groupId) return;

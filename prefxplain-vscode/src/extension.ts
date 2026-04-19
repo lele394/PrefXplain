@@ -194,7 +194,17 @@ function handleWebviewMessage(
 ): void {
   if (!msg || typeof msg !== "object") return;
   const m = msg as { type?: string; id?: string; path?: string; content?: string };
-  if (!m.type || !m.id) return;
+  if (!m.type) return;
+
+  // Reload messages don't need an id — they're fire-and-forget.
+  // window.location.reload() blanks out VS Code webviews, so the UI posts
+  // this instead and we re-set panel.webview.html on the host side.
+  if (m.type === "prefxplain:reload") {
+    refreshPreview(htmlPath, true);
+    return;
+  }
+
+  if (!m.id) return;
   const reply = (payload: Record<string, unknown>): void => {
     panel.webview.postMessage({ id: m.id, ...payload });
   };

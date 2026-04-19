@@ -171,6 +171,10 @@
   // Hero double-click: drill into Nested with that group focused. Debounce the
   // single-click so dblclick preempts it without flicker.
   let heroClickTimer = null;
+  // Ghost anchor single-click pins the group; double-click teleports to it.
+  // Same debounce pattern as hero so the two pin-toggles fired by a dblclick
+  // don't fight the teleport. The timer is cleared by the dblclick handler.
+  let anchorClickTimer = null;
   canvas.addEventListener('click', async (e) => {
     const entryChip = e.target.closest('.entry-chip');
     const clusterHeader = e.target.closest('.cluster-header');
@@ -179,14 +183,14 @@
     const group = e.target.closest('.group-container');
     const file = e.target.closest('.file-card');
     if (ghostAnchor) {
-      // Single-click pins the anchor group so its arrows stay lit up. Click
-      // again (same anchor) to unpin. Double-click teleports — see dblclick.
-      // Pinning an anchor moves attention to the group level, so any active
-      // file selection is cleared (mirrors how selecting a file clears the
-      // pin). Without this, the file-level `selected` branch dominates in
-      // fileState/edgeState and the pin has no visible effect.
       const g = ghostAnchor.getAttribute('data-anchor-group');
-      if (g) {
+      if (!g) return;
+      if (anchorClickTimer) clearTimeout(anchorClickTimer);
+      anchorClickTimer = setTimeout(() => {
+        anchorClickTimer = null;
+        // Single-click (after dblclick window): toggle the pin. Pinning moves
+        // attention to the group level, so any active file selection is
+        // cleared (mirrors how selecting a file clears the pin).
         state.pinnedGroup = state.pinnedGroup === g ? null : g;
         if (state.pinnedGroup) {
           state.selected = null;
@@ -194,8 +198,8 @@
           state.hoveredFile = null;
         }
         syncChrome();
-        await rerender();
-      }
+        rerender();
+      }, 240);
       return;
     }
     if (entryChip) {
@@ -278,6 +282,7 @@
 
   canvas.addEventListener('dblclick', (e) => {
     if (heroClickTimer) { clearTimeout(heroClickTimer); heroClickTimer = null; }
+    if (anchorClickTimer) { clearTimeout(anchorClickTimer); anchorClickTimer = null; }
     const hero = e.target.closest('.hero-card');
     const ghost = e.target.closest('.ghost-anchor');
     const file = e.target.closest('.file-card');

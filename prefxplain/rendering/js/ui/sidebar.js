@@ -89,7 +89,7 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
         .filter(n => !filter || n.label.toLowerCase().includes(filter) || (n.description || '').toLowerCase().includes(filter));
       if (filter && files.length === 0) continue;
       const isOpen = openGroups[g];
-      const focusBg = focusedGroup === g ? 'rgba(88,166,255,0.12)' : 'transparent';
+      const focusBg = focusedGroup === g ? T.accentTint : 'transparent';
       const focusBorder = focusedGroup === g ? T.accent : 'transparent';
       html += `<div style="display:flex;align-items:center;gap:4px;padding:2px 10px 2px 8px">
         <button data-group-toggle="${PX.escapeXml(g)}" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;padding:0;background:transparent;border:none;color:${T.inkFaint};font-size:9px;cursor:pointer">${isOpen ? '\u25be' : '\u25b8'}</button>
@@ -105,7 +105,7 @@ PX.ui.sidebar = function sidebar(container, { graph, groupsMeta, index }) {
           const entryFlag = f.role === 'entry_point' ? `<span style="font-size:8.5px;color:${T.accent}">ENTRY</span>` : '';
           const bridgeCount = (((index || {}).fileBridgeIn || {})[f.id] || 0) + (((index || {}).fileBridgeOut || {})[f.id] || 0);
           const bridgeFlag = bridgeCount > 0 ? `<span style="font-size:8.5px;color:${T.good}">\u2194${bridgeCount}</span>` : '';
-          html += `<button data-node="${PX.escapeXml(f.id)}" style="display:flex;align-items:center;gap:6px;width:100%;padding:3px 14px 3px 34px;background:${sel ? 'rgba(88,166,255,0.12)' : 'transparent'};border:none;border-left:2px solid ${sel ? T.accent : 'transparent'};color:${sel ? T.ink : T.ink2};font-family:${T.mono};font-size:11px;cursor:pointer;text-align:left">
+          html += `<button data-node="${PX.escapeXml(f.id)}" style="display:flex;align-items:center;gap:6px;width:100%;padding:3px 14px 3px 34px;background:${sel ? T.accentTint : 'transparent'};border:none;border-left:2px solid ${sel ? T.accent : 'transparent'};color:${sel ? T.ink : T.ink2};font-family:${T.mono};font-size:11px;cursor:pointer;text-align:left">
             <span style="color:${T.inkFaint};font-size:10px">\u2397</span>
             <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${PX.escapeXml(f.label)}</span>
             ${bridgeFlag}${entryFlag}

@@ -43,18 +43,18 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
   const kb = Math.round((n.size || 0) / 1024);
 
   const overlay = document.createElement('div');
-  overlay.style.cssText = `position:fixed;inset:0;background:rgba(1,4,9,0.88);z-index:100;display:flex;align-items:center;justify-content:center;font-family:${T.ui};backdrop-filter:blur(6px)`;
+  overlay.style.cssText = `position:fixed;inset:0;background:${T.overlay};z-index:100;display:flex;align-items:center;justify-content:center;font-family:${T.ui};backdrop-filter:blur(6px)`;
 
   overlay.innerHTML = `
-    <div id="px-flow-card" style="background:${T.panel};border:1px solid ${T.border};border-radius:8px;width:min(1100px,94vw);max-height:92vh;overflow:auto;box-shadow:0 24px 80px rgba(0,0,0,0.6)">
+    <div id="px-flow-card" style="background:${T.panel};border:1px solid ${T.border};border-radius:8px;width:min(1100px,94vw);max-height:92vh;overflow:auto;box-shadow:${T.shadowLg}">
       <div style="padding:14px 20px;border-bottom:1px solid ${T.border};display:flex;align-items:center;gap:10px;background:${T.panelAlt}">
         <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint}">Flow</span>
         <span style="color:${T.borderAlt}">\u00b7</span>
         <span style="font-family:${T.mono};font-size:13px;color:${T.ink};font-weight:600">${PX.escapeXml(n.label)}</span>
         <span style="font-family:${T.mono};font-size:10.5px;color:${T.inkFaint}">${PX.escapeXml(n.id)}</span>
-        ${isHub ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:rgba(210,153,34,0.18);color:${T.warn};border:1px solid ${T.warn};border-radius:3px;text-transform:uppercase;letter-spacing:1px">SPOF</span>` : ''}
-        ${isEntry && !isHub ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:rgba(88,166,255,0.18);color:${T.accent};border:1px solid ${T.accent};border-radius:3px;text-transform:uppercase;letter-spacing:1px">Entry</span>` : ''}
-        ${isTest ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:rgba(163,113,247,0.18);color:#a371f7;border:1px solid #a371f7;border-radius:3px;text-transform:uppercase;letter-spacing:1px">Test</span>` : ''}
+        ${isHub ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:${T.warnTint};color:${T.warn};border:1px solid ${T.warn};border-radius:3px;text-transform:uppercase;letter-spacing:1px">SPOF</span>` : ''}
+        ${isEntry && !isHub ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:${T.accentTint};color:${T.accent};border:1px solid ${T.accent};border-radius:3px;text-transform:uppercase;letter-spacing:1px">Entry</span>` : ''}
+        ${isTest ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:${T.testTint};color:${T.testColor};border:1px solid ${T.testColor};border-radius:3px;text-transform:uppercase;letter-spacing:1px">Test</span>` : ''}
         <span style="flex:1"></span>
         <span style="font-family:${T.mono};font-size:10px;color:${T.inkFaint}">esc to close</span>
         <button data-close style="background:transparent;border:1px solid ${T.border};color:${T.inkMuted};font-family:${T.mono};font-size:13px;width:26px;height:26px;border-radius:3px;cursor:pointer">\u00d7</button>
@@ -63,7 +63,7 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
         <div style="display:grid;grid-template-columns:1fr 40px 1.1fr 40px 1fr;gap:0;align-items:center">
           ${_col(`Inputs \u00b7 ${importersList.length} ${importersList.length === 1 ? 'caller' : 'callers'}`, T.good, importersList, `nobody imports this \u2014 ${isEntry ? 'this is an entry point' : 'top of chain'}`, T, groupsMeta)}
           ${_arrow(T.good, importersList.length)}
-          <div style="background:${T.bg};border:2px solid ${isHub ? T.warn : T.accent};border-radius:6px;padding:16px;box-shadow:0 0 0 4px ${isHub ? 'rgba(210,153,34,0.08)' : 'rgba(88,166,255,0.08)'}">
+          <div style="background:${T.bg};border:2px solid ${isHub ? T.warn : T.accent};border-radius:6px;padding:16px;box-shadow:0 0 0 4px ${isHub ? T.warnTintSoft : T.accentTintSoft}">
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
               <span style="width:6px;height:6px;background:${color};border-radius:50%"></span>
               <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint}">${PX.escapeXml(n.group || '')} / file</span>

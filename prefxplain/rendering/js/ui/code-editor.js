@@ -351,7 +351,7 @@ async function _saveFile(relPath, content) {
 function _confirmDialog({ message, onSave, onDiscard, onCancel }) {
   const T = PX.T;
   const overlay = document.createElement('div');
-  overlay.style.cssText = `position:fixed;inset:0;background:rgba(1,4,9,0.92);z-index:120;display:flex;align-items:center;justify-content:center;font-family:${T.ui};backdrop-filter:blur(4px)`;
+  overlay.style.cssText = `position:fixed;inset:0;background:${T.overlay};z-index:120;display:flex;align-items:center;justify-content:center;font-family:${T.ui};backdrop-filter:blur(4px)`;
   overlay.innerHTML = `
     <div role="dialog" aria-modal="true" style="background:${T.panel};border:1px solid ${T.border};border-radius:8px;width:min(440px,92vw);padding:20px 22px;box-shadow:0 24px 80px rgba(0,0,0,0.6)">
       <div style="font-size:14px;font-weight:600;color:${T.ink};margin-bottom:6px">Unsaved changes</div>
@@ -359,7 +359,7 @@ function _confirmDialog({ message, onSave, onDiscard, onCancel }) {
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button data-act="cancel" style="font-family:${T.ui};font-size:12px;padding:6px 12px;background:transparent;color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;cursor:pointer">Cancel</button>
         <button data-act="discard" style="font-family:${T.ui};font-size:12px;padding:6px 12px;background:transparent;color:${T.danger};border:1px solid ${T.danger};border-radius:4px;cursor:pointer">Discard</button>
-        <button data-act="save" style="font-family:${T.ui};font-size:12px;padding:6px 12px;background:${T.accent};color:#0d1117;border:1px solid ${T.accent};border-radius:4px;cursor:pointer;font-weight:600">Save</button>
+        <button data-act="save" style="font-family:${T.ui};font-size:12px;padding:6px 12px;background:${T.accent};color:#ffffff;border:1px solid ${T.accent};border-radius:4px;cursor:pointer;font-weight:600">Save</button>
       </div>
     </div>
   `;
@@ -389,7 +389,7 @@ PX.ui.codeEditor = async function codeEditor({ nodeId, graph, index }) {
   const lang = _detectLang(n.id);
 
   const overlay = document.createElement('div');
-  overlay.style.cssText = `position:fixed;inset:0;background:rgba(1,4,9,0.88);z-index:110;display:flex;align-items:stretch;justify-content:center;padding:3vh 3vw;font-family:${T.ui};backdrop-filter:blur(6px)`;
+  overlay.style.cssText = `position:fixed;inset:0;background:${T.overlay};z-index:110;display:flex;align-items:stretch;justify-content:center;padding:3vh 3vw;font-family:${T.ui};backdrop-filter:blur(6px)`;
 
   overlay.innerHTML = `
     <div id="px-editor-card" style="background:${T.panel};border:1px solid ${T.border};border-radius:8px;width:100%;max-width:1180px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,0.65)">
@@ -402,7 +402,7 @@ PX.ui.codeEditor = async function codeEditor({ nodeId, graph, index }) {
         <span data-status style="font-family:${T.mono};font-size:10px;color:${T.inkFaint}"></span>
         <span style="flex:1"></span>
         <span style="font-family:${T.mono};font-size:10px;color:${T.inkFaint}">\u2318/Ctrl+S to save \u00b7 Esc to close</span>
-        <button data-act="save" style="font-family:${T.ui};font-size:11.5px;font-weight:600;padding:5px 12px;background:${T.accent};color:#0d1117;border:1px solid ${T.accent};border-radius:4px;cursor:pointer">Save</button>
+        <button data-act="save" style="font-family:${T.ui};font-size:11.5px;font-weight:600;padding:5px 12px;background:${T.accent};color:#ffffff;border:1px solid ${T.accent};border-radius:4px;cursor:pointer">Save</button>
         <button data-act="close" title="Close" style="background:transparent;border:1px solid ${T.border};color:${T.inkMuted};font-family:${T.mono};font-size:13px;width:26px;height:26px;border-radius:3px;cursor:pointer">\u00d7</button>
       </div>
       <div class="px-editor-surface" style="position:relative;flex:1;min-height:0;overflow:hidden">
@@ -410,7 +410,7 @@ PX.ui.codeEditor = async function codeEditor({ nodeId, graph, index }) {
           <pre data-highlight style="margin:0;padding:14px 18px;font-family:inherit;font-size:inherit;line-height:inherit;white-space:pre;color:inherit;tab-size:4;-moz-tab-size:4;min-height:100%;box-sizing:border-box;will-change:transform"></pre>
         </div>
         <textarea data-editor class="px-editor-textarea" spellcheck="false" wrap="off"
-          style="position:absolute;inset:0;width:100%;height:100%;margin:0;padding:14px 18px;resize:none;border:none;outline:none;background:transparent;color:transparent;caret-color:var(--vscode-editor-foreground,#d4d4d4);font-family:inherit;font-size:inherit;line-height:inherit;white-space:pre;overflow:auto;tab-size:4;-moz-tab-size:4;-webkit-text-fill-color:transparent"></textarea>
+          style="position:absolute;inset:0;width:100%;height:100%;margin:0;padding:14px 18px;resize:none;border:none;outline:none;background:transparent;color:transparent;caret-color:var(--vscode-editor-foreground,#111111);font-family:inherit;font-size:inherit;line-height:inherit;white-space:pre;overflow:auto;tab-size:4;-moz-tab-size:4;-webkit-text-fill-color:transparent"></textarea>
       </div>
     </div>
   `;

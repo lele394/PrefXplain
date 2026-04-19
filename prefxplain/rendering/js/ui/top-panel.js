@@ -141,9 +141,9 @@ function _roleTag(role) {
   const T = PX.T;
   if (!role || role === 'undefined') return '';
   const map = {
-    entry_point: { label: 'entry', col: T.accent, bg: 'rgba(88,166,255,0.14)' },
+    entry_point: { label: 'entry', col: T.accent, bg: T.accentTint },
     utility:     { label: 'utility', col: T.inkMuted, bg: T.panelAlt },
-    test:        { label: 'test', col: '#bc8cff', bg: 'rgba(188,140,255,0.14)' },
+    test:        { label: 'test', col: T.testColor, bg: T.testTint },
   };
   const t = map[role] || map.utility;
   return `<span style="font-family:${T.mono};font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;padding:1px 6px;background:${t.bg};color:${t.col};border-radius:3px">${t.label}</span>`;

@@ -23,7 +23,7 @@ PX.ui.viewSwitcher = function viewSwitcher(container, {
   reload.type = 'button';
   reload.title = 'Reload preview';
   reload.textContent = '\u21bb';
-  reload.style.cssText = `display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;background:#ffffff;color:#0d1117;border:1px solid #ffffff;border-radius:4px;font-family:${T.mono};font-size:17px;font-weight:700;line-height:1;cursor:pointer;flex-shrink:0;box-shadow:0 0 0 1px rgba(255,255,255,0.15)`;
+  reload.style.cssText = `display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;background:${T.ink};color:${T.bg};border:1px solid ${T.ink};border-radius:4px;font-family:${T.mono};font-size:17px;font-weight:700;line-height:1;cursor:pointer;flex-shrink:0;box-shadow:0 1px 2px rgba(17,17,17,0.08)`;
   reload.addEventListener('click', () => {
     // Inside a VS Code webview, window.location.reload() leaves the panel
     // blank (the custom vscode-webview:// scheme doesn't reload cleanly).
@@ -35,9 +35,28 @@ PX.ui.viewSwitcher = function viewSwitcher(container, {
     }
     window.location.reload();
   });
-  reload.addEventListener('mouseenter', () => { reload.style.background = T.accent; reload.style.color = '#ffffff'; reload.style.borderColor = T.accent; });
-  reload.addEventListener('mouseleave', () => { reload.style.background = '#ffffff'; reload.style.color = '#0d1117'; reload.style.borderColor = '#ffffff'; });
+  reload.addEventListener('mouseenter', () => { reload.style.background = T.accent; reload.style.color = T.bg; reload.style.borderColor = T.accent; });
+  reload.addEventListener('mouseleave', () => { reload.style.background = T.ink; reload.style.color = T.bg; reload.style.borderColor = T.ink; });
   wrap.appendChild(reload);
+
+  // Theme toggle. Flips :root[data-theme] — every view re-resolves its
+  // var(--px-*) references through CSS cascading without re-rendering.
+  // The glyph updates reactively via the 'prefxplain:themechange' event.
+  const theme = document.createElement('button');
+  theme.type = 'button';
+  theme.setAttribute('aria-label', 'Toggle theme');
+  const paintTheme = () => {
+    const isDark = PX.getTheme && PX.getTheme() === 'dark';
+    theme.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+    theme.textContent = isDark ? '\u263C' : '\u263D';  // ☼ sun / ☽ moon
+  };
+  theme.style.cssText = `display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;padding:0;background:transparent;color:${T.inkMuted};border:1px solid ${T.border};border-radius:4px;font-family:${T.mono};font-size:14px;line-height:1;cursor:pointer;flex-shrink:0;transition:border-color 150ms ease,color 150ms ease`;
+  theme.addEventListener('mouseenter', () => { theme.style.borderColor = T.borderAlt; theme.style.color = T.ink; });
+  theme.addEventListener('mouseleave', () => { theme.style.borderColor = T.border; theme.style.color = T.inkMuted; });
+  theme.addEventListener('click', () => { if (PX.toggleTheme) PX.toggleTheme(); });
+  window.addEventListener('prefxplain:themechange', paintTheme);
+  paintTheme();
+  wrap.appendChild(theme);
 
   const lead = document.createElement('span');
   lead.textContent = 'View';

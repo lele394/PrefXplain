@@ -19,7 +19,7 @@ PX.ui.minimap = function minimap(container, { graph, groupsMeta }) {
   let _collapsed = false;
 
   const wrap = document.createElement('div');
-  wrap.style.cssText = `display:none;padding:8px 10px 10px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;box-shadow:0 4px 14px rgba(0,0,0,0.35);width:260px;user-select:none`;
+  wrap.style.cssText = `display:none;padding:8px 10px 10px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;box-shadow:${T.shadowMd};width:260px;user-select:none`;
 
   const header = document.createElement('div');
   header.style.cssText = `display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px`;
@@ -162,10 +162,10 @@ PX.ui.minimap = function minimap(container, { graph, groupsMeta }) {
       const isHighlight = g.id === _highlight && !isFocused;
       const fill = isFocused ? color : T.panelAlt;
       const fillOp = isFocused ? 0.92 : 1;
-      const strokeCol = isFocused ? '#ffffff' : (isHighlight ? color : T.border);
+      const strokeCol = isFocused ? T.bg : (isHighlight ? color : T.border);
       const strokeW = isFocused ? Math.max(3, 3 / displayScale) : (isHighlight ? Math.max(2.4, 2.6 / displayScale) : Math.max(1, 1.1 / displayScale));
       const groupOpacity = _focused && !isFocused && !isHighlight ? 0.55 : 1;
-      const nameCol = isFocused ? '#ffffff' : (isHighlight ? color : T.ink);
+      const nameCol = isFocused ? T.bg : (isHighlight ? color : T.ink);
       const nameWeight = isFocused || isHighlight ? 700 : 600;
 
       svg += `<g opacity="${groupOpacity}" style="transition:opacity 160ms">`;

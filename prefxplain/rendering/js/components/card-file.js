@@ -24,7 +24,7 @@ function _glyph(node, x, y, color, isSelFill) {
     return `<path d="M${x + 8} ${y + 10} L${x + 17} ${y + 15} L${x + 8} ${y + 20} Z" fill="${col}" opacity="${isSelFill ? 1 : 0.85}"/>`;
   }
   if (node.role === 'test') {
-    return `<path d="M${x + 7} ${y + 15} L${x + 11} ${y + 19} L${x + 18} ${y + 11}" fill="none" stroke="${isSelFill ? '#fff' : '#a371f7'}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    return `<path d="M${x + 7} ${y + 15} L${x + 11} ${y + 19} L${x + 18} ${y + 11}" fill="none" stroke="${isSelFill ? '#fff' : PX.T.testColor}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
   }
   // util default — 3 dots
   const d = isSelFill ? '#fff' : PX.T.inkFaint;
@@ -52,10 +52,10 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
   const isEntry = node.role === 'entry_point';
   const isTest = node.role === 'test';
   const fill = isSel ? T.accent
-    : state === 'blast' ? 'rgba(210,153,34,0.16)'
-    : state === 'depends' ? 'rgba(88,166,255,0.16)'
-    : state === 'imports' ? 'rgba(63,185,80,0.16)'
-    : state === 'match' ? 'rgba(63,185,80,0.14)'
+    : state === 'blast' ? T.warnTint
+    : state === 'depends' ? T.accentTint
+    : state === 'imports' ? T.goodTint
+    : state === 'match' ? T.goodTint
     : T.panelAlt;
   const stroke = isSel ? T.accent2
     : state === 'blast' ? T.warn
@@ -69,7 +69,7 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
   const subCol = isSel ? 'rgba(255,255,255,0.8)' : T.inkMuted;
   const sizeKB = Math.round((node.size || 0) / 1024);
   const dots = _sizeDots(sizeKB);
-  const accent = isHub ? T.warn : isEntry ? T.accent : isTest ? '#8957e5' : groupColor;
+  const accent = isHub ? T.warn : isEntry ? T.accent : isTest ? T.testColor : groupColor;
   const glyph = _glyph({ isHub, role: node.role }, x, y, accent, isSel);
   const barMaxW = 44;
   const inBarW = (inDeg / Math.max(1, maxDeg)) * barMaxW;
@@ -89,7 +89,7 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
     if (bridgeOut > 0) badge.push(`${bridgeOut}\u2192`);
     const badgeText = badge.join(' ');
     const badgeW = badgeText.length * 5.8 + 12;
-    out += `<rect x="${x + w - badgeW - 54}" y="${y + 7}" width="${badgeW}" height="14" fill="${isSel ? 'rgba(255,255,255,0.16)' : 'rgba(88,166,255,0.12)'}" stroke="${isSel ? 'rgba(255,255,255,0.18)' : T.accent}" stroke-width="0.8" rx="7"/>`;
+    out += `<rect x="${x + w - badgeW - 54}" y="${y + 7}" width="${badgeW}" height="14" fill="${isSel ? 'rgba(255,255,255,0.16)' : T.accentTint}" stroke="${isSel ? 'rgba(255,255,255,0.18)' : T.accent}" stroke-width="0.8" rx="7"/>`;
     out += `<text x="${x + w - 54 - badgeW / 2}" y="${y + 17}" font-family="${T.mono}" font-size="8.5" font-weight="700" fill="${isSel ? '#fff' : T.accent2}" text-anchor="middle">${badgeText}</text>`;
   }
   // size dots

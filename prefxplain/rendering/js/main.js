@@ -13,11 +13,11 @@
 
   const graph = window.__PREFXPLAIN_GRAPH__;
   if (!graph || !Array.isArray(graph.nodes)) {
-    root.innerHTML = '<div style="padding:24px;color:#f85149">No graph payload found.</div>';
+    root.innerHTML = '<div style="padding:24px;color:#b8321f">No graph payload found.</div>';
     return;
   }
   if (typeof ELK === 'undefined') {
-    root.innerHTML = '<div style="padding:24px;color:#f85149">ELK failed to load.</div>';
+    root.innerHTML = '<div style="padding:24px;color:#b8321f">ELK failed to load.</div>';
     return;
   }
 
@@ -74,7 +74,7 @@
   // Zoom is tracked per view so each keeps its own scale across toggles.
   const zoomState = { 'group-map': 1, nested: 1 };
   const zoomPanel = document.createElement('div');
-  zoomPanel.style.cssText = `display:flex;align-items:center;gap:4px;padding:4px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;font-family:${T.mono};color:${T.ink};box-shadow:0 4px 14px rgba(0,0,0,0.35);user-select:none;pointer-events:auto`;
+  zoomPanel.style.cssText = `display:flex;align-items:center;gap:4px;padding:4px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;font-family:${T.mono};color:${T.ink};box-shadow:${T.shadowMd};user-select:none;pointer-events:auto`;
   const btn = (label, title) => {
     const b = document.createElement('button');
     b.textContent = label;

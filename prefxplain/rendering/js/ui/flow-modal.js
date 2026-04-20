@@ -17,54 +17,13 @@ function _truncate(s, n) {
 
 // ---- dependency list panel -------------------------------------------------
 
-// One row per imported/importing file. Group-colored left stripe so the reader
-// can glance-match the file back to its architectural group in the main map.
-function _depRow(file, groupsMeta, T) {
-  const meta = groupsMeta[file.group] || {};
-  const color = PX.groupColor(file.group, meta);
-  return `<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:${T.bg};border:1px solid ${T.border};border-left:3px solid ${color};border-radius:3px">
-    <span style="font-family:${T.mono};font-size:10.5px;color:${T.ink};font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${PX.escapeXml(file.label)}</span>
-    <span style="font-family:${T.mono};font-size:8.5px;color:${T.inkFaint};text-transform:uppercase;letter-spacing:0.8px;white-space:nowrap">${PX.escapeXml(file.group || '')}</span>
-  </div>`;
-}
-
-// A single section (Uses / Used by). Collapses long lists behind a disclosure
-// so hubs with 40 importers don't push the flowchart off-screen.
-function _depSection(title, tone, items, emptyText, T, groupsMeta, sectionId) {
-  const head = `<div style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:${tone};margin-bottom:6px">${PX.escapeXml(title)}</div>`;
-  if (!items.length) {
-    return `<div>${head}<div style="padding:10px;background:${T.bg};border:1px dashed ${T.borderAlt};border-radius:4px;font-family:${T.mono};font-size:10.5px;color:${T.inkFaint};text-align:center">${PX.escapeXml(emptyText)}</div></div>`;
-  }
-  const VISIBLE = 8;
-  const first = items.slice(0, VISIBLE).map(f => _depRow(f, groupsMeta, T)).join('');
-  const rest = items.slice(VISIBLE).map(f => _depRow(f, groupsMeta, T)).join('');
-  const hasRest = items.length > VISIBLE;
-  const hiddenId = `px-dep-more-${sectionId}`;
-  const toggle = hasRest
-    ? `<button data-toggle="${hiddenId}" style="margin-top:4px;padding:6px 10px;background:${T.panelAlt};border:1px solid ${T.border};border-radius:4px;font-family:${T.mono};font-size:10px;color:${T.inkMuted};cursor:pointer;width:100%;text-align:center">+ ${items.length - VISIBLE} more</button>`
-    : '';
-  const hidden = hasRest
-    ? `<div id="${hiddenId}" style="display:none;flex-direction:column;gap:5px;margin-top:5px">${rest}</div>`
-    : '';
-  return `<div>${head}<div style="display:flex;flex-direction:column;gap:5px;max-height:360px;overflow:auto">${first}${hidden}${toggle}</div></div>`;
-}
-
-function _depsPanel(importers, deps, T, groupsMeta) {
-  const usesTitle = `Uses \u00b7 ${deps.length} ${deps.length === 1 ? 'dep' : 'deps'}`;
-  const byTitle = `Used by \u00b7 ${importers.length} ${importers.length === 1 ? 'caller' : 'callers'}`;
-  return `<div style="display:flex;flex-direction:column;gap:18px">
-    ${_depSection(usesTitle, T.accent, deps, 'no internal deps \u2014 leaf module', T, groupsMeta, 'uses')}
-    ${_depSection(byTitle, T.good, importers, 'nobody imports this \u2014 top of chain', T, groupsMeta, 'by')}
-  </div>`;
-}
-
-// ---- center panel: File Brief ---------------------------------------------
+// ---- File Brief blocks ----------------------------------------------------
 //
-// Instead of dumping a code preview (the Space key already shows real code),
-// the center renders a progressive-disclosure brief — Purpose → Role →
-// Consumes/Does/Produces → Invariants → Watch → (optional Flow). Each block
-// answers a distinct question a founder or onboarding dev would ask; skipping
-// empty blocks beats filling them with hallucinated content.
+// The modal stacks vertically: flowchart full-width at the top (when present),
+// then a single metadata row with Consumes | Does | Produces | Stats, then
+// Invariants and Watch. Each helper below renders one section; the modal
+// entry point composes them. Skipping empty blocks beats filling them with
+// hallucinated content.
 
 function _briefPurpose(node, T) {
   // Purpose = why this file exists, one line. Prefer the short `flow`
@@ -100,19 +59,6 @@ function _briefColumn(title, tone, items, emptyText, T) {
   return `<div>${head}<div style="display:flex;flex-direction:column;gap:6px">${rows}</div></div>`;
 }
 
-function _briefCDP(node, importers, deps, T) {
-  const consumes = deps.slice(0, 3).map(f => f.label);
-  if (deps.length > 3) consumes.push(`+${deps.length - 3} more`);
-  const does = (node.highlights || []).slice(0, 3);
-  const produces = importers.slice(0, 3).map(f => f.label);
-  if (importers.length > 3) produces.push(`+${importers.length - 3} more`);
-  return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px">
-    ${_briefColumn('Consumes', T.good, consumes, 'nothing \u2014 leaf module', T)}
-    ${_briefColumn('Does', T.accent, does, 'no behaviour recorded', T)}
-    ${_briefColumn('Produces', T.accent2 || T.accent, produces, 'nobody imports this', T)}
-  </div>`;
-}
-
 function _briefBulletList(title, tone, items, T) {
   if (!items || !items.length) return '';
   const rows = items.map(t =>
@@ -133,49 +79,52 @@ function _briefWatchFallback(importers, T) {
   return _briefBulletList('If you change this, watch\u2026', T.warn, items, T);
 }
 
-function _fileBrief(node, importers, deps, T) {
-  const hasFlow = _hasFlowchart(node);
+// Compact Stats column used in the metadata row — renders size, fan, tier
+// and optional cycle flag as plain label/value pairs so it visually matches
+// the Consumes/Does/Produces columns next to it.
+function _briefStatsColumn(node, inDeg, outDeg, nodeMetrics, allNodes, T) {
+  const kb = Math.round((node.size || 0) / 1024);
+  const lines = Math.max(1, Math.round((node.size || 0) / 40));
+  const tier = _centralityTier(node.id, nodeMetrics, allNodes);
+  const metrics = (nodeMetrics || {})[node.id] || {};
+  const rows = [
+    { label: 'Size', value: `${kb}k \u00b7 ~${lines} line${lines === 1 ? '' : 's'}` },
+    { label: 'Fan in',  value: String(inDeg) },
+    { label: 'Fan out', value: String(outDeg) },
+  ];
+  if (tier) rows.push({ label: 'Centrality', value: `${tier.label} \u00b7 top ${tier.pct}%` });
+  if (metrics.in_cycle) rows.push({ label: 'Cycle', value: 'In circular dep', warn: true });
 
-  const purpose = _briefPurpose(node, T);
-  const rolePattern = _briefRolePattern(node, T);
-  const cdp = _briefCDP(node, importers, deps, T);
-
-  const invariants = (node.invariants || []).slice(0, 3);
-  const invariantsBlock = invariants.length
-    ? _briefBulletList("Invariants \u2014 don't break", T.warn, invariants, T)
-    : '';
-
-  const watchList = (node.watch_if_changed || []).slice(0, 3);
-  const watchBlock = watchList.length
-    ? _briefBulletList('If you change this, watch\u2026', T.accent, watchList, T)
-    : _briefWatchFallback(importers, T);
-
-  if (hasFlow) {
-    // Flowchart is the main answer to "how does this file work?" — it
-    // opens front and centre. The File Brief items follow underneath as
-    // supporting context so the reader can pivot between "the shape" and
-    // "the facts" without scrolling back up.
-    const flowHeader = `<div style="font-family:${T.mono};font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:10px">Logic flow</div>`;
-    const blocksBelow = [purpose, rolePattern, cdp, invariantsBlock, watchBlock].filter(Boolean);
-    const below = blocksBelow.length
-      ? `<div style="margin-top:26px;padding-top:22px;border-top:1px solid ${T.border};display:flex;flex-direction:column;gap:22px">${blocksBelow.join('')}</div>`
-      : '';
-    return `<div style="display:flex;flex-direction:column">
-      <div>${flowHeader}${_renderFlowchart(node.flowchart, T)}</div>
-      ${below}
-    </div>`;
-  }
-
-  // No flowchart — the File Brief stands on its own.
-  const blocks = [purpose, rolePattern, cdp, invariantsBlock, watchBlock].filter(Boolean);
-  return `<div style="display:flex;flex-direction:column;gap:22px">${blocks.join('')}</div>`;
+  const head = `<div style="font-family:${T.mono};font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:8px">Stats</div>`;
+  const list = rows.map(r => `<div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-family:${T.ui};font-size:11.5px;line-height:1.4;color:${r.warn ? T.warn : T.ink2}">
+      <span style="color:${T.inkFaint};font-family:${T.mono};font-size:9.5px;letter-spacing:1.1px;text-transform:uppercase;flex-shrink:0">${PX.escapeXml(r.label)}</span>
+      <span style="font-weight:600;text-align:right">${PX.escapeXml(r.value)}</span>
+    </div>`).join('');
+  return `<div>${head}<div style="display:flex;flex-direction:column;gap:6px">${list}</div></div>`;
 }
 
-// ---- right panel: complexity -----------------------------------------------
+// CDP row with Stats as a 4th column — filenames for Consumes/Produces come
+// straight from the import graph, Does reuses the existing highlights, and
+// Stats compresses the quantitative signals that used to live in the side
+// complexity rail.
+function _briefMetaRow(node, importers, deps, inDeg, outDeg, nodeMetrics, allNodes, T) {
+  const MAX = 4;
+  const consumes = deps.slice(0, MAX).map(f => f.label);
+  if (deps.length > MAX) consumes.push(`+${deps.length - MAX} more`);
+  const does = (node.highlights || []).slice(0, 4);
+  const produces = importers.slice(0, MAX).map(f => f.label);
+  if (importers.length > MAX) produces.push(`+${importers.length - MAX} more`);
+  return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:24px;align-items:flex-start">
+    ${_briefColumn('Consumes', T.good, consumes, 'nothing \u2014 leaf module', T)}
+    ${_briefColumn('Does', T.accent, does, 'no behaviour recorded', T)}
+    ${_briefColumn('Produces', T.accent2 || T.accent, produces, 'nobody imports this', T)}
+    ${_briefStatsColumn(node, inDeg, outDeg, nodeMetrics, allNodes, T)}
+  </div>`;
+}
 
 // Rank a pagerank value against every other node's pagerank. Returns a tier
 // name so the UI shows "Core" / "Connected" / "Leaf" instead of raw 0.001-ish
-// float noise users can't interpret.
+// float noise users can't interpret. Used by `_briefStatsColumn`.
 function _centralityTier(nodeId, nodeMetrics, allNodes) {
   if (!nodeMetrics || !allNodes || !allNodes.length) return null;
   const my = (nodeMetrics[nodeId] || {}).pagerank;
@@ -188,68 +137,6 @@ function _centralityTier(nodeId, nodeMetrics, allNodes) {
   if (percentile <= 10) return { label: 'Core',      tone: 'warn',  pct: Math.round(percentile) };
   if (percentile <= 50) return { label: 'Connected', tone: 'accent', pct: Math.round(percentile) };
   return { label: 'Leaf', tone: 'muted', pct: Math.round(percentile) };
-}
-
-function _metricRow(label, value, T) {
-  return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:${T.bg};border:1px solid ${T.border};border-radius:4px">
-    <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint}">${PX.escapeXml(label)}</span>
-    <span style="font-family:${T.mono};font-size:11px;color:${T.ink};font-weight:600;text-align:right">${value}</span>
-  </div>`;
-}
-
-function _fanBars(inDeg, outDeg, T) {
-  const maxBar = 70;
-  const peak = Math.max(1, inDeg, outDeg);
-  const inW = (inDeg / peak) * maxBar;
-  const outW = (outDeg / peak) * maxBar;
-  const bar = (label, w, count, color) => `<div style="display:flex;align-items:center;gap:8px">
-    <span style="font-family:${T.mono};font-size:9px;letter-spacing:1px;color:${color};font-weight:600;min-width:24px">${label}</span>
-    <div style="flex:1;height:6px;background:${T.bg};border-radius:2px;overflow:hidden"><div style="width:${w}px;height:100%;background:${color};border-radius:2px"></div></div>
-    <span style="font-family:${T.mono};font-size:10.5px;color:${T.ink};font-weight:600;min-width:20px;text-align:right">${count}</span>
-  </div>`;
-  return `<div style="display:flex;flex-direction:column;gap:6px;padding:8px 10px;background:${T.bg};border:1px solid ${T.border};border-radius:4px">
-    <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint}">Fan in / out</span>
-    ${bar('IN', inW, inDeg, T.good)}
-    ${bar('OUT', outW, outDeg, T.accent)}
-  </div>`;
-}
-
-function _tierPill(tier, T) {
-  if (!tier) return '';
-  const color = tier.tone === 'warn' ? T.warn : tier.tone === 'accent' ? T.accent : T.inkFaint;
-  const bg = tier.tone === 'warn' ? T.warnTint : tier.tone === 'accent' ? T.accentTint : T.panelAlt;
-  return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:${T.bg};border:1px solid ${T.border};border-radius:4px">
-    <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint}">Centrality</span>
-    <span style="display:inline-flex;align-items:center;gap:6px">
-      <span style="font-family:${T.mono};font-size:10px;padding:2px 8px;background:${bg};color:${color};border:1px solid ${color};border-radius:3px;text-transform:uppercase;letter-spacing:1px;font-weight:600">${PX.escapeXml(tier.label)}</span>
-      <span style="font-family:${T.mono};font-size:10px;color:${T.inkMuted}">top ${tier.pct}%</span>
-    </span>
-  </div>`;
-}
-
-function _complexityPanel(node, inDeg, outDeg, nodeMetrics, allNodes, T) {
-  const kb = Math.round((node.size || 0) / 1024);
-  // node.preview is no longer shipped — estimate line count from file size.
-  const lines = Math.max(1, Math.round((node.size || 0) / 40));
-  const sizeRow = _metricRow('Size', `${kb}k \u00b7 ~${lines} line${lines === 1 ? '' : 's'}`, T);
-  const fanRow = _fanBars(inDeg, outDeg, T);
-  const metrics = (nodeMetrics || {})[node.id] || {};
-  const tier = _centralityTier(node.id, nodeMetrics, allNodes);
-  const tierRow = _tierPill(tier, T);
-  const cycleRow = metrics.in_cycle
-    ? `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:${T.warnTint};border:1px solid ${T.warn};border-radius:4px">
-        <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:${T.warn}">Cycle</span>
-        <span style="font-family:${T.mono};font-size:10.5px;color:${T.warn};font-weight:600">In circular dep</span>
-      </div>`
-    : '';
-  // Role and pattern live in the File Brief (center panel), not here — the
-  // complexity rail stays focused on quantitative signals.
-  return `<div style="display:flex;flex-direction:column;gap:8px">
-    ${sizeRow}
-    ${fanRow}
-    ${tierRow}
-    ${cycleRow}
-  </div>`;
 }
 
 // ---- AI-generated flowchart renderer ---------------------------------------
@@ -548,39 +435,51 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
     isTest ? `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 7px;background:${T.testTint || T.accentTint};color:${T.testColor || T.accent};border:1px solid ${T.testColor || T.accent};border-radius:3px;text-transform:uppercase;letter-spacing:1px">Test</span>` : '',
   ].filter(Boolean).join('');
 
-  const modeLabel = _hasFlowchart(n) ? 'Logic flow' : (n.preview ? 'Code preview' : 'File');
+  const hasFlow = _hasFlowchart(n);
+  const modeLabel = hasFlow ? 'Logic flow' : 'File';
 
-  const isNarrow = (typeof window !== 'undefined') && window.innerWidth < 1100;
-  const gridTemplate = isNarrow
-    ? 'grid-template-columns:1fr;grid-auto-rows:min-content;gap:18px'
-    : 'grid-template-columns:0.9fr 2.4fr 0.9fr;gap:20px';
+  // Layout: flowchart full-width at top, then a single horizontal row with
+  // Consumes | Does | Produces | Stats so the flowchart gets the maximum
+  // horizontal real estate ("on peut tout voir"). Description, role pills,
+  // invariants and watch stack full-width between the metadata row and the
+  // bottom of the modal.
+  const flowBlock = hasFlow
+    ? `<section>
+        <div style="font-family:${T.mono};font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:10px">Logic flow</div>
+        ${_renderFlowchart(n.flowchart, T)}
+      </section>`
+    : '';
 
-  // On narrow viewports stack in priority order: flowchart → deps → complexity.
-  // On wide viewports columns are ordered deps | flowchart | complexity.
-  const centerOrder = isNarrow ? 'order:1' : '';
-  const depsOrder = isNarrow ? 'order:2' : '';
-  const complexOrder = isNarrow ? 'order:3' : '';
+  const purpose = _briefPurpose(n, T);
+  const rolePattern = _briefRolePattern(n, T);
+  const metaRow = _briefMetaRow(n, importers, deps, inDeg, outDeg, nodeMetrics, allNodes, T);
 
-  const body = `
-    <div style="display:grid;${gridTemplate};align-items:flex-start">
-      <section style="${depsOrder}">
-        ${_depsPanel(importers, deps, T, groupsMeta)}
-      </section>
-      <section style="${centerOrder};min-width:0">
-        ${_fileBrief(n, importers, deps, T)}
-      </section>
-      <section style="${complexOrder}">
-        ${_complexityPanel(n, inDeg, outDeg, nodeMetrics, allNodes, T)}
-      </section>
-    </div>
-    ${desc ? `<div style="margin-top:22px;padding-top:18px;border-top:1px solid ${T.border};font-family:${T.ui};font-size:12.5px;color:${T.inkMuted};line-height:1.55;max-width:900px">${PX.escapeXml(desc)}</div>` : ''}
-  `;
+  const invariants = (n.invariants || []).slice(0, 3);
+  const invariantsBlock = invariants.length
+    ? _briefBulletList("Invariants \u2014 don't break", T.warn, invariants, T)
+    : '';
+
+  const watchList = (n.watch_if_changed || []).slice(0, 3);
+  const watchBlock = watchList.length
+    ? _briefBulletList('If you change this, watch\u2026', T.accent, watchList, T)
+    : _briefWatchFallback(importers, T);
+
+  const briefBlocks = [purpose, rolePattern, metaRow, invariantsBlock, watchBlock].filter(Boolean);
+  const briefSection = briefBlocks.length
+    ? `<section style="${hasFlow ? `margin-top:26px;padding-top:22px;border-top:1px solid ${T.border};` : ''}display:flex;flex-direction:column;gap:22px">${briefBlocks.join('')}</section>`
+    : '';
+
+  const descRow = desc
+    ? `<div style="margin-top:24px;padding-top:20px;border-top:1px solid ${T.border};font-family:${T.ui};font-size:13px;color:${T.inkMuted};line-height:1.6;max-width:1100px">${PX.escapeXml(desc)}</div>`
+    : '';
+
+  const body = `${flowBlock}${briefSection}${descRow}`;
 
   const overlay = document.createElement('div');
   overlay.style.cssText = `position:fixed;inset:0;background:${T.overlay};z-index:100;display:flex;align-items:center;justify-content:center;font-family:${T.ui};backdrop-filter:blur(6px)`;
 
   overlay.innerHTML = `
-    <div id="px-flow-card" style="background:${T.panel};border:1px solid ${T.border};border-radius:8px;width:min(1240px,96vw);max-height:92vh;overflow:auto;box-shadow:${T.shadowLg}">
+    <div id="px-flow-card" style="background:${T.panel};border:1px solid ${T.border};border-radius:8px;width:min(1440px,96vw);max-height:92vh;overflow:auto;box-shadow:${T.shadowLg}">
       <div style="padding:14px 20px;border-bottom:1px solid ${T.border};display:flex;align-items:center;gap:12px;background:${T.panelAlt}">
         <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint}">${PX.escapeXml(modeLabel)}</span>
         <span style="color:${T.borderAlt}">\u00b7</span>

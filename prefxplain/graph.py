@@ -59,6 +59,14 @@ class Node:
     flow: str = ""
     extends_at: str = ""
     pattern: str = ""
+    # File Brief fields — power the popup's "don't break / if you change
+    # this, watch…" blocks. Kept short and concrete so they read like
+    # sticky notes for a founder skim-reading the codebase.
+    # invariants: 2-3 short fragments naming non-obvious constraints.
+    # watch_if_changed: 2-3 short fragments naming concrete callers + the
+    #   first observable thing that would break if this file changed.
+    invariants: list[str] = field(default_factory=list)
+    watch_if_changed: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {
@@ -88,6 +96,10 @@ class Node:
             d["extends_at"] = self.extends_at
         if self.pattern:
             d["pattern"] = self.pattern
+        if self.invariants:
+            d["invariants"] = list(self.invariants)
+        if self.watch_if_changed:
+            d["watch_if_changed"] = list(self.watch_if_changed)
         return d
 
     @classmethod
@@ -109,6 +121,8 @@ class Node:
             flow=d.get("flow", ""),
             extends_at=d.get("extends_at", ""),
             pattern=d.get("pattern", ""),
+            invariants=list(d.get("invariants") or []),
+            watch_if_changed=list(d.get("watch_if_changed") or []),
         )
 
 

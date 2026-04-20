@@ -1064,6 +1064,14 @@ def _run(
                             value = getattr(prior, field_name, "")
                             if value:
                                 setattr(node, field_name, value)
+                        # File Brief fields — preserve just like semantic_role
+                        # so invariants and watch_if_changed survive re-runs.
+                        prior_invariants = list(getattr(prior, "invariants", []) or [])
+                        if prior_invariants:
+                            node.invariants = prior_invariants
+                        prior_watch = list(getattr(prior, "watch_if_changed", []) or [])
+                        if prior_watch:
+                            node.watch_if_changed = prior_watch
                         # Also restore per-symbol descriptions
                         old_sym = {s.name: s.description for s in prior.symbols if s.description}
                         for sym in node.symbols:

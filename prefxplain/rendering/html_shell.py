@@ -160,12 +160,23 @@ def _serialize_node(n: Any) -> dict[str, Any]:
         "language": getattr(n, "language", None) or "",
         "size": getattr(n, "size", 0) or 0,
         "highlights": list(getattr(n, "highlights", []) or []),
-        "preview": getattr(n, "preview", "") or "",
     }
     for field_name in ("semantic_role", "flow", "extends_at", "pattern"):
         value = getattr(n, field_name, "") or ""
         if value:
             payload[field_name] = value
+    invariants = list(getattr(n, "invariants", []) or [])
+    if invariants:
+        payload["invariants"] = invariants
+    watch = list(getattr(n, "watch_if_changed", []) or [])
+    if watch:
+        payload["watch_if_changed"] = watch
+    # `preview` used to ship here for the code-preview fallback. The popup
+    # now renders a File Brief instead — code lives behind the Space key, so
+    # we stop paying the payload cost of shipping 50-line previews per file.
+    flowchart = getattr(n, "flowchart", None)
+    if flowchart:
+        payload["flowchart"] = flowchart
     return payload
 
 

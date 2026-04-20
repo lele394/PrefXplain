@@ -178,6 +178,10 @@ if prev.exists():
                 if old_node.flowchart: node.flowchart = old_node.flowchart
                 if old_node.group: node.group = old_node.group
                 if old_node.highlights: node.highlights = list(old_node.highlights)
+                if getattr(old_node, 'invariants', None):
+                    node.invariants = list(old_node.invariants)
+                if getattr(old_node, 'watch_if_changed', None):
+                    node.watch_if_changed = list(old_node.watch_if_changed)
         # Preserve summary/health/groups/group_highlights if they exist
         if old.metadata.summary: graph.metadata.summary = old.metadata.summary
         if old.metadata.health_score: graph.metadata.health_score = old.metadata.health_score
@@ -393,12 +397,18 @@ the flowchart `label` / `description` fields below:
    - BAD: `["uses a SQLite database for caching descriptions across runs"]`
      (too long, one instead of three)
 
-4. **`flowchart`** (dict): A flowchart that shows the ACTUAL logic flow of
-   the file. This is the popup a user sees when they double-click a block,
-   alongside that file's dependencies and complexity signals — so it must
-   actually explain **what the file does and how it decides between
-   branches**. Generic `Start → Process → End` shapes fail this test
-   immediately.
+4. **`flowchart`** (dict, **conditional — omit entirely if no real branches**):
+   A flowchart that shows the ACTUAL branching logic of the file. The popup
+   hides the flowchart panel unless the file genuinely has decisions —
+   mapping a flat pipeline with `Start → Process → End` is pure noise
+   ("premium noise"), so **only produce a flowchart when the file has at
+   least one real conditional branch or state transition**.
+
+   Decision rule: if you can't find at least one `if`/`match`/state-switch
+   in the file whose condition names a concrete thing (env var, file type,
+   numeric threshold, flag, error type), **leave `flowchart` as `None`**.
+   The popup's File Brief already communicates Purpose / Consumes / Does /
+   Produces without a diagram.
 
    Structure: `{"nodes": [...], "edges": [...]}`
    - Each node: `{"id": "1", "label": "3-6 words", "type": "start|end|decision|step",
@@ -485,6 +495,53 @@ the flowchart `label` / `description` fields below:
    ]}
    ```
 
+5. **`invariants`** (list of **exactly 2-3 short fragments**, ≤12 words each):
+   Non-obvious rules a reader MUST keep true when editing this file. These
+   appear in the popup's File Brief as "don't break" bullets — the founder's
+   answer to *"what will bite me if I change this?"*.
+
+   **Self-test:** *"Could a mid-level developer who hasn't seen this file
+   before accidentally violate this invariant by making a plausible edit?"*
+   If no (the invariant is obvious or enforced by the type system), **do not
+   list it**. An empty list is better than filler.
+
+   Hard rules:
+   - Each fragment names one rule in plain active voice, no trailing period.
+   - Must reference a **concrete artifact** from the file — a specific
+     argument name, env var, format, type, or contract. No abstractions.
+   - Skip the field entirely (`[]`) for trivial files (tests, simple data
+     classes, single-responsibility utilities with no hidden contract).
+
+   Examples:
+   - GOOD for a path resolver: `["Absolute paths only — no relative paths leak out", "Cache key includes the $LEVEL env var", "Walks lazily, never materializes the full tree"]`
+   - GOOD for a migration script: `["Idempotent — re-running must not double-apply", "Must run before 002_user_schema"]`
+   - BAD: `["Uses good error handling", "Well-structured"]` (generic, no
+     artifact)
+   - BAD: `["Returns None on failure"]` (enforced by the signature; too
+     obvious)
+
+6. **`watch_if_changed`** (list of **exactly 2-3 short fragments**, ≤14 words
+   each): Concrete blast-radius hints. The popup renders these as
+   *"If you change this, watch…"* bullets — the founder's second-brain for
+   impact analysis.
+
+   Each fragment must name **a specific caller, a test, a UI surface, or an
+   observable behavior** that would break first if this file's contract
+   changed. This is not a reachability list (the graph already shows
+   importers) — it's human-readable "first things to look at".
+
+   Hard rules:
+   - Name real artifacts: file names, test names, UI components, CLI flags.
+   - Start with the thing to watch, not "check if" filler.
+   - 2-3 items. If the file has no downstream effects (pure util, tests,
+     orphan), use `[]`.
+
+   Examples:
+   - GOOD for a renderer: `["prefxplain.html layout", "VS Code preview extension's CSS contract", "README embedded screenshots"]`
+   - GOOD for an analyzer: `["tests/test_analyzer.py — import resolution cases", "CLI `prefxplain check` exit codes", "cache invalidation across re-runs"]`
+   - BAD: `["downstream code"]` (no artifact)
+   - BAD: `["anything that uses this function"]` (that's just the import graph)
+
 #### 4d. Patch the JSON after each batch
 
 After writing descriptions for a batch, run this script with the dict filled in:
@@ -496,33 +553,52 @@ from prefxplain.graph import Graph
 
 graph = Graph.load(Path("prefxplain.json"))
 
-# FILL THIS IN -- one entry per file in this batch
-# Format: "path/to/file.py": ("Short Title", "Full description.", [highlights], {flowchart_dict}),
+# FILL THIS IN — one entry per file in this batch.
+# Format: "path/to/file.py": {
+#     "short": "Short Title",
+#     "description": "Full description.",
+#     "highlights": ["...", "...", "..."],             # exactly 3
+#     "flowchart": {"nodes": [...], "edges": [...]},   # OR None if no real branches
+#     "invariants": ["...", "..."],                     # 2-3, or [] when trivial
+#     "watch": ["...", "..."],                          # 2-3, or [] when orphan
+# }
 files = {
-    # "src/auth.py": ("JWT Validator", "Validates JWT tokens; exposes verify(token).", ["PyJWT", "HS256", "15 min TTL"], {"nodes": [...], "edges": [...]}),
+    # "src/auth.py": {
+    #     "short": "JWT Validator",
+    #     "description": "Validates JWT tokens; exposes verify(token).",
+    #     "highlights": ["PyJWT HS256", "15 min TTL", "Reads JWT_SECRET env"],
+    #     "flowchart": {"nodes": [...], "edges": [...]},
+    #     "invariants": ["Tokens are verified before any DB lookup", "JWT_SECRET must be 256 bits"],
+    #     "watch": ["tests/test_auth.py", "middleware/session.py", "401 response format"],
+    # },
 }
 
 for node in graph.nodes:
-    if node.id in files:
-        entry = files[node.id]
-        node.short_title = entry[0]
-        node.description = entry[1]
-        if len(entry) > 2 and entry[2]:
-            node.highlights = list(entry[2])
-        if len(entry) > 3 and entry[3]:
-            node.flowchart = entry[3]
+    entry = files.get(node.id)
+    if not entry:
+        continue
+    node.short_title = entry["short"]
+    node.description = entry["description"]
+    node.highlights = list(entry.get("highlights") or [])
+    flowchart = entry.get("flowchart")
+    node.flowchart = flowchart if flowchart else None
+    node.invariants = list(entry.get("invariants") or [])
+    node.watch_if_changed = list(entry.get("watch") or [])
 
 graph.save(Path("prefxplain.json"))
 print(f"Patched {len(files)} files")
 PYEOF
 ```
 
-IMPORTANT: You MUST fill in the `files` dict with real values before running.
-Each value is a 4-tuple: `("Short Title", "Full description.", [highlights], {flowchart})`.
-The flowchart dict is required — it MUST reflect the actual logic of the file.
-Highlights MUST be a list of exactly 3 strings — see step 4c rule 3 for the
-self-test ("would a reader understand this block from title + 3 bullets?").
-Do NOT leave the placeholder comment. Run once per batch. Save after each batch.
+IMPORTANT:
+- Fill in the `files` dict with real values before running — remove the
+  placeholder comment.
+- Each entry MUST provide `short`, `description`, and 3 `highlights`.
+- `flowchart` is **conditional**: set it to `None` or omit it unless the
+  file has real decision branches (step 4c rule 4).
+- `invariants` and `watch` are 2-3 items each, or `[]` when genuinely
+  trivial or orphan. No filler — see step 4c rules 5 & 6 for the self-tests.
+- Run once per batch. Save after each batch.
 
 #### 4e. Completeness check
 

@@ -15,13 +15,6 @@ function _truncate(s, n) {
   return str.length > n ? str.slice(0, n - 1).trimEnd() + '\u2026' : str;
 }
 
-function _countLines(text) {
-  if (!text) return 0;
-  let n = 1;
-  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) n++;
-  return n;
-}
-
 // ---- dependency list panel -------------------------------------------------
 
 // One row per imported/importing file. Group-colored left stripe so the reader
@@ -65,23 +58,115 @@ function _depsPanel(importers, deps, T, groupsMeta) {
   </div>`;
 }
 
-// ---- center panel: flowchart or code preview -------------------------------
+// ---- center panel: File Brief ---------------------------------------------
+//
+// Instead of dumping a code preview (the Space key already shows real code),
+// the center renders a progressive-disclosure brief — Purpose → Role →
+// Consumes/Does/Produces → Invariants → Watch → (optional Flow). Each block
+// answers a distinct question a founder or onboarding dev would ask; skipping
+// empty blocks beats filling them with hallucinated content.
 
-function _centerPanel(node, T) {
-  if (_hasFlowchart(node)) {
-    return _renderFlowchart(node.flowchart, T);
+function _briefPurpose(node, T) {
+  // Purpose = why this file exists, one line. Prefer the short `flow`
+  // narrative, fall back to the first sentence of description.
+  const flow = (node.flow || '').trim();
+  const desc = (node.description || '').trim();
+  const source = flow && flow.length <= 160 ? flow : desc;
+  if (!source) return '';
+  const firstSentence = source.match(/^[^.!?]+[.!?]/);
+  const text = firstSentence ? firstSentence[0].trim() : source;
+  return `<div style="font-family:${T.ui};font-size:15px;line-height:1.5;color:${T.ink};font-weight:500;max-width:900px">${PX.escapeXml(text)}</div>`;
+}
+
+function _briefRolePattern(node, T) {
+  const role = node.semantic_role || '';
+  const pattern = node.pattern || '';
+  if (!role && !pattern) return '';
+  const pill = (text, color, bg) => `<span style="font-family:${T.mono};font-size:10px;padding:3px 10px;background:${bg};color:${color};border:1px solid ${color};border-radius:4px;text-transform:uppercase;letter-spacing:1.1px;font-weight:600">${PX.escapeXml(text)}</span>`;
+  const parts = [];
+  if (role)    parts.push(pill(role, T.accent2 || T.accent, T.accentTint));
+  if (pattern) parts.push(pill(pattern, T.good, T.goodTint));
+  return `<div style="display:flex;gap:8px;flex-wrap:wrap">${parts.join('')}</div>`;
+}
+
+function _briefColumn(title, tone, items, emptyText, T) {
+  const head = `<div style="font-family:${T.mono};font-size:9px;letter-spacing:1.4px;text-transform:uppercase;color:${tone};margin-bottom:8px">${PX.escapeXml(title)}</div>`;
+  if (!items.length) {
+    return `<div>${head}<div style="padding:8px 10px;background:${T.bg};border:1px dashed ${T.borderAlt};border-radius:4px;font-family:${T.mono};font-size:10px;color:${T.inkFaint}">${PX.escapeXml(emptyText)}</div></div>`;
   }
-  const preview = node.preview || '';
-  if (!preview.trim()) {
-    return `<div style="padding:24px;background:${T.bg};border:1px dashed ${T.borderAlt};border-radius:6px;font-family:${T.mono};font-size:11px;color:${T.inkFaint};text-align:center">no flowchart and no preview available for this file</div>`;
-  }
-  const lines = _countLines(preview);
-  const header = `<div style="display:flex;align-items:center;gap:8px;font-family:${T.mono};font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:8px">
-    <span>preview</span><span style="color:${T.borderAlt}">\u00b7</span>
-    <span>first ${lines} line${lines === 1 ? '' : 's'}</span>
+  const rows = items.map(text =>
+    `<div style="display:flex;align-items:flex-start;gap:8px;font-family:${T.ui};font-size:11.5px;line-height:1.4;color:${T.ink2}"><span style="color:${tone};margin-top:2px;flex-shrink:0">\u25b8</span><span style="flex:1;min-width:0;overflow-wrap:anywhere">${PX.escapeXml(text)}</span></div>`
+  ).join('');
+  return `<div>${head}<div style="display:flex;flex-direction:column;gap:6px">${rows}</div></div>`;
+}
+
+function _briefCDP(node, importers, deps, T) {
+  const consumes = deps.slice(0, 3).map(f => f.label);
+  if (deps.length > 3) consumes.push(`+${deps.length - 3} more`);
+  const does = (node.highlights || []).slice(0, 3);
+  const produces = importers.slice(0, 3).map(f => f.label);
+  if (importers.length > 3) produces.push(`+${importers.length - 3} more`);
+  return `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px">
+    ${_briefColumn('Consumes', T.good, consumes, 'nothing \u2014 leaf module', T)}
+    ${_briefColumn('Does', T.accent, does, 'no behaviour recorded', T)}
+    ${_briefColumn('Produces', T.accent2 || T.accent, produces, 'nobody imports this', T)}
   </div>`;
-  const code = `<pre style="margin:0;padding:14px 16px;background:${T.codeBg || T.bg};border:1px solid ${T.border};border-radius:6px;overflow:auto;max-height:70vh;font-family:${T.mono};font-size:11.5px;line-height:1.45;color:${T.ink2};white-space:pre">${PX.escapeXml(preview)}</pre>`;
-  return `<div>${header}${code}</div>`;
+}
+
+function _briefBulletList(title, tone, items, T) {
+  if (!items || !items.length) return '';
+  const rows = items.map(t =>
+    `<div style="display:flex;align-items:flex-start;gap:10px;font-family:${T.ui};font-size:12.5px;line-height:1.5;color:${T.ink}"><span style="color:${tone};font-family:${T.mono};margin-top:1px;flex-shrink:0">\u2192</span><span style="flex:1">${PX.escapeXml(t)}</span></div>`
+  ).join('');
+  return `<div style="display:flex;flex-direction:column;gap:8px">
+    <div style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:${tone}">${PX.escapeXml(title)}</div>
+    ${rows}
+  </div>`;
+}
+
+function _briefWatchFallback(importers, T) {
+  // If the describer didn't produce watch_if_changed, synthesize pointers
+  // from the top importers. An empty section would fail the founder's
+  // "what breaks if I touch this?" question, so we always show something.
+  if (!importers.length) return '';
+  const items = importers.slice(0, 3).map(f => `${f.label} \u2014 first place to check`);
+  return _briefBulletList('If you change this, watch\u2026', T.warn, items, T);
+}
+
+function _hasDecisionFlow(node) {
+  const fc = node && node.flowchart;
+  if (!fc || !Array.isArray(fc.nodes)) return false;
+  return fc.nodes.some(n => n && n.type === 'decision');
+}
+
+function _fileBrief(node, importers, deps, T) {
+  const purpose = _briefPurpose(node, T);
+  const rolePattern = _briefRolePattern(node, T);
+  const cdp = _briefCDP(node, importers, deps, T);
+
+  const invariants = (node.invariants || []).slice(0, 3);
+  const invariantsBlock = invariants.length
+    ? _briefBulletList("Invariants \u2014 don't break", T.warn, invariants, T)
+    : '';
+
+  const watchList = (node.watch_if_changed || []).slice(0, 3);
+  const watchBlock = watchList.length
+    ? _briefBulletList('If you change this, watch\u2026', T.accent, watchList, T)
+    : _briefWatchFallback(importers, T);
+
+  const hasDecisions = _hasDecisionFlow(node);
+  const decisionCount = hasDecisions
+    ? node.flowchart.nodes.filter(n => n.type === 'decision').length
+    : 0;
+  const flowBlock = hasDecisions
+    ? `<div>
+        <button data-flow-toggle style="padding:8px 14px;background:${T.panelAlt};border:1px solid ${T.border};border-radius:4px;font-family:${T.mono};font-size:10.5px;color:${T.inkMuted};cursor:pointer">Show logic flow (${decisionCount} decision${decisionCount === 1 ? '' : 's'}) \u25be</button>
+        <div data-flow-reveal style="display:none;margin-top:14px">${_renderFlowchart(node.flowchart, T)}</div>
+      </div>`
+    : '';
+
+  const blocks = [purpose, rolePattern, cdp, invariantsBlock, watchBlock, flowBlock].filter(Boolean);
+  return `<div style="display:flex;flex-direction:column;gap:22px">${blocks.join('')}</div>`;
 }
 
 // ---- right panel: complexity -----------------------------------------------
@@ -140,23 +225,10 @@ function _tierPill(tier, T) {
   </div>`;
 }
 
-function _rolePills(node, T) {
-  const role = node.semantic_role || '';
-  const pattern = node.pattern || '';
-  if (!role && !pattern) return '';
-  const pill = (text, color) => `<span style="font-family:${T.mono};font-size:9.5px;padding:2px 8px;background:${T.panelAlt};color:${color};border:1px solid ${color};border-radius:3px;text-transform:uppercase;letter-spacing:1px;font-weight:600">${PX.escapeXml(text)}</span>`;
-  const parts = [];
-  if (role)    parts.push(pill(role,    T.accent2 || T.accent));
-  if (pattern) parts.push(pill(pattern, T.good));
-  return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:${T.bg};border:1px solid ${T.border};border-radius:4px;gap:10px;flex-wrap:wrap">
-    <span style="font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:${T.inkFaint}">Role</span>
-    <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap">${parts.join('')}</span>
-  </div>`;
-}
-
 function _complexityPanel(node, inDeg, outDeg, nodeMetrics, allNodes, T) {
   const kb = Math.round((node.size || 0) / 1024);
-  const lines = _countLines(node.preview || '') || Math.max(1, Math.round((node.size || 0) / 40));
+  // node.preview is no longer shipped — estimate line count from file size.
+  const lines = Math.max(1, Math.round((node.size || 0) / 40));
   const sizeRow = _metricRow('Size', `${kb}k \u00b7 ~${lines} line${lines === 1 ? '' : 's'}`, T);
   const fanRow = _fanBars(inDeg, outDeg, T);
   const metrics = (nodeMetrics || {})[node.id] || {};
@@ -168,13 +240,13 @@ function _complexityPanel(node, inDeg, outDeg, nodeMetrics, allNodes, T) {
         <span style="font-family:${T.mono};font-size:10.5px;color:${T.warn};font-weight:600">In circular dep</span>
       </div>`
     : '';
-  const roleRow = _rolePills(node, T);
+  // Role and pattern live in the File Brief (center panel), not here — the
+  // complexity rail stays focused on quantitative signals.
   return `<div style="display:flex;flex-direction:column;gap:8px">
     ${sizeRow}
     ${fanRow}
     ${tierRow}
     ${cycleRow}
-    ${roleRow}
   </div>`;
 }
 
@@ -436,7 +508,7 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
         ${_depsPanel(importers, deps, T, groupsMeta)}
       </section>
       <section style="${centerOrder};min-width:0">
-        ${_centerPanel(n, T)}
+        ${_fileBrief(n, importers, deps, T)}
       </section>
       <section style="${complexOrder}">
         ${_complexityPanel(n, inDeg, outDeg, nodeMetrics, allNodes, T)}
@@ -477,6 +549,21 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
       const panel = overlay.querySelector('#' + CSS.escape(targetId));
       if (panel) panel.style.display = 'flex';
       toggleBtn.style.display = 'none';
+      return;
+    }
+    // "Show logic flow" disclosure inside the File Brief: only emitted
+    // when the flowchart actually contains a decision node, so the button
+    // is never shown for flat Start→Process→End shapes.
+    const flowBtn = e.target.closest('[data-flow-toggle]');
+    if (flowBtn) {
+      const reveal = flowBtn.parentElement.querySelector('[data-flow-reveal]');
+      if (reveal) {
+        const shown = reveal.style.display !== 'none';
+        reveal.style.display = shown ? 'none' : 'block';
+        flowBtn.textContent = shown
+          ? flowBtn.textContent.replace('\u25b4', '\u25be')
+          : flowBtn.textContent.replace('\u25be', '\u25b4');
+      }
     }
   });
 

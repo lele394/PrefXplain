@@ -22,7 +22,6 @@ _APP_MODULES = [
     "components/edge.js",
     "components/card-hero.js",
     "components/card-file.js",
-    "components/group-container.js",
     "components/group-detail-chrome.js",
     "views/group-map.js",
     "views/nested.js",

@@ -1,14 +1,17 @@
-// views/nested.js — Nested renderer.
+// views/nested.js — Focused group story renderer.
 //
-// Two paths:
-//   - Overview (no group focused): the classic multi-group nested overview
-//     with aggregate labelled edges. Unchanged from before.
-//   - Focused group: renders a structured "group story" — breadcrumb,
-//     summary, primary entry paths, dependency-position bands (Entry /
-//     Core / Leaf / Test), intra-group edges with top-N verb labels, and
-//     a "stress points" strip when hubs/cycles/dominant-bridges exist.
-//     Cards are hand-positioned in bands (deterministic across renders);
-//     ELK is used only to route edges between fixed positions.
+// Exports PX.views.focused(graph, opts). Used when a group is focused
+// (state.focusedGroup !== null). Renders a structured "group story":
+// breadcrumb, summary, primary entry paths, dependency-position bands
+// (Entry / Core / Leaf / Test), intra-group edges with top-N verb labels,
+// and a "stress points" strip when hubs/cycles/dominant-bridges exist.
+// Cards are hand-positioned in bands (deterministic across renders);
+// ELK is used only to route edges between fixed positions.
+//
+// The overview path (no group focused) is rendered by PX.views.groupMap.
+// There used to be a `PX.views.nested` router + `_nestedOverview` body
+// here; both are gone. Kept in git history if you need the previous
+// multi-group nested landscape.
 
 window.PX = window.PX || {};
 PX.views = PX.views || {};
@@ -30,7 +33,10 @@ function _translateEdge(edge, dx, dy) {
   return out;
 }
 
-PX.views.nested = async function renderNested(graph, opts = {}) {
+// Public entry point: render the focused group story. Requires a non-null
+// `focusedGroup` — main.js only calls this branch when state.focusedGroup
+// is set, so we don't route back to the overview here.
+PX.views.focused = async function renderFocusedView(graph, opts = {}) {
   const {
     showBullets = true,
     selected = null,
@@ -40,235 +46,13 @@ PX.views.nested = async function renderNested(graph, opts = {}) {
     hoveredGroup = null,
     hoveredFile = null,
   } = opts;
-  const idx = index || PX.buildGraphIndex(graph);
-  const focusGroupId = focusedGroup || (selected && idx.byId[selected]
-    ? ((idx.byId[selected].group || 'Ungrouped'))
-    : null);
-
-  if (!focusGroupId) {
-    return PX.views._nestedOverview(graph, idx, { showBullets, selected, filter, hoveredGroup });
+  if (!focusedGroup) {
+    throw new Error('PX.views.focused requires opts.focusedGroup');
   }
-  return PX.views._nestedFocused(graph, idx, focusGroupId, {
+  const idx = index || PX.buildGraphIndex(graph);
+  return PX.views._nestedFocused(graph, idx, focusedGroup, {
     showBullets, selected, filter, hoveredGroup, hoveredFile,
   });
-};
-
-// ── Overview (no group focused): full-canvas nested landscape ──────────
-PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
-  const { showBullets, selected, filter, hoveredGroup = null } = opts;
-  const groupsMeta = graph.metaGroups || {};
-  const overviewIr = PX.buildIr(graph, 'nested', {
-    showBullets,
-    index: idx,
-    compact: false,
-  });
-  overviewIr.layoutOptions = { 'elk.aspectRatio': '0.9' };
-
-  const laid = await PX.runLayout(overviewIr);
-  const nodesByIdRaw = PX._collectNodes(laid);
-  const edgeMetaById = Object.fromEntries((overviewIr.edges || []).map(e => [e.id, e]));
-  const rawPolylines = PX.extractEdgePolylines(laid).map(e => ({
-    ...e,
-    ...(edgeMetaById[e.id] || {}),
-  }));
-  // Rule: arrows never cross group blocks. Detour any middle segment that
-  // would clip an intermediate group card (source/target cards excluded —
-  // the arrow terminates at their ports).
-  const overviewCardBboxes = (laid.children || []).map(box => ({
-    id: box.id,
-    x1: box.x || 0, y1: box.y || 0,
-    x2: (box.x || 0) + (box.width || 0),
-    y2: (box.y || 0) + (box.height || 0),
-  }));
-  const polylines = rawPolylines.map(e => {
-    const srcId = PX.splitPortId(e.source).nodeId;
-    const tgtId = PX.splitPortId(e.target).nodeId;
-    const obstacles = overviewCardBboxes.filter(b => b.id !== srcId && b.id !== tgtId);
-    if (obstacles.length === 0) return e;
-    return {
-      ...e,
-      points: PX.detourAroundLabels(e.points || [], obstacles, 14, { preserveEndSegments: true }),
-    };
-  });
-  const labelled = PX.placeEdgeLabels(polylines, { centerOnPath: true }).map(e => {
-    if (!(e.count > 0 && e.sourceGroup && e.targetGroup)) {
-      return { ...e, __labelW: 0, __labelH: 0 };
-    }
-    const dims = PX._labelDims(e.sourceGroup, e.targetGroup, e.count);
-    return { ...e, __labelW: dims.width, __labelH: dims.height };
-  });
-  const segments = [];
-  for (const edge of labelled) {
-    const pts = edge.points || [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      segments.push({
-        x1: pts[i].x, y1: pts[i].y,
-        x2: pts[i + 1].x, y2: pts[i + 1].y,
-        edgeId: edge.id,
-      });
-    }
-  }
-  const cardRects = (laid.children || []).map(box => ({
-    x1: box.x || 0, y1: box.y || 0,
-    x2: (box.x || 0) + (box.width || 0),
-    y2: (box.y || 0) + (box.height || 0),
-  }));
-  const placed = PX.avoidLabelCollisions(labelled, {
-    labelW: (e) => e.__labelW || 180,
-    labelH: (e) => e.__labelH || 50,
-    gap: 18,
-    segments,
-    walkPath: true,
-    cardRects,
-  }).map(e => ({
-    ...e,
-    sourceGroup: PX.splitPortId(e.source).nodeId,
-    targetGroup: PX.splitPortId(e.target).nodeId,
-  }));
-  // Mirror group-map's final detour pass: route each edge around OTHER
-  // edges' label rects so foreign segments don't cross a visible label
-  // when the edge highlights. preserveEndSegments keeps port stubs clean.
-  const labelBboxes = placed
-    .filter(e => e.labelX != null && e.labelY != null && e.count > 0)
-    .map(e => ({
-      id: e.id,
-      x1: e.labelX - (e.__labelW || 0) / 2,
-      y1: e.labelY - (e.__labelH || 0) / 2,
-      x2: e.labelX + (e.__labelW || 0) / 2,
-      y2: e.labelY + (e.__labelH || 0) / 2,
-    }));
-  const edges = placed.map(e => {
-    const foreign = labelBboxes.filter(b => b.id !== e.id);
-    if (foreign.length === 0) return e;
-    return {
-      ...e,
-      points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }),
-    };
-  });
-
-  const topBoxes = (laid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
-  const layerOf = {};
-  const rowTol = 40;
-  let layer = topBoxes.length;
-  let prevY = -1e9;
-  for (const b of topBoxes) {
-    if ((b.y || 0) - prevY > rowTol) layer -= 1;
-    layerOf[b.id] = Math.max(0, layer);
-    prevY = b.y || 0;
-  }
-
-  const selectedGroup = hoveredGroup || (selected && idx ? (idx.byId[selected] || {}).group : null);
-  const groupEdgeState = (e) => {
-    if (!selectedGroup) return 'normal';
-    if (e.sourceGroup === selectedGroup) return 'depends';
-    if (e.targetGroup === selectedGroup) return 'imports';
-    return 'faded';
-  };
-  const groupBoxState = (name) => {
-    if (!selectedGroup) return 'normal';
-    if (name === selectedGroup) return 'selected';
-    const involved = edges.some(e => (e.sourceGroup === selectedGroup && e.targetGroup === name) || (e.targetGroup === selectedGroup && e.sourceGroup === name));
-    return involved ? 'normal' : 'faded';
-  };
-
-  const LEFT_PAD = 24;
-  const TOP_PAD = 28;
-  let minX = 0, minY = 0;
-  let maxX = laid.width || 640;
-  let maxY = laid.height || 520;
-  for (const box of (laid.children || [])) {
-    const bx = box.x || 0, by = box.y || 0;
-    const bw = box.width || 0, bh = box.height || 0;
-    if (bx < minX) minX = bx;
-    if (by < minY) minY = by;
-    if (bx + bw > maxX) maxX = bx + bw;
-    if (by + bh > maxY) maxY = by + bh;
-  }
-  for (const e of edges) {
-    for (const p of e.points || []) {
-      if (p.x < minX) minX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y > maxY) maxY = p.y;
-    }
-    if (e.labelX != null && e.labelY != null) {
-      const lw = e.__labelW || 0, lh = e.__labelH || 0;
-      if (e.labelX - lw / 2 < minX) minX = e.labelX - lw / 2;
-      if (e.labelY - lh / 2 < minY) minY = e.labelY - lh / 2;
-      if (e.labelX + lw / 2 > maxX) maxX = e.labelX + lw / 2;
-      if (e.labelY + lh / 2 > maxY) maxY = e.labelY + lh / 2;
-    }
-  }
-  const PAD = 20;
-  const dx = LEFT_PAD + PAD - minX;
-  const dy = TOP_PAD + PAD - minY;
-  const W = Math.ceil(maxX - minX + 2 * PAD + 2 * LEFT_PAD);
-  const H = Math.ceil(maxY - minY + 2 * PAD + 2 * TOP_PAD);
-  const nodesById = {};
-  for (const [id, node] of Object.entries(nodesByIdRaw)) {
-    nodesById[id] = { ...node, x: (node.x || 0) + dx, y: (node.y || 0) + dy };
-  }
-  const translated = edges.map(e => _translateEdge(e, dx, dy));
-
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}">`;
-  svg += PX.components.markers();
-
-  const mkLabel = (e) => (e.count > 0 && e.sourceGroup && e.targetGroup ? {
-    sourceName: e.sourceGroup,
-    sourceColor: PX.groupColor(e.sourceGroup, groupsMeta[e.sourceGroup] || {}),
-    targetName: e.targetGroup,
-    targetColor: PX.groupColor(e.targetGroup, groupsMeta[e.targetGroup] || {}),
-    count: e.count,
-  } : null);
-
-  for (const e of translated) {
-    const st = groupEdgeState(e);
-    svg += PX.components.edge(e, {
-      nodesById,
-      state: st,
-      thick: true,
-      pathOnly: true,
-    });
-  }
-  for (const box of (laid.children || [])) {
-    const meta = groupsMeta[box.id] || {};
-    const stats = ((idx.groupStats || {})[box.id]) || {};
-    const color = PX.groupColor(box.id, meta);
-    const st = groupBoxState(box.id);
-    svg += PX.components.groupContainer({
-      x: (box.x || 0) + dx,
-      y: (box.y || 0) + dy,
-      w: box.width,
-      h: box.height,
-      name: box.id,
-      color,
-      desc: meta.desc || meta.description || '',
-      fileCount: stats.fileCount || 0,
-      layer: layerOf[box.id] || 0,
-      bridgeIn: stats.externalIn || 0,
-      bridgeOut: stats.externalOut || 0,
-      strongestIn: stats.strongestIn || null,
-      strongestOut: stats.strongestOut || null,
-      gatewayFiles: (stats.bridgeFiles || []).slice(0, 3),
-      expanded: false,
-      selected: st === 'selected',
-      faded: st === 'faded',
-    });
-  }
-  for (const e of translated) {
-    const st = groupEdgeState(e);
-    const label = mkLabel(e);
-    if (!label) continue;
-    svg += PX.components.edge(e, {
-      nodesById,
-      state: st,
-      label,
-      thick: true,
-      labelOnly: true,
-    });
-  }
-  svg += `</svg>`;
-  return { svg, laid, nodesById, edges: translated, W, H };
 };
 
 // ── Focused group: ranked architectural narrative ──────────────────────

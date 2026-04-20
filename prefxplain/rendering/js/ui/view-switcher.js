@@ -1,20 +1,15 @@
-// ui/view-switcher.js — segmented control for Group Map / Nested.
-// Single source of truth for view state lives in main.js, which gets notified
-// via onChange.
+// ui/view-switcher.js — top chrome bar: reload, theme toggle, keyboard hints.
+//
+// This file used to host a Group Map / Nested segmented control, but the two
+// views were consolidated into a single graph whose mode (overview vs focused
+// group) is driven by state.focusedGroup in main.js. The name is kept for now
+// to avoid touching the bundler/HTML shell; only the contents changed.
 
 window.PX = window.PX || {};
 PX.ui = PX.ui || {};
 
-PX.ui.viewSwitcher = function viewSwitcher(container, {
-  value,
-  onChange,
-}) {
+PX.ui.viewSwitcher = function viewSwitcher(container) {
   const T = PX.T;
-  const views = [
-    { id: 'group-map', label: 'Group map' },
-    { id: 'nested',    label: 'Nested' },
-  ];
-  let current = value;
 
   const wrap = document.createElement('div');
   wrap.style.cssText = `display:flex;align-items:center;gap:12px;padding:6px 14px;background:${T.panel};border-bottom:1px solid ${T.border};font-family:${T.ui};font-size:11.5px;flex-shrink:0`;
@@ -58,41 +53,6 @@ PX.ui.viewSwitcher = function viewSwitcher(container, {
   paintTheme();
   wrap.appendChild(theme);
 
-  const lead = document.createElement('span');
-  lead.textContent = 'View';
-  lead.style.cssText = `color:${T.inkFaint};font-family:${T.mono};font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase`;
-  wrap.appendChild(lead);
-
-  const pill = document.createElement('div');
-  pill.style.cssText = `display:flex;gap:1px;padding:1px;background:${T.bg};border:1px solid ${T.border};border-radius:4px`;
-
-  const buttons = {};
-  const paint = () => {
-    for (const v of views) {
-      const b = buttons[v.id];
-      const active = current === v.id;
-      b.style.background = active ? T.accent : 'transparent';
-      b.style.color = active ? '#fff' : T.inkMuted;
-    }
-  };
-
-  for (const v of views) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = v.label;
-    b.style.cssText = `font-family:${T.mono};font-size:10.5px;padding:3px 9px;border:none;cursor:pointer;border-radius:3px`;
-    b.addEventListener('click', () => {
-      if (current === v.id) return;
-      current = v.id;
-      paint();
-      if (typeof onChange === 'function') onChange(current);
-    });
-    pill.appendChild(b);
-    buttons[v.id] = b;
-  }
-  wrap.appendChild(pill);
-  paint();
-
   // Spacer + keyboard hints
   const spacer = document.createElement('span'); spacer.style.flex = '1'; wrap.appendChild(spacer);
   const hint = document.createElement('span');
@@ -101,8 +61,4 @@ PX.ui.viewSwitcher = function viewSwitcher(container, {
   wrap.appendChild(hint);
 
   container.appendChild(wrap);
-  return {
-    setValue: (v) => { current = v; paint(); },
-    get value() { return current; },
-  };
 };

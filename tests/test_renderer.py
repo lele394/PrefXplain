@@ -339,8 +339,12 @@ class TestElkRenderer:
 
     def test_elk_nested_toolbar_stays_simple(self, simple_graph: Graph) -> None:
         html = render(simple_graph)
-        assert "Group map" in html
-        assert "Nested" in html
+        # Top chrome: reload button + keyboard hints only. The Group map /
+        # Nested pill was removed when the two views were consolidated into
+        # a single graph whose mode follows state.focusedGroup.
+        assert "Reload preview" in html
+        assert "Group map" not in html
+        assert ">Nested<" not in html
         assert "Focus: ${" not in html
         assert "onDetailChange" not in html
         assert "setDetailValue" not in html

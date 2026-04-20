@@ -1,11 +1,15 @@
 // main.js — entry point. Phase 6: full UI chrome wired.
 //   - Top info bar (selection-driven)
-//   - View switcher (Group map / Nested)
+//   - Chrome strip (reload + theme) — view switching is state-driven
 //   - Left sidebar explorer with filter
 //   - Main SVG canvas
 //   - Bottom legend
 //   - Flow modal on double-click
 //   - Keyboard: '/' focus filter, Escape deselect, dbl-click card -> flow
+//
+// One graph type: when `state.focusedGroup` is null we render the Group Map
+// overview (hero cards + aggregate arrows). When it's set we render the
+// focused group story (bands + intra-group edges). No explicit viewMode.
 
 (async function main() {
   const root = document.getElementById('root');
@@ -26,7 +30,6 @@
   const groupsMeta = graph.metaGroups || {};
 
   const state = {
-    viewMode: 'group-map',
     showBullets: true,
     selected: null,
     filter: '',
@@ -71,8 +74,10 @@
   const miniMap = PX.ui.minimap(minimapHost, { graph, groupsMeta });
 
   // Two buttons in the bottom-right: zoom in to 150% and reset to 100%.
-  // Zoom is tracked per view so each keeps its own scale across toggles.
-  const zoomState = { 'group-map': 1, nested: 1 };
+  // Zoom is tracked per mode (overview vs focused group) so each keeps its
+  // own scale across toggles. Mode is derived from state.focusedGroup.
+  const zoomKey = () => (state.focusedGroup ? 'focused' : 'overview');
+  const zoomState = { overview: 1, focused: 1 };
   const zoomPanel = document.createElement('div');
   zoomPanel.style.cssText = `display:flex;align-items:center;gap:4px;padding:4px;background:${T.panel};border:1px solid ${T.border};border-radius:8px;font-family:${T.mono};color:${T.ink};box-shadow:${T.shadowMd};user-select:none;pointer-events:auto`;
   const btn = (label, title) => {
@@ -90,11 +95,11 @@
   bottomRight.appendChild(zoomPanel);
 
   const applyZoom = () => {
-    const effective = zoomState[state.viewMode] ?? 1;
+    const effective = zoomState[zoomKey()] ?? 1;
     canvas.style.setProperty('--px-zoom', effective);
   };
   const setZoom = (next) => {
-    zoomState[state.viewMode] = next;
+    zoomState[zoomKey()] = next;
     applyZoom();
   };
   zIn.onclick = () => setZoom(1.5);
@@ -111,10 +116,7 @@
   root.appendChild(shell);
 
   const top = PX.ui.topPanel(topHost, { graph, index, groupsMeta });
-  const switcher = PX.ui.viewSwitcher(switchHost, {
-    value: state.viewMode,
-    onChange: async (v) => { state.viewMode = v; syncChrome(); await rerender(); },
-  });
+  PX.ui.viewSwitcher(switchHost);
   const side = PX.ui.sidebar(sideHost, { graph, groupsMeta, index });
   PX.ui.legend(legendHost);
 
@@ -124,10 +126,8 @@
     top.setFocusedGroup(state.focusedGroup);
     side.setSelected(state.selected);
     side.setFocusedGroup(state.focusedGroup);
-    switcher.setValue(state.viewMode);
-    // Minimap only relevant inside a focused group in nested mode.
-    const showMinimap = state.viewMode === 'nested' && state.focusedGroup;
-    miniMap.setFocused(showMinimap ? state.focusedGroup : null);
+    // Minimap only relevant inside a focused group.
+    miniMap.setFocused(state.focusedGroup || null);
   };
   const setSelected = async (id) => {
     state.selected = id;
@@ -144,7 +144,7 @@
     syncChrome();
     await rerender();
   };
-  const setFocusedGroup = async (groupId, { switchView = true } = {}) => {
+  const setFocusedGroup = async (groupId) => {
     state.focusedGroup = groupId;
     // Focused-group change invalidates any pinned anchor — the pin belonged
     // to the previous focus context.
@@ -156,20 +156,20 @@
       const selGroup = ((index.byId[state.selected] || {}).group || 'Ungrouped');
       if (selGroup !== groupId) state.selected = null;
     }
-    if (switchView && groupId) state.viewMode = 'nested';
     syncChrome();
     await rerender();
   };
   side.onSelect((id) => setSelected(id));
   side.onOpen((id) => openEditor(id));
-  side.onSelectGroup((groupId) => setFocusedGroup(groupId, { switchView: true }));
+  side.onSelectGroup((groupId) => setFocusedGroup(groupId));
   side.onFilter((v) => { state.filter = v; rerender(); });
   top.onDeselect(() => setSelected(null));
-  top.onClearFocus(() => setFocusedGroup(null, { switchView: false }));
+  top.onClearFocus(() => setFocusedGroup(null));
 
-  // Hero single-click: just highlight the group's links in Group map (toggle).
-  // Hero double-click: drill into Nested with that group focused. Debounce the
-  // single-click so dblclick preempts it without flicker.
+  // Hero single-click: toggle focus on that group's story. Hero double-click
+  // behaves the same way (kept for muscle memory from the previous "drill
+  // into nested" gesture). Debounce the single-click so dblclick preempts it
+  // without flicker.
   let heroClickTimer = null;
   // Ghost anchor single-click pins the group; double-click teleports to it.
   // Same debounce pattern as hero so the two pin-toggles fired by a dblclick
@@ -186,7 +186,6 @@
     const clusterHeader = e.target.closest('.cluster-header');
     const ghostAnchor = e.target.closest('.ghost-anchor');
     const hero = e.target.closest('.hero-card');
-    const group = e.target.closest('.group-container');
     const file = e.target.closest('.file-card');
     if (ghostAnchor) {
       const g = ghostAnchor.getAttribute('data-anchor-group');
@@ -225,13 +224,8 @@
       heroClickTimer = setTimeout(() => {
         heroClickTimer = null;
         const next = state.focusedGroup === groupId ? null : groupId;
-        setFocusedGroup(next, { switchView: false });
+        setFocusedGroup(next);
       }, 240);
-      return;
-    }
-    if (group) {
-      const groupId = group.getAttribute('data-group');
-      if (groupId) await setFocusedGroup(groupId, { switchView: false });
       return;
     }
     if (file) {
@@ -252,14 +246,14 @@
       return;
     }
     if (state.focusedGroup || state.selected) {
-      await setFocusedGroup(null, { switchView: false });
+      await setFocusedGroup(null);
     }
   });
   // Minimap hover tracking: illuminate the hovered block's group in the
   // bottom-right overview. Works off mouseover (bubbles) so we only install a
-  // single listener. Targets: file cards (group = file's group), group
-  // containers, ghost anchors (external group), and cluster headers (points
-  // at a file whose group is external).
+  // single listener. Targets: file cards (group = file's group), hero cards,
+  // ghost anchors (external group), and cluster headers (points at a file
+  // whose group is external). Only active inside a focused group.
   const hoverGroupFromTarget = (target) => {
     const ghost = target.closest('.ghost-anchor');
     if (ghost) return ghost.getAttribute('data-anchor-group');
@@ -275,17 +269,17 @@
       const node = id ? index.byId[id] : null;
       if (node) return node.group || 'Ungrouped';
     }
-    const group = target.closest('.group-container,.hero-card');
-    if (group) return group.getAttribute('data-group');
+    const hero = target.closest('.hero-card');
+    if (hero) return hero.getAttribute('data-group');
     return null;
   };
   canvas.addEventListener('mouseover', (e) => {
-    if (!(state.viewMode === 'nested' && state.focusedGroup)) return;
+    if (!state.focusedGroup) return;
     const g = hoverGroupFromTarget(e.target);
     if (g) miniMap.setHighlight(g);
   });
   canvas.addEventListener('mouseout', (e) => {
-    if (!(state.viewMode === 'nested' && state.focusedGroup)) return;
+    if (!state.focusedGroup) return;
     const to = e.relatedTarget;
     if (to && canvas.contains(to) && hoverGroupFromTarget(to)) return;
     miniMap.clearHighlight();
@@ -302,12 +296,12 @@
       // Double-click teleports to the external group. Undo the pin first so
       // the new focus starts clean (pin belonged to the previous context).
       const g = ghost.getAttribute('data-anchor-group');
-      if (g) setFocusedGroup(g, { switchView: false });
+      if (g) setFocusedGroup(g);
       return;
     }
     if (hero) {
       const groupId = hero.getAttribute('data-group');
-      if (groupId) setFocusedGroup(groupId, { switchView: true });
+      if (groupId) setFocusedGroup(groupId);
       return;
     }
     if (file) {
@@ -316,15 +310,14 @@
     }
   });
 
-  // Hover: highlight group connections in Overview/GroupMap AND highlight
-  // per-file arrows when hovering a file card in a focused nested view.
+  // Hover: highlight aggregate arrows in the overview AND per-file arrows
+  // when hovering a file card in a focused group story.
   let hoverTimer = null;
   canvas.addEventListener('mouseover', (e) => {
     const hero = e.target.closest('.hero-card');
-    const group = e.target.closest('.group-container');
     const ghost = e.target.closest('.ghost-anchor');
     const file = e.target.closest('.file-card');
-    const gid = (hero || group)?.getAttribute('data-group')
+    const gid = hero?.getAttribute('data-group')
       || ghost?.getAttribute('data-anchor-group')
       || null;
     const fid = file?.getAttribute('data-node') || null;
@@ -340,7 +333,7 @@
   canvas.addEventListener('mouseout', (e) => {
     if (e.relatedTarget && e.currentTarget.contains(e.relatedTarget)) {
       const rel = e.relatedTarget;
-      if (rel.closest('.hero-card,.group-container,.ghost-anchor,.file-card')) return;
+      if (rel.closest('.hero-card,.ghost-anchor,.file-card')) return;
     }
     if (hoverTimer) clearTimeout(hoverTimer);
     hoverTimer = setTimeout(() => {
@@ -385,7 +378,7 @@
       } else if (state.selected) {
         setSelected(null);
       } else if (state.focusedGroup) {
-        setFocusedGroup(null, { switchView: false });
+        setFocusedGroup(null);
       }
     }
   });
@@ -401,8 +394,8 @@
       // effective hoveredGroup passed to views. Transient hover wins while
       // the cursor is over a group target.
       const effectiveGroup = state.hoveredGroup || state.pinnedGroup;
-      const view = state.viewMode === 'nested'
-        ? await PX.views.nested(graph, {
+      const view = state.focusedGroup
+        ? await PX.views.focused(graph, {
           showBullets: state.showBullets,
           selected: state.selected,
           filter: state.filter,
@@ -414,11 +407,12 @@
         : await PX.views.groupMap(graph, {
           selected: state.selected,
           index,
-          focusedGroup: state.focusedGroup,
+          focusedGroup: null,
           hoveredGroup: effectiveGroup,
         });
+      const mode = state.focusedGroup ? 'focused' : 'overview';
       canvas.innerHTML = view.svg;
-      PX.log(`[prefxplain] rendered ${state.viewMode}: ${view.W}x${view.H}`);
+      PX.log(`[prefxplain] rendered ${mode}: ${view.W}x${view.H}`);
     } catch (err) {
       console.error('[prefxplain] render failed:', err);
       canvas.innerHTML = '';

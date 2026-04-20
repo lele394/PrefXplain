@@ -155,7 +155,7 @@ function _fileBrief(node, importers, deps, T) {
     // opens front and centre. The File Brief items follow underneath as
     // supporting context so the reader can pivot between "the shape" and
     // "the facts" without scrolling back up.
-    const flowHeader = `<div style="font-family:${T.mono};font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:10px">Logic flow \u00b7 hover a block for the tl;dr</div>`;
+    const flowHeader = `<div style="font-family:${T.mono};font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:10px">Logic flow</div>`;
     const blocksBelow = [purpose, rolePattern, cdp, invariantsBlock, watchBlock].filter(Boolean);
     const below = blocksBelow.length
       ? `<div style="margin-top:26px;padding-top:22px;border-top:1px solid ${T.border};display:flex;flex-direction:column;gap:22px">${blocksBelow.join('')}</div>`
@@ -313,8 +313,14 @@ function _renderFlowchartNode(node, p, T) {
   const cy = y + h / 2;
   const isDiamond = node.type === 'decision';
   const isPill = node.type === 'start' || node.type === 'end';
-  const descAttr = PX.escapeXml((node.description || '').trim());
-  const nodeAttrs = `class="fc-node" data-fc-desc="${descAttr}" data-fc-type="${PX.escapeXml(node.type || 'step')}"`;
+  // The hover tooltip surfaces `insight` — a single non-obvious detail the
+  // describer chose to add (failure mode, hidden contract, design rationale).
+  // Duplicating the inline description here was noise, so only nodes with a
+  // genuinely new insight get a tooltip; the cursor hint (set in CSS below)
+  // makes that discoverability without promising a tooltip for every block.
+  const insightAttr = PX.escapeXml((node.insight || '').trim());
+  const hasInsight = !!insightAttr;
+  const nodeAttrs = `class="fc-node${hasInsight ? ' fc-node--has-insight' : ''}" data-fc-insight="${insightAttr}" data-fc-type="${PX.escapeXml(node.type || 'step')}"${hasInsight ? ' style="cursor:help"' : ''}`;
 
   if (isDiamond) {
     // Diamond shape via polygon. Label is single-line SVG text inside, full
@@ -381,21 +387,17 @@ function _renderFlowchartEdge(edge, pos, T) {
 
   const line = `<path d="${path}" fill="none" stroke="${T.inkFaint}" stroke-width="1.4" marker-end="url(#fc-arrow)"/>`;
 
-  // Every edge carries a label. Explicit labels (from decision conditions
-  // or future LLM runs) stay as-is; empty labels get a subtle "then" so
-  // the arrow never looks orphaned. This matches the user's ask: no
-  // silently empty edges between steps.
+  // Labels are reserved for real transitions (decision conditions like
+  // "yes"/"no" or a named event like "on retry"). Non-decision edges
+  // between sequential steps are unlabelled on purpose — a generic "then"
+  // chip would just add noise to the diagram.
   const rawLabel = (edge.label || '').trim();
-  const isDefault = !rawLabel;
-  const labelText = rawLabel || 'then';
-  const labelColor = isDefault ? T.inkFaint : T.inkMuted;
-  const labelBg = isDefault ? T.bg : T.panel;
-  const labelBorder = isDefault ? T.borderAlt : T.border;
-  const chars = labelText.length;
-  const labelW = Math.max(chars * 5.8 + 14, 32);
+  if (!rawLabel) return line;
+
+  const labelW = Math.max(rawLabel.length * 5.8 + 14, 32);
   const labelH = 16;
-  const bg = `<rect x="${mx - labelW / 2}" y="${my - labelH / 2}" width="${labelW}" height="${labelH}" rx="3" ry="3" fill="${labelBg}" stroke="${labelBorder}" stroke-width="0.8"/>`;
-  const txt = `<text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="middle" font-family="${T.mono}" font-size="9.5" fill="${labelColor}"${isDefault ? ' font-style="italic"' : ''}>${PX.escapeXml(labelText)}</text>`;
+  const bg = `<rect x="${mx - labelW / 2}" y="${my - labelH / 2}" width="${labelW}" height="${labelH}" rx="3" ry="3" fill="${T.panel}" stroke="${T.border}" stroke-width="0.8"/>`;
+  const txt = `<text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="middle" font-family="${T.mono}" font-size="9.5" fill="${T.inkMuted}">${PX.escapeXml(rawLabel)}</text>`;
   return line + bg + txt;
 }
 
@@ -637,9 +639,13 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
   overlay.addEventListener('mouseover', (e) => {
     const fcNode = e.target.closest('.fc-node');
     if (!fcNode) return;
-    const desc = fcNode.getAttribute('data-fc-desc') || '';
-    if (!desc) { tooltip.style.display = 'none'; return; }
-    tooltip.textContent = desc;
+    // Only show the tooltip when the describer authored an insight. The
+    // inline description is already visible inside the block, so we never
+    // duplicate it here — empty insight = no tooltip, discoverability comes
+    // from the cursor turning into a help cursor on nodes that have one.
+    const insight = fcNode.getAttribute('data-fc-insight') || '';
+    if (!insight) { tooltip.style.display = 'none'; return; }
+    tooltip.textContent = insight;
     tooltip.style.display = 'block';
     // Read layout after display so getBoundingClientRect returns real size.
     positionTooltip(fcNode.getBoundingClientRect());

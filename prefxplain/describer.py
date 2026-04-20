@@ -748,6 +748,11 @@ def _validate_flowchart(fc: dict | None) -> dict | None:
         clean_node = {"id": nid, "label": label, "type": ntype, "shape": shape}
         if description:
             clean_node["description"] = description
+        # `insight` is the optional hover-tooltip field. Ship it through only
+        # when the describer wrote something; empty strings become absent.
+        insight = str(n.get("insight", "")).strip()
+        if insight:
+            clean_node["insight"] = insight
         clean_nodes.append(clean_node)
     clean_edges = []
     for e in edges:

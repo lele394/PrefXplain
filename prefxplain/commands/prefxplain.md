@@ -412,8 +412,31 @@ the flowchart `label` / `description` fields below:
 
    Structure: `{"nodes": [...], "edges": [...]}`
    - Each node: `{"id": "1", "label": "3-6 words", "type": "start|end|decision|step",
-     "description": "1 concrete sentence — hover tooltip"}`
-   - Each edge: `{"from": "1", "to": "2", "label": "condition or empty string"}`
+     "description": "1 concrete sentence shown inside the block",
+     "insight": "OPTIONAL — see rule below"}`
+   - Each edge: `{"from": "1", "to": "2", "label": "condition or '' if no real transition name"}`
+
+   **`insight` (optional, shown on hover).** A single non-obvious sentence
+   that adds information the inline `description` cannot. The popup shows
+   no tooltip unless this field has content — so *only write one when you
+   genuinely have something new to say*. Good insights fall into these
+   buckets:
+   - **Failure mode**: "If the cache file is corrupt, we fall back to
+     re-describing every file from scratch."
+   - **Hidden contract / assumption**: "Assumes `$LEVEL` is already
+     validated by the CLI — invalid values here become silent no-ops."
+   - **Design rationale**: "Preserves prior descriptions so a flaky LLM
+     call doesn't silently wipe good data."
+   - **Performance note**: "Runs per file in a hot loop — every added
+     regex doubles the cold-start time."
+
+   Do **not** write an `insight` that:
+   - Restates the description in different words.
+   - Says the block is "important" or "central".
+   - Documents what any reader can deduce from the label alone.
+
+   If nothing non-obvious to add, set `"insight": ""` or omit the field.
+   An empty insight is strictly better than filler.
 
    **Self-test before you save:** *"If I only saw the flowchart labels and
    descriptions — no code, no file header, nothing else — would I understand
@@ -435,11 +458,11 @@ the flowchart `label` / `description` fields below:
      `"files > 500 cap?"`, `"ANTHROPIC_API_KEY set?"`).
    - Decision nodes MUST have ≥2 outgoing edges with concrete condition
      labels (the real branching condition, not `"valid?"` / `"ok?"`).
-   - Every edge — including non-decision ones — SHOULD carry a short
-     label naming the transition (e.g. `"then"`, `"on success"`,
-     `"retry"`, `"cache miss"`). Empty labels render as a faint `then`
-     fallback so the arrow never looks orphaned; prefer a real one-word
-     hint when possible.
+   - Non-decision edges carry a label ONLY when the transition has a
+     real name worth showing (`"on success"`, `"retry"`, `"cache miss"`,
+     `"fallback"`). The generic "and then the next step runs" case uses
+     `"label": ""` — the popup renders no chip at all. A chip that just
+     says `then` is filler; omit it.
    - Labels describe what happens, not function names
      (GOOD: `"Parse import statements"`, BAD: `"_analyze_python()"`).
    - **description** is the most important field — it's what appears on

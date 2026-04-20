@@ -472,6 +472,51 @@ def mcp_cmd(
     serve(root, from_json)
 
 
+@app.command(name="upgrade")
+def upgrade_cmd() -> None:
+    """Upgrade prefxplain to the latest version from GitHub main.
+
+    Re-runs the official curl|bash installer, which wipes ``~/.prefxplain`` and
+    reclones a fresh copy from https://github.com/PrefOptimize/PrefXplain. This
+    is the canonical update path — PyPI is intentionally not used because it
+    lags GitHub main.
+    """
+    installer_url = (
+        "https://raw.githubusercontent.com/PrefOptimize/PrefXplain/main/install.sh"
+    )
+    if not shutil.which("curl"):
+        console.print("[red]curl not found on PATH. Install curl and retry.[/red]")
+        raise typer.Exit(1)
+    if not shutil.which("bash"):
+        console.print("[red]bash not found on PATH. Install bash and retry.[/red]")
+        raise typer.Exit(1)
+
+    console.print("[bold]Upgrading prefxplain…[/bold]")
+    console.print(f"[dim]Source: {installer_url}[/dim]")
+    console.print()
+
+    cmd = f"curl -fsSL {installer_url} | bash"
+    try:
+        result = subprocess.run(["bash", "-c", cmd], check=False)
+    except OSError as exc:
+        console.print(f"[red]Failed to launch installer: {exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if result.returncode != 0:
+        console.print(
+            f"[red]Installer exited with code {result.returncode}. "
+            "Check the output above for details.[/red]"
+        )
+        raise typer.Exit(result.returncode)
+
+    console.print()
+    console.print("[bold green]Upgrade complete.[/bold green]")
+    console.print(
+        "[dim]If `which prefxplain` still points elsewhere, remove any pip- or "
+        "conda-installed copy and ensure ~/.local/bin is ahead on PATH.[/dim]"
+    )
+
+
 @app.command(name="setup")
 def setup_cmd(
     tool: Optional[str] = typer.Argument(
@@ -492,7 +537,9 @@ def setup_cmd(
     """
     package_root = Path(__file__).parent
     cmd_source = package_root / "commands" / "prefxplain.md"
+    update_cmd_source = package_root / "commands" / "prefxplain-update.md"
     cmd_content: Optional[str] = None
+    update_cmd_content: Optional[str] = None
     copilot_plugin_dir = package_root / "copilot_plugin"
     copilot_plugin_manifest = copilot_plugin_dir / "plugin.json"
     # The Copilot plugin's SKILL.md is a plain Anthropic-style Agent Skill
@@ -507,6 +554,17 @@ def setup_cmd(
                 raise typer.Exit(1)
             cmd_content = cmd_source.read_text(encoding="utf-8")
         return cmd_content
+
+    def _load_update_cmd_content() -> Optional[str]:
+        """Lazy-load the /prefxplain-update slash command. Returns None if missing.
+
+        Absence is non-fatal — older installs may not ship this file yet, and we
+        don't want a missing update command to block the main setup.
+        """
+        nonlocal update_cmd_content
+        if update_cmd_content is None and update_cmd_source.exists():
+            update_cmd_content = update_cmd_source.read_text(encoding="utf-8")
+        return update_cmd_content
 
     # Detect available tools
     detected: list[str] = []
@@ -560,22 +618,35 @@ def setup_cmd(
     failed = False
     for t in targets:
         if t == "claude-code":
-            if project:
-                dest = Path.cwd() / ".claude" / "commands" / "prefxplain.md"
-            else:
-                dest = home / ".claude" / "commands" / "prefxplain.md"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(_load_cmd_content(), encoding="utf-8")
+            commands_dir = (
+                Path.cwd() / ".claude" / "commands"
+                if project
+                else home / ".claude" / "commands"
+            )
+            commands_dir.mkdir(parents=True, exist_ok=True)
             scope = "project" if project else "global"
+
+            dest = commands_dir / "prefxplain.md"
+            dest.write_text(_load_cmd_content(), encoding="utf-8")
             installed.append(f"Claude Code ({scope}): {dest}")
+
+            update_body = _load_update_cmd_content()
+            if update_body is not None:
+                update_dest = commands_dir / "prefxplain-update.md"
+                update_dest.write_text(update_body, encoding="utf-8")
+                installed.append(f"Claude Code ({scope}): {update_dest}")
 
         elif t == "cursor":
             # Cursor uses .cursor/rules/ for project-level instructions
-            if project:
-                dest = Path.cwd() / ".cursor" / "rules" / "prefxplain.mdc"
-            else:
-                dest = home / ".cursor" / "rules" / "prefxplain.mdc"
-            dest.parent.mkdir(parents=True, exist_ok=True)
+            rules_dir = (
+                Path.cwd() / ".cursor" / "rules"
+                if project
+                else home / ".cursor" / "rules"
+            )
+            rules_dir.mkdir(parents=True, exist_ok=True)
+            scope = "project" if project else "global"
+
+            dest = rules_dir / "prefxplain.mdc"
             # Cursor uses .mdc format — wrap the command as a rule
             cursor_content = (
                 "---\n"
@@ -586,8 +657,21 @@ def setup_cmd(
                 + _load_cmd_content()
             )
             dest.write_text(cursor_content, encoding="utf-8")
-            scope = "project" if project else "global"
             installed.append(f"Cursor ({scope}): {dest}")
+
+            update_body = _load_update_cmd_content()
+            if update_body is not None:
+                update_dest = rules_dir / "prefxplain-update.mdc"
+                cursor_update = (
+                    "---\n"
+                    "description: Upgrade prefxplain itself to the latest GitHub main\n"
+                    "globs: \n"
+                    "alwaysApply: false\n"
+                    "---\n\n"
+                    + update_body
+                )
+                update_dest.write_text(cursor_update, encoding="utf-8")
+                installed.append(f"Cursor ({scope}): {update_dest}")
 
         elif t == "codex":
             # Codex uses AGENTS.md for project instructions. There is no global
@@ -728,6 +812,9 @@ def setup_cmd(
             _print_codex_project_note()
             console.print()
         console.print("Now type [bold]/prefxplain[/bold] in your AI tool to generate a codebase map.")
+        console.print(
+            "Type [bold]/prefxplain-update[/bold] whenever you want to pull the latest renderer."
+        )
     else:
         console.print("[yellow]Nothing to install.[/yellow]")
         if failed:
@@ -1091,7 +1178,7 @@ def entry_point() -> None:
     `prefxplain create .`.
     """
     args = sys.argv[1:]
-    subcommands = {"create", "update", "check", "context", "mcp", "setup", "--help", "-h", "--version", "-v"}
+    subcommands = {"create", "update", "upgrade", "check", "context", "mcp", "setup", "--help", "-h", "--version", "-v"}
     if args and args[0] not in subcommands:
         sys.argv.insert(1, "create")
     app()

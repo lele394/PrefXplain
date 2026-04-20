@@ -22,18 +22,24 @@ descriptions are re-generated in the new voice.
 
 Run these checks at the very start of every invocation:
 
-**1. Check Python package:**
+**1. Check CLI availability:**
 
 ```bash
-python -c "import prefxplain; print('prefxplain', prefxplain.__version__)" 2>/dev/null
+command -v prefxplain >/dev/null && prefxplain --version 2>/dev/null
 ```
 
 If exit code != 0, tell the user:
 
-> prefxplain is not installed in `which python`. I can run `pip install prefxplain` to set it up. OK? [y/N]
+> prefxplain is not installed on this machine. I can install it with:
+> `curl -fsSL https://raw.githubusercontent.com/PrefOptimize/PrefXplain/main/install.sh | bash`
+> OK? [y/N]
 
-Wait for confirmation. If yes, run `pip install prefxplain`.
-If that also fails, stop and say what went wrong.
+Wait for confirmation. If yes, run the curl|bash one-liner above.
+Do NOT use `pip install prefxplain` — PyPI lags the GitHub main branch and
+ships an older renderer. The installer clones fresh from main and sets up the
+venv + shim + slash commands for you.
+
+If the installer fails, stop and say what went wrong.
 
 **2. Check IDE extension (for in-IDE preview):**
 
@@ -42,7 +48,14 @@ ship VS Code/Cursor but don't add the `code`/`cursor` CLI to PATH, so a pure-
 CLI check yields false negatives.
 
 ```bash
-PREFXPLAIN_ROOT="$(python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null)"
+# Resolve PREFXPLAIN_ROOT: prefer the curl|bash install at ~/.prefxplain,
+# fall back to the installed-package location if someone vendored it via
+# `pip install -e` from a checkout.
+if [ -d "$HOME/.prefxplain/prefxplain-vscode" ]; then
+  PREFXPLAIN_ROOT="$HOME/.prefxplain"
+else
+  PREFXPLAIN_ROOT="$(prefxplain --help >/dev/null 2>&1 && python3 -c "import prefxplain, pathlib; print(pathlib.Path(prefxplain.__file__).parent.parent)" 2>/dev/null || echo "")"
+fi
 EXT_INSTALLED="no"
 for ext_dir in "$HOME/.vscode/extensions" "$HOME/.cursor/extensions" "$HOME/.windsurf/extensions"; do
   if ls -d "$ext_dir"/prefxplain.prefxplain-vscode-* >/dev/null 2>&1; then

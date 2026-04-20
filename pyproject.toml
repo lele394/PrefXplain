@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "prefxplain"
-version = "0.3.0"
+version = "0.4.0"
 description = "Explain your codebase in 30 seconds. Interactive architecture diagrams with AI descriptions, health scoring, and blast radius analysis. Works with Claude Code, Codex, Copilot CLI, and Gemini CLI."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -64,6 +64,8 @@ prefxplain = [
     "commands/*.md",
     "copilot_plugin/plugin.json",
     "copilot_plugin/skills/*/SKILL.md",
+    "rendering/js/*.js",
+    "rendering/js/**/*.js",
     "vscode_extension/*.vsix",
 ]
 

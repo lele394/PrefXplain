@@ -1,3 +1,3 @@
 """PrefXplain — understand your codebase. Visual dependency maps + natural language descriptions."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

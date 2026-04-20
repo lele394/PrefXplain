@@ -133,13 +133,9 @@ function _briefWatchFallback(importers, T) {
   return _briefBulletList('If you change this, watch\u2026', T.warn, items, T);
 }
 
-function _hasDecisionFlow(node) {
-  const fc = node && node.flowchart;
-  if (!fc || !Array.isArray(fc.nodes)) return false;
-  return fc.nodes.some(n => n && n.type === 'decision');
-}
-
 function _fileBrief(node, importers, deps, T) {
+  const hasFlow = _hasFlowchart(node);
+
   const purpose = _briefPurpose(node, T);
   const rolePattern = _briefRolePattern(node, T);
   const cdp = _briefCDP(node, importers, deps, T);
@@ -154,18 +150,24 @@ function _fileBrief(node, importers, deps, T) {
     ? _briefBulletList('If you change this, watch\u2026', T.accent, watchList, T)
     : _briefWatchFallback(importers, T);
 
-  const hasDecisions = _hasDecisionFlow(node);
-  const decisionCount = hasDecisions
-    ? node.flowchart.nodes.filter(n => n.type === 'decision').length
-    : 0;
-  const flowBlock = hasDecisions
-    ? `<div>
-        <button data-flow-toggle style="padding:8px 14px;background:${T.panelAlt};border:1px solid ${T.border};border-radius:4px;font-family:${T.mono};font-size:10.5px;color:${T.inkMuted};cursor:pointer">Show logic flow (${decisionCount} decision${decisionCount === 1 ? '' : 's'}) \u25be</button>
-        <div data-flow-reveal style="display:none;margin-top:14px">${_renderFlowchart(node.flowchart, T)}</div>
-      </div>`
-    : '';
+  if (hasFlow) {
+    // Flowchart is the main answer to "how does this file work?" — it
+    // opens front and centre. The File Brief items follow underneath as
+    // supporting context so the reader can pivot between "the shape" and
+    // "the facts" without scrolling back up.
+    const flowHeader = `<div style="font-family:${T.mono};font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:${T.inkFaint};margin-bottom:10px">Logic flow \u00b7 hover a block for the tl;dr</div>`;
+    const blocksBelow = [purpose, rolePattern, cdp, invariantsBlock, watchBlock].filter(Boolean);
+    const below = blocksBelow.length
+      ? `<div style="margin-top:26px;padding-top:22px;border-top:1px solid ${T.border};display:flex;flex-direction:column;gap:22px">${blocksBelow.join('')}</div>`
+      : '';
+    return `<div style="display:flex;flex-direction:column">
+      <div>${flowHeader}${_renderFlowchart(node.flowchart, T)}</div>
+      ${below}
+    </div>`;
+  }
 
-  const blocks = [purpose, rolePattern, cdp, invariantsBlock, watchBlock, flowBlock].filter(Boolean);
+  // No flowchart — the File Brief stands on its own.
+  const blocks = [purpose, rolePattern, cdp, invariantsBlock, watchBlock].filter(Boolean);
   return `<div style="display:flex;flex-direction:column;gap:22px">${blocks.join('')}</div>`;
 }
 
@@ -275,39 +277,71 @@ function _flowchartTint(type, T) {
   }
 }
 
+// Estimate the height a node needs to fit its label + optional description
+// without truncation. Used before layout so rows honour the tallest node.
+// Overshoots by a few pixels to leave breathing room — the renderer uses
+// foreignObject so real wrapping happens in HTML.
+function _estimateNodeHeight(node, w, isDiamond) {
+  const innerW = w - 28; // horizontal padding
+  const label = (node.label || '').trim();
+  const desc = (node.description || '').trim();
+  // Rough char-width estimates for the fonts the renderer uses.
+  const charLabel = isDiamond ? 6.2 : 7.2; // mono @ 12.5px
+  const charDesc = 5.6;                     // ui @ 10.5px
+  const labelLineH = isDiamond ? 15 : 18;
+  const descLineH = 14;
+  const labelLines = Math.max(1, Math.ceil(label.length * charLabel / innerW));
+  const descLines = desc ? Math.max(1, Math.ceil(desc.length * charDesc / innerW)) : 0;
+  const paddingV = 24;
+  const gap = desc ? 6 : 0;
+  const contentH = labelLines * labelLineH + gap + descLines * descLineH;
+  // Diamonds need vertical headroom at top + bottom points — bump the floor.
+  const floor = isDiamond ? 90 : 70;
+  return Math.max(floor, contentH + paddingV);
+}
+
 // Render a single node: pill (start/end), diamond (decision), rounded rect
-// (everything else). Color encodes the type so we don't burn pixels on a
-// chip — label and optional description sit centered inside the shape.
+// (everything else). Non-diamonds use <foreignObject> so labels and
+// descriptions wrap naturally without truncation. Diamonds keep SVG text
+// because HTML content can't follow a diamond clip cleanly; their full
+// description lives in the hover tooltip instead.
 function _renderFlowchartNode(node, p, T) {
   const color = _flowchartColor(node.type, T);
   const fill = _flowchartTint(node.type, T);
-  const cx = p.x + p.w / 2;
-  const cy = p.y + p.h / 2;
+  const { x, y, w, h } = p;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
   const isDiamond = node.type === 'decision';
   const isPill = node.type === 'start' || node.type === 'end';
+  const descAttr = PX.escapeXml((node.description || '').trim());
+  const nodeAttrs = `class="fc-node" data-fc-desc="${descAttr}" data-fc-type="${PX.escapeXml(node.type || 'step')}"`;
 
-  const labelMax = isDiamond ? 22 : 28;
-  const label = _truncate(node.label, labelMax);
-  // Diamonds are visually busy — skip the description to keep them readable.
-  const desc = (!isDiamond && node.description) ? _truncate(node.description, 42) : '';
-
-  let shape;
-  if (isPill) {
-    shape = `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.h / 2}" ry="${p.h / 2}" fill="${fill}" stroke="${color}" stroke-width="1.6"/>`;
-  } else if (isDiamond) {
-    const pts = `${cx},${p.y} ${p.x + p.w},${cy} ${cx},${p.y + p.h} ${p.x},${cy}`;
-    shape = `<polygon points="${pts}" fill="${fill}" stroke="${color}" stroke-width="1.6"/>`;
-  } else {
-    shape = `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="6" ry="6" fill="${fill}" stroke="${color}" stroke-width="1.4"/>`;
+  if (isDiamond) {
+    // Diamond shape via polygon. Label is single-line SVG text inside, full
+    // description surfaces through the hover tooltip instead of cramming
+    // both into the already-busy diamond body.
+    const pts = `${cx},${y} ${x + w},${cy} ${cx},${y + h} ${x},${cy}`;
+    const shape = `<polygon points="${pts}" fill="${fill}" stroke="${color}" stroke-width="1.6"/>`;
+    const label = `<text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" font-family="${T.mono}" font-size="12" font-weight="600" fill="${T.ink}">${PX.escapeXml(node.label || '')}</text>`;
+    return `<g ${nodeAttrs}>${shape}${label}</g>`;
   }
 
-  const labelY = desc ? cy - 5 : cy;
-  const labelText = `<text x="${cx}" y="${labelY}" text-anchor="middle" dominant-baseline="middle" font-family="${T.mono}" font-size="11.5" font-weight="600" fill="${T.ink}">${PX.escapeXml(label)}</text>`;
-  const descText = desc
-    ? `<text x="${cx}" y="${cy + 11}" text-anchor="middle" dominant-baseline="middle" font-family="${T.ui}" font-size="10" fill="${T.inkMuted}">${PX.escapeXml(desc)}</text>`
-    : '';
-
-  return shape + labelText + descText;
+  const radius = isPill ? h / 2 : 6;
+  const rect = `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${radius}" ry="${radius}" fill="${fill}" stroke="${color}" stroke-width="${isPill ? 1.6 : 1.4}"/>`;
+  const label = PX.escapeXml(node.label || '');
+  const desc = PX.escapeXml((node.description || '').trim());
+  // foreignObject lets HTML flexbox + word-wrap handle multi-line content.
+  // xmlns on the inner div is required for Safari and for browsers that
+  // serialise the SVG back to HTML via innerHTML.
+  const content = `
+    <foreignObject x="${x}" y="${y}" width="${w}" height="${h}">
+      <div xmlns="http://www.w3.org/1999/xhtml" style="width:${w}px;height:${h}px;box-sizing:border-box;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;gap:4px;pointer-events:none">
+        <div style="font-family:${T.mono};font-size:12.5px;font-weight:600;color:${T.ink};line-height:1.3;word-break:break-word">${label}</div>
+        ${desc ? `<div style="font-family:${T.ui};font-size:10.5px;color:${T.inkMuted};line-height:1.35;word-break:break-word">${desc}</div>` : ''}
+      </div>
+    </foreignObject>
+  `;
+  return `<g ${nodeAttrs}>${rect}${content}</g>`;
 }
 
 // Route an edge between two laid-out nodes. Down-flowing edges (the common
@@ -346,15 +380,22 @@ function _renderFlowchartEdge(edge, pos, T) {
   }
 
   const line = `<path d="${path}" fill="none" stroke="${T.inkFaint}" stroke-width="1.4" marker-end="url(#fc-arrow)"/>`;
-  if (!edge.label) return line;
 
-  // Conditional labels (e.g. "yes" / "no" off a decision) get a paneled
-  // background chip so they stay legible when crossing other lines.
-  const labelText = _truncate(edge.label, 18);
-  const labelW = Math.max(labelText.length * 5.6 + 14, 28);
+  // Every edge carries a label. Explicit labels (from decision conditions
+  // or future LLM runs) stay as-is; empty labels get a subtle "then" so
+  // the arrow never looks orphaned. This matches the user's ask: no
+  // silently empty edges between steps.
+  const rawLabel = (edge.label || '').trim();
+  const isDefault = !rawLabel;
+  const labelText = rawLabel || 'then';
+  const labelColor = isDefault ? T.inkFaint : T.inkMuted;
+  const labelBg = isDefault ? T.bg : T.panel;
+  const labelBorder = isDefault ? T.borderAlt : T.border;
+  const chars = labelText.length;
+  const labelW = Math.max(chars * 5.8 + 14, 32);
   const labelH = 16;
-  const bg = `<rect x="${mx - labelW / 2}" y="${my - labelH / 2}" width="${labelW}" height="${labelH}" rx="3" ry="3" fill="${T.panel}" stroke="${T.borderAlt}" stroke-width="0.8"/>`;
-  const txt = `<text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="middle" font-family="${T.mono}" font-size="9.5" fill="${T.inkMuted}">${PX.escapeXml(labelText)}</text>`;
+  const bg = `<rect x="${mx - labelW / 2}" y="${my - labelH / 2}" width="${labelW}" height="${labelH}" rx="3" ry="3" fill="${labelBg}" stroke="${labelBorder}" stroke-width="0.8"/>`;
+  const txt = `<text x="${mx}" y="${my}" text-anchor="middle" dominant-baseline="middle" font-family="${T.mono}" font-size="9.5" fill="${labelColor}"${isDefault ? ' font-style="italic"' : ''}>${PX.escapeXml(labelText)}</text>`;
   return line + bg + txt;
 }
 
@@ -413,32 +454,48 @@ function _renderFlowchart(fc, T) {
   }
   const ranks = Object.keys(byRank).map(Number).sort((a, b) => a - b);
 
-  const NODE_W = 200;
-  const NODE_H = 60;
-  const COL_GAP = 36;
-  const ROW_PITCH = 110;
-  const PAD = 36;
+  const NODE_W = 240;
+  const DIAMOND_W = 200;
+  const COL_GAP = 40;
+  const ROW_GAP = 48;
+  const PAD = 40;
 
   let maxCols = 0;
   for (const r of ranks) maxCols = Math.max(maxCols, byRank[r].length);
   const innerW = maxCols * NODE_W + (maxCols - 1) * COL_GAP;
   const totalW = PAD * 2 + innerW;
-  const totalH = PAD * 2 + (ranks.length - 1) * ROW_PITCH + NODE_H;
 
+  // Per-row height = tallest node in that row, measured from content so
+  // labels and descriptions never truncate. Each row is laid out sequen-
+  // tially with a fixed ROW_GAP on top of the prior row's height.
   const pos = {};
+  let cursorY = PAD;
+  let totalH = PAD;
   for (let ri = 0; ri < ranks.length; ri++) {
     const row = byRank[ranks[ri]];
+    let rowH = 0;
+    for (const node of row) {
+      const isDiamond = node.type === 'decision';
+      const w = isDiamond ? DIAMOND_W : NODE_W;
+      const h = _estimateNodeHeight(node, w, isDiamond);
+      if (h > rowH) rowH = h;
+    }
     const rowW = row.length * NODE_W + (row.length - 1) * COL_GAP;
     const startX = PAD + (innerW - rowW) / 2;
-    const y = PAD + ri * ROW_PITCH;
     row.forEach((node, i) => {
-      pos[node.id] = {
-        x: startX + i * (NODE_W + COL_GAP),
-        y,
-        w: NODE_W,
-        h: NODE_H,
-      };
+      const isDiamond = node.type === 'decision';
+      const w = isDiamond ? DIAMOND_W : NODE_W;
+      const h = _estimateNodeHeight(node, w, isDiamond);
+      // Center shorter nodes vertically within the row so the edges land
+      // on aligned midlines.
+      const vOffset = (rowH - h) / 2;
+      const nodeX = isDiamond
+        ? startX + i * (NODE_W + COL_GAP) + (NODE_W - DIAMOND_W) / 2
+        : startX + i * (NODE_W + COL_GAP);
+      pos[node.id] = { x: nodeX, y: cursorY + vOffset, w, h };
     });
+    cursorY += rowH + (ri < ranks.length - 1 ? ROW_GAP : 0);
+    totalH = cursorY + PAD;
   }
 
   // Edges first so node fills cover the line endpoints cleanly.
@@ -538,7 +595,11 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
     </div>
   `;
 
-  const close = () => { overlay.remove(); if (typeof onClose === 'function') onClose(); };
+  const close = () => {
+    tooltip.remove();
+    overlay.remove();
+    if (typeof onClose === 'function') onClose();
+  };
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay) { close(); return; }
     if (e.target.closest('[data-close]')) { close(); return; }
@@ -549,22 +610,46 @@ PX.ui.flowModal = function flowModal({ nodeId, graph, index, groupsMeta, onClose
       const panel = overlay.querySelector('#' + CSS.escape(targetId));
       if (panel) panel.style.display = 'flex';
       toggleBtn.style.display = 'none';
-      return;
     }
-    // "Show logic flow" disclosure inside the File Brief: only emitted
-    // when the flowchart actually contains a decision node, so the button
-    // is never shown for flat Start→Process→End shapes.
-    const flowBtn = e.target.closest('[data-flow-toggle]');
-    if (flowBtn) {
-      const reveal = flowBtn.parentElement.querySelector('[data-flow-reveal]');
-      if (reveal) {
-        const shown = reveal.style.display !== 'none';
-        reveal.style.display = shown ? 'none' : 'block';
-        flowBtn.textContent = shown
-          ? flowBtn.textContent.replace('\u25b4', '\u25be')
-          : flowBtn.textContent.replace('\u25be', '\u25b4');
-      }
-    }
+  });
+
+  // Hover tooltip for flowchart nodes — surfaces the full `description`
+  // (tl;dr of what the step does) without cluttering the node itself.
+  // A single floating div moves between nodes as the mouse traverses them.
+  const tooltip = document.createElement('div');
+  tooltip.style.cssText = `position:fixed;z-index:101;max-width:340px;padding:10px 12px;background:${T.panel};border:1px solid ${T.border};border-radius:6px;box-shadow:${T.shadowMd};font-family:${T.ui};font-size:12.5px;line-height:1.45;color:${T.ink};pointer-events:none;display:none`;
+  document.body.appendChild(tooltip);
+
+  const positionTooltip = (targetRect) => {
+    const pad = 10;
+    const tt = tooltip.getBoundingClientRect();
+    // Prefer above the node; flip below if it would clip the top.
+    let top = targetRect.top - tt.height - pad;
+    if (top < 8) top = targetRect.bottom + pad;
+    let left = targetRect.left + targetRect.width / 2 - tt.width / 2;
+    const vw = window.innerWidth;
+    if (left + tt.width > vw - 8) left = vw - tt.width - 8;
+    if (left < 8) left = 8;
+    tooltip.style.top = top + 'px';
+    tooltip.style.left = left + 'px';
+  };
+
+  overlay.addEventListener('mouseover', (e) => {
+    const fcNode = e.target.closest('.fc-node');
+    if (!fcNode) return;
+    const desc = fcNode.getAttribute('data-fc-desc') || '';
+    if (!desc) { tooltip.style.display = 'none'; return; }
+    tooltip.textContent = desc;
+    tooltip.style.display = 'block';
+    // Read layout after display so getBoundingClientRect returns real size.
+    positionTooltip(fcNode.getBoundingClientRect());
+  });
+  overlay.addEventListener('mouseout', (e) => {
+    const fcNode = e.target.closest('.fc-node');
+    if (!fcNode) return;
+    const rel = e.relatedTarget;
+    if (rel && rel.closest && rel.closest('.fc-node') === fcNode) return;
+    tooltip.style.display = 'none';
   });
 
   document.body.appendChild(overlay);

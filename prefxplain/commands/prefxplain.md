@@ -433,10 +433,13 @@ the flowchart `label` / `description` fields below:
      `"found?"` in isolation — spell out the actual branching condition
      (`"path ends in .py?"`, `"$LEVEL unchanged from prior run?"`,
      `"files > 500 cap?"`, `"ANTHROPIC_API_KEY set?"`).
-   - Decision nodes MUST have ≥2 outgoing edges with condition labels.
-     Only decision-source edges carry labels — non-decision edges should
-     have `"label": ""` so the flow stays readable. The renderer hides
-     empty labels automatically.
+   - Decision nodes MUST have ≥2 outgoing edges with concrete condition
+     labels (the real branching condition, not `"valid?"` / `"ok?"`).
+   - Every edge — including non-decision ones — SHOULD carry a short
+     label naming the transition (e.g. `"then"`, `"on success"`,
+     `"retry"`, `"cache miss"`). Empty labels render as a faint `then`
+     fallback so the arrow never looks orphaned; prefer a real one-word
+     hint when possible.
    - Labels describe what happens, not function names
      (GOOD: `"Parse import statements"`, BAD: `"_analyze_python()"`).
    - **description** is the most important field — it's what appears on

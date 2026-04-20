@@ -175,6 +175,12 @@
   // Same debounce pattern as hero so the two pin-toggles fired by a dblclick
   // don't fight the teleport. The timer is cleared by the dblclick handler.
   let anchorClickTimer = null;
+  // File card single-click selects; double-click opens the flow modal. A bare
+  // click triggers rerender(), which rebuilds the DOM so the second click's
+  // target is a fresh element — and dblclick then fails to match .file-card
+  // via elementFromPoint. Debounce the selection the same way hero does so
+  // the dblclick handler can cancel it before the rerender wipes the card.
+  let fileClickTimer = null;
   canvas.addEventListener('click', async (e) => {
     const entryChip = e.target.closest('.entry-chip');
     const clusterHeader = e.target.closest('.cluster-header');
@@ -230,7 +236,12 @@
     }
     if (file) {
       const id = file.getAttribute('data-node');
-      if (id) await setSelected(state.selected === id ? null : id);
+      if (!id) return;
+      if (fileClickTimer) clearTimeout(fileClickTimer);
+      fileClickTimer = setTimeout(() => {
+        fileClickTimer = null;
+        setSelected(state.selected === id ? null : id);
+      }, 240);
       return;
     }
     // Click on empty canvas background: first drop any pin, then equivalent
@@ -283,6 +294,7 @@
   canvas.addEventListener('dblclick', (e) => {
     if (heroClickTimer) { clearTimeout(heroClickTimer); heroClickTimer = null; }
     if (anchorClickTimer) { clearTimeout(anchorClickTimer); anchorClickTimer = null; }
+    if (fileClickTimer) { clearTimeout(fileClickTimer); fileClickTimer = null; }
     const hero = e.target.closest('.hero-card');
     const ghost = e.target.closest('.ghost-anchor');
     const file = e.target.closest('.file-card');

@@ -115,7 +115,35 @@ def _serialize_graph(graph: Graph) -> dict[str, Any]:
             }
             for e in graph.edges
         ],
+        "nodeMetrics": _per_node_metrics(graph),
     }
+
+
+def _per_node_metrics(graph: Any) -> dict[str, dict[str, Any]]:
+    """Return {node_id: {pagerank, in_cycle}} for the modal's complexity panel.
+
+    indegree / outdegree are derivable from the edge list in JS, so we don't
+    ship them twice. pagerank and in_cycle come from graph algorithms the
+    frontend shouldn't re-implement.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        pr = graph.pagerank()
+    except Exception:
+        pr = {}
+    cycle_ids: set[str] = set()
+    try:
+        for cycle in graph.find_cycles():
+            for nid in cycle:
+                cycle_ids.add(nid)
+    except Exception:
+        pass
+    for n in graph.nodes:
+        out[n.id] = {
+            "pagerank": round(pr.get(n.id, 0.0), 6),
+            "in_cycle": n.id in cycle_ids,
+        }
+    return out
 
 
 def _serialize_node(n: Any) -> dict[str, Any]:
@@ -132,6 +160,7 @@ def _serialize_node(n: Any) -> dict[str, Any]:
         "language": getattr(n, "language", None) or "",
         "size": getattr(n, "size", 0) or 0,
         "highlights": list(getattr(n, "highlights", []) or []),
+        "preview": getattr(n, "preview", "") or "",
     }
     for field_name in ("semantic_role", "flow", "extends_at", "pattern"):
         value = getattr(n, field_name, "") or ""

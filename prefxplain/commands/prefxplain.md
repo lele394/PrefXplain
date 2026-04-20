@@ -393,29 +393,68 @@ the flowchart `label` / `description` fields below:
    - BAD: `["uses a SQLite database for caching descriptions across runs"]`
      (too long, one instead of three)
 
-4. **`flowchart`** (dict): A flowchart showing the ACTUAL logic flow of the file.
-   This is what appears when a user double-clicks a block in the diagram.
-   It MUST reflect the real behavior of the code, NOT be generic.
+4. **`flowchart`** (dict): A flowchart that shows the ACTUAL logic flow of
+   the file. This is the popup a user sees when they double-click a block,
+   alongside that file's dependencies and complexity signals — so it must
+   actually explain **what the file does and how it decides between
+   branches**. Generic `Start → Process → End` shapes fail this test
+   immediately.
 
    Structure: `{"nodes": [...], "edges": [...]}`
    - Each node: `{"id": "1", "label": "3-6 words", "type": "start|end|decision|step",
      "description": "1 concrete sentence — hover tooltip"}`
    - Each edge: `{"from": "1", "to": "2", "label": "condition or empty string"}`
 
-   Rules:
-   - Use 3-7 nodes. One "start" node, one "end" node.
-   - Decision nodes MUST have 2+ outgoing edges with meaningful condition labels
-     (e.g. "yes"/"no", "found"/"not found", "valid"/"invalid", "Python"/"JS/TS").
-   - Labels should describe what happens, not name functions
-     (GOOD: "Parse import statements", BAD: "_analyze_python()")
-   - **description** is the most important field — it's what appears on hover.
-     Write it like you're explaining to a smart friend who doesn't know this
-     codebase. Short, plain language, no jargon. One sentence max.
-     BAD: "Calls ast.parse() on the file content, then walks the module body
-     to extract ImportFrom and FunctionDef nodes." (too technical)
-     BAD: "Processes the input data." (too vague)
-     GOOD: "Reads the Python file and picks out every function, class, and
-     import it finds."
+   **Self-test before you save:** *"If I only saw the flowchart labels and
+   descriptions — no code, no file header, nothing else — would I understand
+   what this file does and what it really decides between? Could I roughly
+   re-implement the file's behavior from this alone?"* If the answer is no,
+   rewrite the flowchart.
+
+   Hard rules:
+   - 3-7 nodes. Exactly one "start", exactly one "end".
+   - **Concrete identifiers**: at least 2 of the 3-7 nodes MUST name a real
+     artifact from this file — a file path it reads or writes, an env var
+     it checks, a port it binds, a CLI flag it parses, a DB table, an API
+     endpoint, a file format it emits, a class/function name it defines.
+     A flowchart without any proper nouns describes a template, not this
+     file.
+   - **Real decision conditions**: ban `"valid?"`, `"ok?"`, `"success?"`,
+     `"found?"` in isolation — spell out the actual branching condition
+     (`"path ends in .py?"`, `"$LEVEL unchanged from prior run?"`,
+     `"files > 500 cap?"`, `"ANTHROPIC_API_KEY set?"`).
+   - Decision nodes MUST have ≥2 outgoing edges with condition labels.
+     Only decision-source edges carry labels — non-decision edges should
+     have `"label": ""` so the flow stays readable. The renderer hides
+     empty labels automatically.
+   - Labels describe what happens, not function names
+     (GOOD: `"Parse import statements"`, BAD: `"_analyze_python()"`).
+   - **description** is the most important field — it's what appears on
+     hover. Write it at the same `$LEVEL` voice as the file description.
+     One sentence, concrete, no jargon the audience can't parse.
+
+   Failure modes to reject:
+   - BAD (flat chain, no decisions, no proper nouns):
+     ```
+     Start → Initialize → Load data → Validate → Process → Return result → End
+     ```
+     This is the most common failure in the wild. If your flowchart looks
+     like this, it describes any file in any project. Rewrite.
+   - BAD (generic decisions):
+     ```
+     Start → Is input valid? → [yes: process / no: error] → End
+     ```
+     `"input valid?"` tells the reader nothing about this file.
+   - GOOD (branch-and-merge with concrete identifiers):
+     ```
+     Start
+       → Load prefxplain.json from repo root
+       → JSON exists AND $LEVEL matches prior run?
+         ├─ yes → Preserve prior descriptions and flowcharts
+         └─ no  → Clear descriptions so step 4c re-writes them
+       → Save graph.metadata.level = effective_level
+       → End
+     ```
 
    Example for an auth middleware:
    ```json

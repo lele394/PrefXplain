@@ -275,7 +275,6 @@ PX.views._nestedOverview = async function renderOverview(graph, idx, opts) {
 PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts) {
   const { showBullets, selected, filter, hoveredGroup = null, hoveredFile = null } = opts;
   const story = PX.buildGroupStory(graph, groupId, idx);
-  const CANVAS = 1640;
   const LEFT = 32;
   const TOP = 20;
   const GAP = 14;
@@ -300,20 +299,80 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   //   useAnchors = story.externalIn  (they import from us) → RIGHT
   const depAnchors = (story.externalOut || []);  // upstream dependencies
   const useAnchors = (story.externalIn || []);   // downstream consumers
-  // Anchor margin scales with anchor count so the USE last-segment stub
-  // (anchorCorridor → anchorLeft-PAD) always leaves ≥14px of visible
-  // horizontal shaft between the Q-rounded bend and the arrowhead base.
-  // Without that clearance, the vertical trunk appears to fuse with the
-  // arrowhead triangle — looks like the shaft "enters through the tip".
-  // Budget: stub must be > tailTrim (14) + bend radius (6) + visible shaft
-  // (14) = 34 for the FURTHEST anchor (i=N-1). Each added anchor pushes
-  // its corridor 12px further in, so the margin grows in lockstep.
+  // Anchor margin scales with anchor count — but each side is budgeted
+  // INDEPENDENTLY. Using max(depCount, useCount) for both sides (the old
+  // behavior) over-allocates the lighter side and pushes its anchor column
+  // needlessly far from the content, which showed up as "USED BY floats
+  // way off to the right" when a group has e.g. 3 deps + 1 use.
+  //
+  // Routing geometry is asymmetric:
+  //   USE (right) last-segment stub  [furthest corridor → anchor tip]:
+  //     must be > tailTrim (14) + bend radius (6) + visible shaft (14) = 34,
+  //     with one extra anchor adding 12px of corridor offset. That gives
+  //     useMargin ≥ 58 + (N_use − 1) * 12. We use max(60, 48 + N_use*12)
+  //     for a 2px safety.
+  //   DEP (left) first-segment stub  [anchor.right → closest corridor]:
+  //     only needs a clean visible shaft (≥14px) before the first bend.
+  //     depMargin ≥ 28 + (N_dep − 1) * 12; we use max(40, 28 + N_dep*12)
+  //     for 2px safety and a 40px floor to keep the arrow tail readable
+  //     even when the anchor column is lightly populated.
+  const depMarginDyn = Math.max(40, 28 + depAnchors.length * 12);
+  const useMarginDyn = Math.max(60, 48 + useAnchors.length * 12);
+  const leftReserved = depAnchors.length > 0 ? ANCHOR_W + depMarginDyn : 0;
+  const rightReserved = useAnchors.length > 0 ? ANCHOR_W + useMarginDyn : 0;
+  // Kept for the anchor-column VERTICAL stack height calc below (anchors
+  // are stacked per-side, but the canvas height must fit the taller one).
   const maxAnchorCount = Math.max(depAnchors.length, useAnchors.length);
-  const ANCHOR_MARGIN_DYN = Math.max(60, 48 + maxAnchorCount * 12);
-  const leftReserved = depAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN_DYN : 0;
-  const rightReserved = useAnchors.length > 0 ? ANCHOR_W + ANCHOR_MARGIN_DYN : 0;
+
+  // Adaptive canvas width: hug the actual story instead of forcing a fixed
+  // 1640px shell. A group with 2–3 child blocks should not leave a giant
+  // empty right-hand gutter that pushes the USED-BY anchors off-screen and
+  // forces horizontal scrolling through nothing.
+  //
+  // Must stay in lock-step with the buildGroupStoryLayoutIr call below
+  // (bandGapX=72, leftPad=0). The ir's "wide" column layout needs
+  //   canvasWidth ≥ columnBands.length * cw + (columnBands.length-1) * bandGapX
+  // otherwise targetCols drops and bands collapse into a stacked grid.
+  const CW_NAT = (showBullets ? PX.NODE_SIZES.fileBullets.w : PX.NODE_SIZES.fileNoBullets.w);
+  const BAND_GAP_X_NAT = 72;
+  const BAND_COL_KEYS_NAT = ['entry', 'core', 'leaf'];
+  const storyBands = story.bands || [];
+  const storyColBands = storyBands.filter(b => BAND_COL_KEYS_NAT.includes(b.key));
+  const storyTestBand = storyBands.find(b => b.key === 'test') || null;
+  const storyStandaloneBand = storyBands.find(b => b.key === 'standalone') || null;
+  // Column bands render SIDE-BY-SIDE, one card wide each.
+  const colCountNat = storyColBands.length;
+  const naturalColW = colCountNat > 0
+    ? colCountNat * CW_NAT + (colCountNat - 1) * BAND_GAP_X_NAT
+    : 0;
+  // Tests + standalone wrap into a grid. Cap at 4 columns so a group with
+  // many tests grows DOWN (more rows) instead of blowing up the canvas
+  // horizontally. Matches the density feel of the multi-group overview.
+  const MAX_WRAP_COLS_NAT = 4;
+  const gridNatW = (units) => {
+    if (units <= 0) return 0;
+    const cols = Math.min(Math.max(units, 1), MAX_WRAP_COLS_NAT);
+    return cols * CW_NAT + (cols - 1) * BAND_GAP_X_NAT;
+  };
+  const testUnitsNat = storyTestBand
+    ? (Array.isArray(storyTestBand.clusters) && storyTestBand.clusters.length > 0
+        ? storyTestBand.clusters.length
+        : storyTestBand.files.length)
+    : 0;
+  const naturalTestW = gridNatW(testUnitsNat);
+  const naturalStandaloneW = gridNatW(
+    storyStandaloneBand ? storyStandaloneBand.files.length : 0,
+  );
+  // Final main width = widest content row. Floor at one card so a lone
+  // standalone file still renders cleanly instead of 0-width.
+  const mainWidth = Math.max(
+    CW_NAT,
+    naturalColW,
+    naturalTestW,
+    naturalStandaloneW,
+  );
+  const CANVAS = mainWidth + 2 * LEFT + leftReserved + rightReserved;
   const mainLeft = LEFT + leftReserved;
-  const mainWidth = CANVAS - 2 * LEFT - leftReserved - rightReserved;
 
   // Boundary edges route as:  anchor → corridor → vertical → target
   // They pick up local detours around intermediate cards only where the
@@ -819,10 +878,15 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     return 'normal';
   };
 
-  // Use a natural pixel width (scaled by zoom) so the focused view keeps its
-  // air-per-card budget even when the parent canvas is narrower than CANVAS.
-  // Parent #px-canvas has overflow:auto, so the SVG drives horizontal scroll.
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(${W}px * var(--px-zoom, 1));height:auto;min-width:${W}px" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
+  // Scale the focused view to fit its parent like the multi-group overview:
+  // width:100% + preserveAspectRatio="xMidYMid meet" lets the SVG shrink
+  // proportionally on narrow viewports instead of locking to the natural
+  // CANVAS width. Previously we pinned min-width:${W}px which forced the
+  // parent (#px-canvas, overflow:auto) to scroll horizontally whenever the
+  // viewport was narrower than CANVAS — even when the canvas was only
+  // slightly over budget. With this, zoom > 1 is the opt-in path for bigger
+  // cards; at zoom = 1 the whole story is always fully visible.
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
   svg += PX.components.markers();
 
   // No in-SVG summary banner — the top info bar (#px-top) owns the

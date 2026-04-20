@@ -13,4 +13,3 @@
 - [ ] `prefxplain query "where is auth handled?"` — embedding similarity on descriptions — v0.2.
 - [ ] GitHub Action for auto-commit on push — v0.3.
 - [ ] Multi-language support (Go, Rust via tree-sitter grammars) — v0.3.
-- [ ] CI/CD pipeline for PyPI releases — v0.2.

@@ -8,8 +8,8 @@ version = "0.4.0"
 description = "Explain your codebase in 30 seconds. Interactive architecture diagrams with AI descriptions, health scoring, and blast radius analysis. Works with Claude Code, Codex, Copilot CLI, and Gemini CLI."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
-authors = [{ name = "PrefXplain Contributors" }]
+license = { text = "Apache-2.0" }
+authors = [{ name = "Rémi Al Ajroudi" }, { name = "PrefOptimize" }]
 keywords = [
     "codebase-visualization", "dependency-graph", "architecture-diagram",
     "code-review", "claude-code", "codex", "copilot-cli", "gemini-cli",
@@ -21,7 +21,7 @@ keywords = [
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",

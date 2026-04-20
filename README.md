@@ -26,7 +26,7 @@ because I was drowning in review. Now I run `/prefxplain` before every
 audit, every onboarding, every investor walkthrough. It takes 30 seconds
 and it changes how I think about the codebase I'm steering.
 
-Free. MIT. Fork it, improve it, make it yours.
+Free. Apache 2.0. Fork it, improve it, make it yours — just keep attribution.
 
 **Who this is for:**
 - **Founders** explaining their tech to non-technical stakeholders — investors, customers, new hires
@@ -71,22 +71,36 @@ curl -fsSL https://raw.githubusercontent.com/PrefOptimize/PrefXplain/main/instal
 
 That's it. The installer clones PrefXplain to `~/.prefxplain`, builds an
 isolated Python venv, drops a `prefxplain` command on your PATH,
-registers the `/prefxplain` slash command for every AI tool it detects
-(Claude Code, Cursor/Windsurf, Copilot CLI, Gemini CLI), and
-auto-installs the bundled preview extension into every VS Code fork it
-finds (VS Code, Cursor, Windsurf, Antigravity, Trae, Void, VSCodium,
-Positron, …). The preview extension is bundled with the Python package,
-so `pipx` / `uv tool` installs can install it too; `npm` is only needed
-if you want to rebuild the extension from source. Re-run the same command
-to upgrade — it's idempotent. Codex is project-local, so run
-`prefxplain setup codex` inside each repo you want to use it in.
+registers the `/prefxplain` and `/prefxplain-update` slash commands for
+every AI tool it detects (Claude Code, Cursor/Windsurf, Copilot CLI,
+Gemini CLI), and auto-installs the bundled preview extension into every
+VS Code fork it finds (VS Code, Cursor, Windsurf, Antigravity, Trae,
+Void, VSCodium, Positron, …). `npm` is only needed if you want to
+rebuild the extension from source. Re-run the same command to upgrade —
+it's idempotent. Codex is project-local, so run `prefxplain setup codex`
+inside each repo you want to use it in.
 
 > **Inside your AI coding tool?** Paste the line above into Claude Code /
 > Codex / Copilot / Gemini and the agent runs it for you.
->
-> **Already on pipx / uv?** `pipx install prefxplain && prefxplain setup`
-> (or `uv tool install prefxplain && prefxplain setup`) also works — the
-> bundled preview extension is installed there too.
+
+## Update — 1 line
+
+From inside any AI coding tool:
+
+```
+/prefxplain-update
+```
+
+Or from any terminal:
+
+```bash
+prefxplain upgrade
+```
+
+Both re-run the installer against GitHub `main`, refresh `~/.prefxplain`,
+and re-register the slash commands. PrefXplain intentionally does not
+ship through PyPI — `curl | bash` is the canonical install and update
+path, so what you get is always exactly what's on `main`.
 
 ## Use it — 1 line
 
@@ -142,6 +156,7 @@ prefxplain update .                    # re-analyze, preserve descriptions
 prefxplain create . --no-descriptions  # offline, no LLM, still useful
 prefxplain check .                     # CI: fail on circular deps
 prefxplain mcp .                       # MCP server for AI agents
+prefxplain upgrade                     # pull the latest release from GitHub main
 ```
 
 You can also force setup for a specific tool:
@@ -207,7 +222,7 @@ Yes. `--no-descriptions` produces a full diagram — structure, blast radius, se
 <summary>How is this different from CodeSee, Sourcegraph, or `tree`?</summary>
 
 - **`tree` / `madge` / `pydeps`** show the shape of your codebase. PrefXplain adds plain-English descriptions, a layered layout, blast-radius on click, and per-file flowcharts.
-- **Sourcegraph / CodeSee** are SaaS — they require an account, upload source to their servers, and cost money. PrefXplain is one offline HTML file, no account, MIT.
+- **Sourcegraph / CodeSee** are SaaS — they require an account, upload source to their servers, and cost money. PrefXplain is one offline HTML file, no account, Apache 2.0.
 - PrefXplain is **agent-native**: a single slash command inside the AI coding tool you already use, not a separate UI.
 
 </details>
@@ -245,8 +260,9 @@ make test
 
 ## License
 
-MIT. Free forever. Go build something.
+Apache 2.0. Free forever. Fork freely — the only requirement is
+preserving the attribution notices in `LICENSE` and `NOTICE`.
 
 ---
 
-Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/). Source and issues at [github.com/PrefOptimize/PrefXplain](https://github.com/PrefOptimize/PrefXplain). MIT licensed.
+Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/) — founder of [PrefOptimize](https://github.com/PrefOptimize). Source and issues at [github.com/PrefOptimize/PrefXplain](https://github.com/PrefOptimize/PrefXplain). Apache 2.0 licensed.

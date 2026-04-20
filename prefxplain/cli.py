@@ -467,7 +467,7 @@ def mcp_cmd(
         help="Load from prefxplain.json (default: <root>/prefxplain.json).",
     ),
 ) -> None:
-    """Start MCP stdio server for AI agent integration. Requires: pip install 'prefxplain[agent]'"""
+    """Start MCP stdio server for AI agent integration. Requires the `mcp` package: `~/.prefxplain/.venv/bin/pip install 'mcp>=1.0'`."""
     from .mcp_server import serve
     serve(root, from_json)
 

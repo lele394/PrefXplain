@@ -39,7 +39,9 @@ def serve(root: Path, from_json: Path | None = None) -> None:
         from mcp.server.stdio import stdio_server
     except ImportError:
         print(
-            "error: MCP server requires 'pip install prefxplain[agent]'",
+            "error: MCP server requires the 'mcp' package. Install it into "
+            "the prefxplain venv with: "
+            "~/.prefxplain/.venv/bin/pip install 'mcp>=1.0'",
             file=sys.stderr,
         )
         sys.exit(1)

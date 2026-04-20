@@ -270,4 +270,4 @@ broader ecosystem fork, extend, and build on top of the project.
 
 ---
 
-Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/) — founder of [PrefOptimize](https://github.com/PrefOptimize). Source and issues at [github.com/PrefOptimize/PrefXplain](https://github.com/PrefOptimize/PrefXplain).
+Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/).

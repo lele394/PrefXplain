@@ -1,8 +1,9 @@
 // components/card-file.js — SVG string for one file card (Nested mode).
-// 304x132 (with bullets) or 304x64 (without). Four rows:
+// 304x132 (with description) or 304x64 (compact). Four rows:
 //   1. role glyph + short_title (informative phrase) + size dots + "{size}k"
 //   2. filename (monospace, small, subdued)
-//   3. up to 3 highlight bullets
+//   3. description paragraph (falls back to node.short). Uses <foreignObject>
+//      so the prose wraps naturally and clamps with an ellipsis.
 //   4. IN / OUT fan bars (normalized by maxDeg across all files)
 
 window.PX = window.PX || {};
@@ -118,14 +119,22 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
       out += `<rect x="${pillX}" y="${y + 23}" width="${pillW}" height="13" fill="${pillFill}" stroke="${pillStroke}" stroke-width="0.8" rx="6.5"/>`;
       out += `<text x="${pillX + pillW / 2}" y="${y + 32}" font-family="${T.mono}" font-size="8" font-weight="700" letter-spacing="0.6" fill="${pillText}" text-anchor="middle">${PX.escapeXml(roleTag)}</text>`;
     }
-    // row 3: up to 3 highlights. Truncation derives from available width —
-    // keep the describer's char budget aligned with (w - 28) / 5.4.
-    (node.highlights || []).slice(0, 3).forEach((h, i) => {
-      const maxChars = Math.floor((w - 28) / 5.4);
-      const shown = h.length > maxChars ? h.slice(0, maxChars - 1) + '\u2026' : h;
-      out += `<circle cx="${x + 12}" cy="${y + 50 + i * 13}" r="1.3" fill="${isSel ? 'rgba(255,255,255,0.7)' : T.inkMuted}"/>`;
-      out += `<text x="${x + 18}" y="${y + 53 + i * 13}" font-family="${T.mono}" font-size="9.5" fill="${isSel ? 'rgba(255,255,255,0.85)' : T.ink2}">${PX.escapeXml(shown)}</text>`;
-    });
+    // row 3: description paragraph (same text the modal shows under the flow
+    // chart). We use <foreignObject> + HTML/CSS because SVG <text> can't wrap,
+    // and we line-clamp with an ellipsis when the prose is too long. Highlights
+    // still surface in the modal's "Does" column, they just don't compete with
+    // the narrative on the card itself.
+    const descText = (node.description || node.short || '').trim();
+    if (descText) {
+      const descCol = isSel ? 'rgba(255,255,255,0.88)' : T.ink2;
+      const foX = x + 12;
+      const foY = y + 40;
+      const foW = Math.max(0, w - 24);
+      const foH = Math.max(0, h - 60); // stops ~18px above the IN/OUT bars
+      out += `<foreignObject x="${foX}" y="${foY}" width="${foW}" height="${foH}">`
+        +  `<div xmlns="http://www.w3.org/1999/xhtml" style="width:${foW}px;height:${foH}px;font-family:${T.ui};font-size:10.5px;line-height:1.35;color:${descCol};display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word">${PX.escapeXml(descText)}</div>`
+        +  `</foreignObject>`;
+    }
     // row 4: IN / OUT bars
     const bx = x + 10, by = y + h - 14;
     out += `<g transform="translate(${bx},${by})">`;

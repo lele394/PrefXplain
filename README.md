@@ -26,7 +26,7 @@ because I was drowning in review. Now I run `/prefxplain` before every
 audit, every onboarding, every investor walkthrough. It takes 30 seconds
 and it changes how I think about the codebase I'm steering.
 
-Free. Apache 2.0. Fork it, improve it, make it yours — just keep attribution.
+Free. Open source. Apache 2.0.
 
 **Who this is for:**
 - **Founders** explaining their tech to non-technical stakeholders — investors, customers, new hires
@@ -260,9 +260,14 @@ make test
 
 ## License
 
-Apache 2.0. Free forever. Fork freely — the only requirement is
-preserving the attribution notices in `LICENSE` and `NOTICE`.
+PrefXplain is licensed under the Apache License 2.0. The Apache 2.0 license
+keeps the project fully open source and free for any use — commercial or
+personal — while requiring that redistributions preserve the attribution
+notices in [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
+
+This structure supports ongoing PrefXplain development while letting the
+broader ecosystem fork, extend, and build on top of the project.
 
 ---
 
-Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/) — founder of [PrefOptimize](https://github.com/PrefOptimize). Source and issues at [github.com/PrefOptimize/PrefXplain](https://github.com/PrefOptimize/PrefXplain). Apache 2.0 licensed.
+Built by [Rémi Al Ajroudi](https://github.com/RemiAJR) — [LinkedIn](https://www.linkedin.com/in/remi-al-ajroudi/) — founder of [PrefOptimize](https://github.com/PrefOptimize). Source and issues at [github.com/PrefOptimize/PrefXplain](https://github.com/PrefOptimize/PrefXplain).

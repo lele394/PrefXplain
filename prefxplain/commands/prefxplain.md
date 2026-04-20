@@ -319,11 +319,23 @@ the flowchart `label` / `description` fields below:
 
 **For each file, generate FOUR things:**
 
-1. **`short_title`** (1-3 words): The role of the file shown on the diagram card.
-   Think of it as a label you'd write on a box in an architecture whiteboard.
-   - GOOD: `Graph Engine`, `HTML Renderer`, `JWT Validator`, `CLI Entry`, `AST Parser`
-   - GOOD for tests: `Graph Tests`, `CLI Tests`, `Auth Tests`
-   - BAD: `graph.py`, `utils`, `helpers` (filename or too vague)
+1. **`short_title`** (2-5 words, informative phrase): The file's role rendered
+   as the **primary label** on the diagram card — the filename is demoted to
+   a small mono subtitle underneath. Because the title owns the visual primacy,
+   it must describe what the file DOES in words the audience (`$LEVEL`)
+   actually recognises. Not a 1-word tag, not an abbreviation.
+
+   Hard rules:
+   - Do NOT use the filename or a slug of it (`graph.py` → BAD, `utils` → BAD).
+   - Do NOT use bare abbreviations at newbie/middle level (`AR Predictor` →
+     BAD; `Autoregressive Predictor` → GOOD).
+   - Think "sticky note on a whiteboard": 2-5 words that land even without
+     any bullets underneath.
+
+   Examples:
+   - GOOD: `Dependency Graph Builder`, `JWT Request Validator`, `HTML Diagram Renderer`, `Flowchart Popup UI`
+   - GOOD for tests: `Graph Module Tests`, `CLI End-to-End Tests`
+   - BAD: `Graph`, `Renderer`, `Utils`, `Core`, `graph.py`
 
 2. **`description`** (1-2 sentences): What the file exposes and who uses it.
    Start with an active verb. Be specific enough that a reader who knows the
@@ -345,30 +357,41 @@ the flowchart `label` / `description` fields below:
    Test files: describe what behavior is covered, not the framework.
    `Covers edge cases in Graph.add_edge, including self-referential cycles and missing imports.`
 
-3. **`highlights`** (list of 3 strings, aim for 3): CONCRETE, codebase-specific
+3. **`highlights`** (list of **exactly 3 strings**): CONCRETE, codebase-specific
    facts about this file. These render as bullet points **on the diagram card
-   itself**, so they must be legible at a glance even when the diagram is
-   zoomed out.
+   itself**, so they are the second-chance summary: if the title + 3 bullets
+   don't let a reader understand what the block does, the card has failed.
+
+   Self-test before you save: *"If I only ever saw this card's title and 3
+   bullets — no description, no code — would I understand this file's role in
+   the project?"* If the answer is no, rewrite the bullets.
 
    Style:
-   - Proper nouns only — named integrations, third-party tools, model names,
-     hyperparameters, cloud providers, protocols, file formats, exact versions,
-     CLI tools, specific thresholds.
-   - NOT adjectives or architectural platitudes.
-   - Each bullet **must be ≤35 characters** so it fits on the card without
-     wrapping. Shorter is better.
-   - Voice: same level as description, but terser. Bullets are fragments, not
-     sentences — no leading verb, no punctuation at the end.
+   - Always exactly 3 bullets. No `[]`. No 1-bullet. No 2-bullet.
+     If you're tempted to write fewer, you haven't looked hard enough: pick
+     one behaviour, one input/output, and one dependency or constraint.
+   - Each bullet **must be ≤48 characters** (fits the card without wrapping).
+     Aim for 25-40 so the eye can scan.
+   - **Self-explanatory at the target `$LEVEL`.** Spell out acronyms and
+     domain jargon unless the audience would say them out loud. At newbie
+     level: write `Autoregressive next-step prediction`, NOT `AR next-step
+     pred`. At expert level `AR` is fine.
+   - Mix across these three slots:
+     1. a behaviour the file performs ("Caches descriptions in SQLite")
+     2. a concrete input/output ("Emits prefxplain.json", "Reads *.py imports")
+     3. a dependency, constraint, or named integration ("Uses Claude Code",
+        "PyTorch 2.3", "Requires ANTHROPIC_API_KEY")
+   - Fragments, not sentences — no trailing period. Leading capital OK.
 
-   Examples:
-   - GOOD: `["Claude Code integration", "Codex CLI support", "SQLite cache"]`
-   - GOOD: `["PyTorch", "lr=1e-4", "AdamW optimizer"]`
-   - GOOD: `["GCP Cloud Run", "PostgreSQL via asyncpg"]`
-   - BAD: `["handles user commands", "well-structured", "entry point"]` (generic)
-   - BAD: `["uses a SQLite database for caching descriptions"]` (too long, sentence-y)
-
-   If truly nothing concrete stands out, use `[]`. Empty is better than generic.
-   Aim for 3 per file.
+   Examples (newbie voice):
+   - GOOD: `["Picks out every import in a Python file", "Writes a JSON graph to disk", "Uses Python's built-in AST parser"]`
+   - GOOD: `["Listens on port 8765", "Streams prefxplain.html changes live", "Talks to the VS Code preview tab"]`
+   - BAD: `["AR next-step pred", "ViT encoder", "SIGReg"]`
+     (abbreviations — a newbie cannot read this)
+   - BAD: `["handles user commands", "well-structured", "entry point"]`
+     (generic, no proper nouns or concrete facts)
+   - BAD: `["uses a SQLite database for caching descriptions across runs"]`
+     (too long, one instead of three)
 
 4. **`flowchart`** (dict): A flowchart showing the ACTUAL logic flow of the file.
    This is what appears when a user double-clicks a block in the diagram.
@@ -458,7 +481,8 @@ PYEOF
 IMPORTANT: You MUST fill in the `files` dict with real values before running.
 Each value is a 4-tuple: `("Short Title", "Full description.", [highlights], {flowchart})`.
 The flowchart dict is required — it MUST reflect the actual logic of the file.
-Highlights may be an empty list `[]` when nothing concrete stands out, but aim for 3.
+Highlights MUST be a list of exactly 3 strings — see step 4c rule 3 for the
+self-test ("would a reader understand this block from title + 3 bullets?").
 Do NOT leave the placeholder comment. Run once per batch. Save after each batch.
 
 #### 4e. Completeness check

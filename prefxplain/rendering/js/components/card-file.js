@@ -1,8 +1,8 @@
 // components/card-file.js — SVG string for one file card (Nested mode).
-// 220x92 (with bullets) or 220x52 (without). Four rows:
-//   1. role glyph + filename + size dots + "{size}k"
-//   2. subtitle (short title)
-//   3. up to 2 highlight bullets
+// 304x132 (with bullets) or 304x64 (without). Four rows:
+//   1. role glyph + short_title (informative phrase) + size dots + "{size}k"
+//   2. filename (monospace, small, subdued)
+//   3. up to 3 highlight bullets
 //   4. IN / OUT fan bars (normalized by maxDeg across all files)
 
 window.PX = window.PX || {};
@@ -80,9 +80,12 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
   out += `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}" stroke="${stroke}" stroke-width="${isSel || isHub ? 1.8 : 1}" rx="5"/>`;
   // left accent stripe
   out += `<rect x="${x}" y="${y}" width="3" height="${h}" fill="${accent}" opacity="${isSel ? 0.9 : 0.7}" rx="1.5"/>`;
-  // row 1: glyph + name + size dots + size label
+  // row 1: glyph + short_title (informative phrase) + size dots + size label.
+  // The filename moves to row 2 as a muted mono subtitle — the readable phrase
+  // owns the visual primacy, which matters most when zooming out.
   out += glyph;
-  out += `<text x="${x + 24}" y="${y + 18}" font-family="${T.mono}" font-size="11.5" font-weight="600" fill="${textCol}">${PX.escapeXml(node.label)}</text>`;
+  const titleText = node.short || node.label;
+  out += `<text x="${x + 24}" y="${y + 18}" font-family="${T.ui}" font-size="12" font-weight="600" fill="${textCol}">${PX.escapeXml(titleText)}</text>`;
   if (bridgeIn > 0 || bridgeOut > 0) {
     const badge = [];
     if (bridgeIn > 0) badge.push(`\u2190${bridgeIn}`);
@@ -100,10 +103,10 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
   }
   out += `<text x="${x + w - 9}" y="${y + 17}" font-family="${T.mono}" font-size="9" fill="${mutedCol}" text-anchor="end">${sizeKB}k</text>`;
   if (showBullets && h >= PX.NODE_SIZES.fileBullets.h) {
-    // row 2: subtitle + (optional) semantic-role pill right-aligned.
-    // The pill shows up only when the describer produced a role keyword;
-    // codebases described with older v2-only output look identical to before.
-    out += `<text x="${x + 24}" y="${y + 31}" font-family="${T.ui}" font-size="10" fill="${subCol}">${PX.escapeXml(node.short || node.label)}</text>`;
+    // row 2: filename as a muted mono subtitle + (optional) semantic-role pill.
+    // Subtitle contrast stays low so it reads as secondary identification, not
+    // as the primary label.
+    out += `<text x="${x + 24}" y="${y + 32}" font-family="${T.mono}" font-size="10" fill="${mutedCol}">${PX.escapeXml(node.label)}</text>`;
     const semRole = node.semantic_role || node.semanticRole || '';
     if (semRole) {
       const roleTag = semRole.slice(0, 9).toUpperCase();
@@ -112,15 +115,16 @@ PX.components.cardFile = function cardFileSvg(node, box, ctx) {
       const pillFill = isSel ? 'rgba(255,255,255,0.16)' : T.panelAlt;
       const pillStroke = isSel ? 'rgba(255,255,255,0.25)' : T.borderAlt;
       const pillText = isSel ? '#fff' : T.inkMuted;
-      out += `<rect x="${pillX}" y="${y + 22}" width="${pillW}" height="13" fill="${pillFill}" stroke="${pillStroke}" stroke-width="0.8" rx="6.5"/>`;
-      out += `<text x="${pillX + pillW / 2}" y="${y + 31}" font-family="${T.mono}" font-size="8" font-weight="700" letter-spacing="0.6" fill="${pillText}" text-anchor="middle">${PX.escapeXml(roleTag)}</text>`;
+      out += `<rect x="${pillX}" y="${y + 23}" width="${pillW}" height="13" fill="${pillFill}" stroke="${pillStroke}" stroke-width="0.8" rx="6.5"/>`;
+      out += `<text x="${pillX + pillW / 2}" y="${y + 32}" font-family="${T.mono}" font-size="8" font-weight="700" letter-spacing="0.6" fill="${pillText}" text-anchor="middle">${PX.escapeXml(roleTag)}</text>`;
     }
-    // row 3: up to 2 highlights
-    (node.highlights || []).slice(0, 2).forEach((h, i) => {
+    // row 3: up to 3 highlights. Truncation derives from available width —
+    // keep the describer's char budget aligned with (w - 28) / 5.4.
+    (node.highlights || []).slice(0, 3).forEach((h, i) => {
       const maxChars = Math.floor((w - 28) / 5.4);
       const shown = h.length > maxChars ? h.slice(0, maxChars - 1) + '\u2026' : h;
-      out += `<circle cx="${x + 12}" cy="${y + 44 + i * 13}" r="1.3" fill="${isSel ? 'rgba(255,255,255,0.7)' : T.inkMuted}"/>`;
-      out += `<text x="${x + 18}" y="${y + 47 + i * 13}" font-family="${T.mono}" font-size="9.5" fill="${isSel ? 'rgba(255,255,255,0.85)' : T.ink2}">${PX.escapeXml(shown)}</text>`;
+      out += `<circle cx="${x + 12}" cy="${y + 50 + i * 13}" r="1.3" fill="${isSel ? 'rgba(255,255,255,0.7)' : T.inkMuted}"/>`;
+      out += `<text x="${x + 18}" y="${y + 53 + i * 13}" font-family="${T.mono}" font-size="9.5" fill="${isSel ? 'rgba(255,255,255,0.85)' : T.ink2}">${PX.escapeXml(shown)}</text>`;
     });
     // row 4: IN / OUT bars
     const bx = x + 10, by = y + h - 14;

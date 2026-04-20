@@ -29,10 +29,10 @@ PX.NODE_SIZES = {
   // next to the focused detail panel. Just enough to show name + stripe +
   // file count. Dramatically less real estate than a full nested card.
   railGroup:   { w: 184, h: 72 },
-  // File cards need room for: row 1 (glyph + filename + bridge badge + size
-  // dots + size), row 2 (subtitle), row 3 (up to 2 highlights), row 4
-  // (IN/OUT bars). The old 220×92 cramped filenames ≥20 chars; 304×132 is
-  // wide enough for full filenames and tall enough to breathe.
+  // File cards need room for: row 1 (glyph + short_title + bridge badge +
+  // size dots + size), row 2 (filename subtitle), row 3 (up to 3 highlights),
+  // row 4 (IN/OUT bars). 304×132 keeps the 3-bullet grid from colliding with
+  // the IN/OUT bars while giving the title room to breathe.
   fileBullets: { w: 304, h: 132 },
   fileNoBullets:{ w: 304, h: 64 },
 };

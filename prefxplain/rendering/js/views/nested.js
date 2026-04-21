@@ -685,7 +685,9 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   // viewport was narrower than CANVAS — even when the canvas was only
   // slightly over budget. With this, zoom > 1 is the opt-in path for bigger
   // cards; at zoom = 1 the whole story is always fully visible.
-  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
+  // Natural pixel width so columns stay full-size; the canvas div (overflow:auto)
+  // handles horizontal scroll when the layout is wider than the viewport.
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;width:calc(${W}px * var(--px-zoom, 1));height:calc(${H}px * var(--px-zoom, 1))" data-view="nested" data-natural-w="${W}" data-natural-h="${H}" data-focused-group="${PX.escapeXml(groupId)}">`;
   svg += PX.components.markers();
 
   // No in-SVG summary banner — the top info bar (#px-top) owns the

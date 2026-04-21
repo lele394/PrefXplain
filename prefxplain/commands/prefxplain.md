@@ -451,11 +451,14 @@ No prose, no markdown fences.
 )
 ```
 
-If the `prefxplain-worker` subagent_type is not found (fresh install
-that hasn't run `prefxplain setup` yet), fall through to the inline
-fallback at the end of this subsection — do **not** substitute
-`generalPurpose` at the main model, that silently defeats the cost
-split.
+If the `prefxplain-worker` subagent_type is not found, **STOP and tell
+the user:**
+> `prefxplain-worker` agent not found. Run `prefxplain setup` (or
+> `prefxplain setup claude-code`) to install it, then re-run /prefxplain.
+
+Do **not** fall through to the inline path — that runs Opus 4.7 at
+~10× the cost and serial wall-clock. Do **not** substitute
+`generalPurpose` — that defeats the cost split just as silently.
 
 ---
 
@@ -500,16 +503,16 @@ spawn_agent(
 
 ---
 
-**Inline fallback — last resort only.** Run step 4c inline on the main
-session model **only** when all of the following are true:
-(a) the runtime is neither Claude Code, Cursor, nor Codex (e.g. a bare
-Anthropic API harness with no subagent primitive), **or** (b) the
-`prefxplain-worker` subagent_type / named profile is missing and the
-user has explicitly declined to re-run setup. Even then, batch the
-work (10-20 files per turn) so you can interleave step 4d writes.
-Never silently degrade to inline on a supported runtime — surface the
-missing-worker error to the user and ask them to run
-`prefxplain setup` first.
+**Inline fallback — absolute last resort.** This path exists **only**
+for runtimes with no subagent primitive whatsoever (e.g. a bare
+Anthropic API harness). On Claude Code, Cursor, or Codex: **this path
+MUST NOT run**. If the worker agent is missing, STOP and tell the user
+to run `prefxplain setup`. Only proceed inline if (a) the runtime truly
+has no Task/spawn_agent primitive, or (b) the user has seen the
+missing-worker message and explicitly typed "continue inline anyway".
+Even then, batch work (10-20 files per turn) and interleave step 4d
+writes. A missing-worker message is a 10-second fix; running Opus
+inline on 40 files costs ~$5 and several minutes of wall-clock.
 
 Process 10-20 files per batch. For each file:
 

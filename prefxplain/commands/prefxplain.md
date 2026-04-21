@@ -13,9 +13,13 @@ natural-language description written by you (the LLM running this skill).
 
 **Smart re-runs**: if `prefxplain.json` already exists, descriptions, titles,
 flowcharts, groups, and highlights from the previous run are preserved for
-files that still exist. Only new or previously-undescribed files need work.
-This makes re-running cheap. Exception: if `$LEVEL` changes between runs
-(e.g. the user ran `/prefxplain newbie` yesterday and `/prefxplain expert` today),
+files that still exist. If the path you pass points to a wrapper folder that
+sits one level above the actual project (e.g. a monorepo root), step 1b will
+look up to 3 levels deep for a nested `prefxplain.json` and auto-promote
+`$REPO` to that project, so prior descriptions are reused instead of
+regenerated. Only new or previously-undescribed files need work. This makes
+re-running cheap. Exception: if `$LEVEL` changes between runs (e.g. the user
+ran `/prefxplain newbie` yesterday and `/prefxplain expert` today),
 descriptions are re-generated in the new voice.
 
 ## Bootstrap
@@ -98,6 +102,31 @@ to the plain browser (step 6 prints both the `vscode://` deeplink and the
   in-session, no API key is needed -- which makes the command free for the user.
   Do **not** invoke `describer.py` (that is the API-based fallback path).
 
+## Model strategy
+
+This skill runs in three cognitive modes. Use the right model for each:
+
+- **Synthesis (steps 4a, 4f, 4g)** — architectural grouping, group-level
+  highlights, and the executive summary + health score. Each of these
+  reasons across the whole project at once and needs the strongest model
+  available. **Keep the main orchestrating model** — prefer **Claude Opus
+  4.7** on Claude Code / Cursor or **GPT-5.4** on Codex (whichever
+  top-tier model is running this session). Do NOT delegate these steps.
+- **Per-file work (step 4c)** — reading a single file and producing its
+  `short_title`, `description`, `highlights`, `flowchart`, `invariants`,
+  and `watch_if_changed`. This is the volume step (often 10-500+ files
+  per run) and it is embarrassingly parallel. Run it on a small/fast
+  model via parallel subagents whenever the runtime supports it —
+  **Claude Haiku 4.5** on Claude Code / Cursor, **GPT-5.4-mini** on
+  Codex. Near-equivalent output quality at a fraction of the cost and
+  wall-clock time.
+- **Everything else** — bootstrap checks, analyzer calls, JSON patching,
+  HTML rendering. Plain Bash + Python, no LLM work.
+
+See step 4c for concrete dispatch instructions (including the Codex TOML
+workaround) and the inline fallback for runtimes that can't select a
+subagent model per call.
+
 ## Workflow
 
 ### 1. Resolve the repo root and audience level
@@ -118,6 +147,10 @@ Examples:
 - `/prefxplain expert` → `$LEVEL=expert`, `$REPO=.`
 - `/prefxplain newbie /path/to/repo` → `$LEVEL=newbie`, `$REPO=/path/to/repo`
 - `/prefxplain /path/to/repo` → `$LEVEL=""`, `$REPO=/path/to/repo`
+- `/prefxplain lewm-project` (with `lewm-project/le-wm/prefxplain.json` already
+  existing) → parsing sets `$REPO=lewm-project`, then step 1b detects the
+  nested analysis and promotes `$REPO=lewm-project/le-wm` so prior
+  descriptions are preserved instead of regenerated
 
 What each level means (use this for step 4c's voice):
 - **newbie** — first-year CS student. Zero jargon. Plain verbs, concrete
@@ -128,6 +161,48 @@ What each level means (use this for step 4c's voice):
   explaining them. Call out non-obvious invariants and trade-offs.
 - **expert** — domain specialist. Skip introductions. Lead with what is
   unusual or decision-carrying. Precise vocabulary, no padding.
+
+### 1b. Locate an existing prefxplain.json if $REPO doesn't contain one
+
+If the user passes a path that is one level above the actual project folder
+(e.g. a workspace with several projects, or they typed the parent by mistake),
+the existing `prefxplain.json` won't be at `$REPO/prefxplain.json` and step 2
+would wipe all prior work and re-describe every file from scratch. That is
+exactly what "smart re-runs" is meant to avoid, so always reconcile `$REPO`
+with the nearest existing analysis before touching the analyzer.
+
+Before running the analyzer, verify whether `$REPO/prefxplain.json` exists.
+If not, do a shallow search (depth 3, excluding heavy dirs):
+
+```bash
+if [ ! -f "$REPO/prefxplain.json" ]; then
+  find "$REPO" -maxdepth 3 -type f -name prefxplain.json \
+    -not -path '*/node_modules/*' \
+    -not -path '*/.git/*' \
+    -not -path '*/.venv/*' \
+    -not -path '*/__pycache__/*' \
+    -not -path '*/dist/*' \
+    -not -path '*/build/*' \
+    2>/dev/null
+fi
+```
+
+Interpret the output:
+- **No matches** → leave `$REPO` unchanged. First-time analysis.
+- **Exactly one match** → set `$REPO` to the directory of that match (the
+  parent of the `prefxplain.json` file) and tell the user: *"Found existing
+  prefxplain.json at `<path>`. Treating that folder as the repo root to
+  preserve prior descriptions."*
+- **Multiple matches** → STOP. List the candidate directories and ask which
+  one to update. Example:
+  > I see multiple existing analyses under `$REPO`:
+  > - `/workspace/lewm-project/le-wm/prefxplain.json`
+  > - `/workspace/lewm-project/web-ui/prefxplain.json`
+  >
+  > Which one should I update? (reply with the path, or "all fresh" to
+  > re-analyze the parent from scratch)
+
+Once `$REPO` is finalized, continue to step 2 with the adjusted value.
 
 ### 2. Analyze and save JSON (preserving previous descriptions)
 
@@ -220,6 +295,10 @@ Do not silently drop files.
 
 #### 4a. Define architectural groups
 
+**Model:** Cross-file synthesis — keep the main orchestrating model
+(Claude Opus 4.7 on Claude Code / Cursor, GPT-5.4 on Codex). Do not
+delegate to a small/fast-model subagent.
+
 Before describing individual files, look at the file list and define 2-5
 **architectural groups** that reflect how the codebase is actually organized.
 These become the top-level blocks in the diagram.
@@ -292,7 +371,69 @@ for n in g['nodes']:
 
 If the list is empty, skip to step 4e.
 
-#### 4c. Read files and write descriptions in batches
+#### 4c. Read files and write descriptions in batches (Haiku 4.5 / GPT-5.4-mini)
+
+**Model:** This is the step to delegate. Per the "Model strategy" section
+above, the preferred dispatch is parallel small/fast-model subagents
+(Claude Haiku 4.5 on Claude Code / Cursor, GPT-5.4-mini on Codex), one
+per batch of 10-20 files. The content rules below (`short_title`,
+`description`, `highlights`, `flowchart`, `invariants`, `watch_if_changed`)
+apply identically whether a subagent or the main model does the work —
+only the model and the parallelism change.
+
+**How to dispatch:**
+
+1. Take the undescribed list from step 4b and chunk it into batches of
+   10-20 files.
+2. For each batch, spawn a subagent on the runtime's small/fast model.
+   On Claude Code / Cursor that means Claude Haiku 4.5 — e.g. `haiku` in
+   a Claude Code subagent's `model:` frontmatter, or the Haiku 4.5 slug
+   in a Cursor Task call. On Codex that means GPT-5.4-mini — see the
+   "Codex dispatch" note below, because `spawn_agent(model=...)` is
+   unreliable in some CLI versions and a named agent profile is the safe
+   path. Pass the subagent:
+   - the list of file paths in this batch
+   - the audience `$LEVEL` from step 1
+   - the six content rules below, verbatim
+   - an instruction to return a single JSON dict keyed by file path, in
+     the exact shape step 4d's `files` dict expects
+3. Run all batch subagents **in parallel**, not serially. Parallel
+   dispatch cuts wall-clock time for ~100 files down to the slowest
+   single batch.
+4. As each subagent returns, run step 4d for that batch immediately.
+   Per-batch writes mean a crashed or malformed subagent only loses its
+   own batch — the rest of the run is already saved to `prefxplain.json`.
+
+**Codex dispatch (only when the runtime is Codex):** In some Codex CLI
+versions, `spawn_agent(model="gpt-5.4-mini")` is silently ignored and the
+subagent inherits the parent model (GPT-5.4), which defeats the whole
+cost split. The reliable path is a named agent profile. Define a custom
+agent at `.codex/agents/prefxplain-worker.toml` once:
+
+```toml
+name = "prefxplain_worker"
+model = "gpt-5.4-mini"
+model_reasoning_effort = "medium"
+sandbox_mode = "read-only"
+developer_instructions = """
+Read the given files and return their short_title, description,
+highlights, flowchart, invariants, and watch_if_changed as a single
+JSON dict keyed by file path, per the step 4c content rules.
+"""
+```
+
+Then dispatch batches by agent name (`spawn_agent("prefxplain_worker",
+...)` or `spawn_agents_on_csv` over the batched file list). The model is
+now pinned at profile level and can't silently fall back to GPT-5.4.
+Claude Code / Cursor runtimes ignore this block — they use the
+per-subagent `model:` selection described in bullet 2 above.
+
+**Fallback** — if the runtime cannot select a subagent model per call, or
+the small/fast model (Haiku 4.5 / GPT-5.4-mini) is not available there,
+run step 4c inline on the main session model. The output rules don't
+change, only the cost does. Do not invent a workaround: falling back to
+the main model for per-file work is strictly better than a half-broken
+subagent setup.
 
 Process 10-20 files per batch. For each file:
 
@@ -644,6 +785,10 @@ If MISSING > 0, go back and describe them.
 
 #### 4f. Generate group-level highlights
 
+**Model:** Cross-file synthesis — keep the main orchestrating model
+(Claude Opus 4.7 on Claude Code / Cursor, GPT-5.4 on Codex). Do not
+delegate.
+
 After file-level highlights are in place, synthesize up to 3 group-level
 bullets per architectural group — concrete facts that span multiple files
 within the group (e.g. "supports Claude Code + Codex + Copilot" from three
@@ -676,6 +821,11 @@ PYEOF
 Skip groups where nothing concrete spans the files. Empty list is fine.
 
 #### 4g. Generate executive summary + health score
+
+**Model:** The highest-leverage synthesis step in the whole run — keep
+the main orchestrating model (Claude Opus 4.7 on Claude Code / Cursor,
+GPT-5.4 on Codex). Never delegate 4g; the summary is what ends up in
+decks, onboarding docs, and investor materials.
 
 This is the most important step. The summary is what founders paste into decks
 and what devs read to understand a project in 30 seconds.

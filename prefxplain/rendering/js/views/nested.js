@@ -144,9 +144,20 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
         : storyTestBand.files.length)
     : 0;
   const naturalTestW = gridNatW(testUnitsNat);
-  const naturalStandaloneW = gridNatW(
-    storyStandaloneBand ? storyStandaloneBand.files.length : 0,
-  );
+  // Standalone natural width. With a taxonomy, each sub-band lays out its
+  // own grid independently (subPerRow = min(perRow, sub.files.length) — see
+  // ir.js). The widest sub-band therefore dictates the minimum canvas width.
+  // Without a taxonomy we fall back to the total-file grid (current behavior).
+  let naturalStandaloneW = 0;
+  if (storyStandaloneBand && storyStandaloneBand.files.length > 0) {
+    if (Array.isArray(storyStandaloneBand.taxonomy) && storyStandaloneBand.taxonomy.length > 0) {
+      naturalStandaloneW = Math.max(
+        ...storyStandaloneBand.taxonomy.map(sub => gridNatW(sub.files.length)),
+      );
+    } else {
+      naturalStandaloneW = gridNatW(storyStandaloneBand.files.length);
+    }
+  }
   // Final main width = widest content row. Floor at one card so a lone
   // standalone file still renders cleanly instead of 0-width.
   const mainWidth = Math.max(
@@ -680,7 +691,14 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   // Band & cluster labels. Band labels sit above a band's top edge. Cluster
   // headers sit INSIDE the test band, one per test-target column. When a
   // test band has clusters, the outer band label is suppressed (redundant).
+  //
+  // Standalone taxonomy sub-bands work the same way: ir.js still emits an
+  // outer 'standalone' wrapper rect (for backward compat + hit-testing), but
+  // each sub-band carries its own 2-line chrome (category name + LLM
+  // description). We render the sub-band labels and suppress the outer one
+  // to avoid a redundant "STANDALONE (N)" header stacked above them.
   const hasClusters = bandRects.some(b => b.kind === 'cluster');
+  const hasStandaloneSubs = bandRects.some(b => b.kind === 'sub-band');
   for (const band of bandRects) {
     if (band.kind === 'cluster') {
       svg += PX.components.clusterHeader({
@@ -694,7 +712,22 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       });
       continue;
     }
+    if (band.kind === 'sub-band') {
+      // Standalone taxonomy sub-band: 2-line header via bandLabel's optional
+      // description. Headroom (26px above y) is already reserved by ir.js's
+      // SUB_BAND_GAP_Y between stacked sub-bands.
+      svg += PX.components.bandLabel({
+        x: band.x,
+        y: band.y,
+        w: band.w,
+        name: band.name,
+        count: band.count,
+        description: band.description,
+      });
+      continue;
+    }
     if (band.key === 'test' && hasClusters) continue; // cluster headers own this band
+    if (band.key === 'standalone' && hasStandaloneSubs) continue; // sub-band labels own this section
     svg += PX.components.bandLabel({
       x: band.x,
       y: band.y,

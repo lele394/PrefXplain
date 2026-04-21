@@ -95,6 +95,25 @@ def _serialize_graph(graph: Graph) -> dict[str, Any]:
                 value = getattr(summary, field_name, "")
                 if value:
                     entry[field_name] = value
+            # Per-group standalone taxonomy — sub-buckets for edge-less files.
+            # Skip empty buckets (no category name) and categories with no
+            # members; ir.js uses presence of this field to decide between
+            # split sub-bands and the legacy flat STANDALONE band.
+            taxonomy = list(getattr(summary, "standalone_taxonomy", []) or [])
+            serialized_taxonomy: list[dict[str, Any]] = []
+            for cat in taxonomy:
+                if not getattr(cat, "category", ""):
+                    continue
+                member_ids = list(getattr(cat, "member_file_ids", []) or [])
+                if not member_ids:
+                    continue
+                serialized_taxonomy.append({
+                    "category": cat.category,
+                    "description": getattr(cat, "description", ""),
+                    "member_file_ids": member_ids,
+                })
+            if serialized_taxonomy:
+                entry["standalone_taxonomy"] = serialized_taxonomy
         meta_groups[name] = entry
     return {
         "repo": meta.repo if meta else "repo",

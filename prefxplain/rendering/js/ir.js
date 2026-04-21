@@ -280,6 +280,52 @@ PX.buildGroupStory = function buildGroupStory(graph, groupId, index) {
     }))
     .filter(b => b.files.length > 0);
 
+  // Standalone taxonomy: per-category semantic split of the orphan files.
+  // The synthesis step (see prefxplain.md §4g) writes one taxonomy per group
+  // to metadata.group_summaries[<groupId>].standalone_taxonomy. We resolve
+  // member_file_ids to fileView objects, preserve category order from the
+  // LLM (importance-sorted), and drop any file ID that isn't actually in this
+  // group's standalone band (defensive — handles stale json after refactors).
+  //
+  // Files in the standalone band that the LLM didn't categorize are bucketed
+  // into a synthetic "Uncategorized" tail-category so nothing silently
+  // disappears from the view. That category renders with a neutral
+  // description so it's clear it's a fallback, not a curated bucket.
+  const standaloneBand = bands.find(b => b.key === 'standalone');
+  if (standaloneBand && Array.isArray(meta.standalone_taxonomy) && meta.standalone_taxonomy.length > 0) {
+    const standaloneById = new Map(standaloneBand.files.map(f => [f.id, f]));
+    const claimed = new Set();
+    const taxonomy = [];
+    for (const raw of meta.standalone_taxonomy) {
+      if (!raw || typeof raw !== 'object') continue;
+      const category = typeof raw.category === 'string' ? raw.category.trim() : '';
+      if (!category) continue;
+      const memberIds = Array.isArray(raw.member_file_ids) ? raw.member_file_ids : [];
+      const catFiles = [];
+      for (const fid of memberIds) {
+        if (claimed.has(fid)) continue;
+        const fv = standaloneById.get(fid);
+        if (!fv) continue;
+        claimed.add(fid);
+        catFiles.push(fv);
+      }
+      if (catFiles.length === 0) continue;
+      const description = typeof raw.description === 'string' ? raw.description.trim() : '';
+      taxonomy.push({ category, description, files: catFiles });
+    }
+    const uncategorized = standaloneBand.files.filter(f => !claimed.has(f.id));
+    if (uncategorized.length > 0) {
+      taxonomy.push({
+        category: 'Uncategorized',
+        description: 'No category assigned by the synthesis step — inspect individually.',
+        files: uncategorized,
+      });
+    }
+    if (taxonomy.length > 0) {
+      standaloneBand.taxonomy = taxonomy;
+    }
+  }
+
   // Primary entry paths — top 5 entry-band files (already ordered by fan-in).
   const entries = (bandsRaw.entry || []).slice(0, 5).map(fileView);
 
@@ -700,29 +746,94 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
 
   // Standalone band: pure orphans (no edges anywhere). Rendered as a compact
   // full-width grid with shorter cards so they don't dominate the layout.
+  //
+  // Taxonomy split: when buildGroupStory has attached a taxonomy (LLM-defined
+  // semantic categories — see prefxplain.md §4g), we break the single grid
+  // into N stacked sub-bands, each with its own 2-line chrome (category name
+  // + 1-line description). Sub-bands share the column grid and stack with a
+  // tighter gap so they read as one grouped section. The outer 'standalone'
+  // rect is still emitted so existing consumers that iterate bandRects by
+  // key keep working; the nested renderer suppresses its label when sub-
+  // bands are present (same precedent as the clustered test band above).
   if (standaloneBand && standaloneBand.files.length > 0) {
     const usableW = canvasWidth - 2 * leftPad;
     const perRow = Math.max(1, Math.floor((usableW + bandGapX) / (cw + bandGapX)));
-    const rows = Math.ceil(standaloneBand.files.length / perRow);
-    const bandH = rows * CH_STANDALONE + Math.max(0, rows - 1) * cardGapY;
-    for (let i = 0; i < standaloneBand.files.length; i++) {
-      const col = i % perRow;
-      const row = Math.floor(i / perRow);
-      positions[standaloneBand.files[i].id] = {
-        x: leftPad + col * (cw + bandGapX),
-        y: cursorY + row * (CH_STANDALONE + cardGapY),
-      };
+    const hasTaxonomy = Array.isArray(standaloneBand.taxonomy) && standaloneBand.taxonomy.length > 0;
+    if (hasTaxonomy) {
+      // Tight inter-sub-band spacing. 38px accommodates the 2-line chrome
+      // (name at -26, description at -12, rule at -4 relative to band top)
+      // plus ~8px of breathing room before the next sub-band's first row.
+      const SUB_BAND_GAP_Y = 38;
+      const bandTop = cursorY;
+      for (let si = 0; si < standaloneBand.taxonomy.length; si++) {
+        const sub = standaloneBand.taxonomy[si];
+        // Sub-band columns = min(category size, canvas capacity). Small
+        // categories don't waste horizontal space on empty slots; large
+        // ones wrap at the canvas-wide perRow.
+        const subPerRow = Math.max(1, Math.min(perRow, sub.files.length));
+        const subRows = Math.ceil(sub.files.length / subPerRow);
+        const subBandH = subRows * CH_STANDALONE + Math.max(0, subRows - 1) * cardGapY;
+        const subW = subPerRow * cw + Math.max(0, subPerRow - 1) * bandGapX;
+        for (let i = 0; i < sub.files.length; i++) {
+          const col = i % subPerRow;
+          const row = Math.floor(i / subPerRow);
+          positions[sub.files[i].id] = {
+            x: leftPad + col * (cw + bandGapX),
+            y: cursorY + row * (CH_STANDALONE + cardGapY),
+          };
+        }
+        bandRects.push({
+          key: 'standalone-sub',
+          kind: 'sub-band',
+          category: sub.category,
+          description: sub.description,
+          name: sub.category,
+          x: leftPad,
+          y: cursorY,
+          w: subW,
+          h: subBandH,
+          count: sub.files.length,
+        });
+        cursorY += subBandH + (si < standaloneBand.taxonomy.length - 1 ? SUB_BAND_GAP_Y : 0);
+      }
+      // Outer wrapper — renders the umbrella "Standalone (N)" chrome is
+      // suppressed by the renderer since each sub-band already carries its
+      // own label. Kept so hit-testing / aggregate consumers still find the
+      // full region by key='standalone'.
+      bandRects.push({
+        key: 'standalone',
+        kind: 'band',
+        name: standaloneBand.name,
+        x: leftPad,
+        y: bandTop,
+        w: usableW,
+        h: cursorY - bandTop,
+        count: standaloneBand.files.length,
+      });
+      cursorY += bandGapY;
+    } else {
+      // Fallback: single compact grid when no taxonomy is available.
+      const rows = Math.ceil(standaloneBand.files.length / perRow);
+      const bandH = rows * CH_STANDALONE + Math.max(0, rows - 1) * cardGapY;
+      for (let i = 0; i < standaloneBand.files.length; i++) {
+        const col = i % perRow;
+        const row = Math.floor(i / perRow);
+        positions[standaloneBand.files[i].id] = {
+          x: leftPad + col * (cw + bandGapX),
+          y: cursorY + row * (CH_STANDALONE + cardGapY),
+        };
+      }
+      bandRects.push({
+        key: 'standalone',
+        kind: 'band',
+        name: standaloneBand.name,
+        x: leftPad, y: cursorY,
+        w: usableW,
+        h: bandH,
+        count: standaloneBand.files.length,
+      });
+      cursorY += bandH + bandGapY;
     }
-    bandRects.push({
-      key: 'standalone',
-      kind: 'band',
-      name: standaloneBand.name,
-      x: leftPad, y: cursorY,
-      w: usableW,
-      h: bandH,
-      count: standaloneBand.files.length,
-    });
-    cursorY += bandH + bandGapY;
   }
 
   totalH = cursorY;

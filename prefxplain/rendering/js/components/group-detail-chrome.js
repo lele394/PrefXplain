@@ -150,12 +150,45 @@ PX.components.entryPathsStrip = function entryPathsStrip({ x, y, w, entries, col
   return { svg, h };
 };
 
-PX.components.bandLabel = function bandLabel({ x, y, w, name, count }) {
+// Band label chrome.
+//
+// One-line form (no description): NAME upper-case on the left, COUNT on the
+// right, dashed rule at y-4 just above the first card. The rule sits 4px
+// above the band's top edge so it reads as an underline for the label.
+//
+// Two-line form (description provided): NAME + COUNT at y-26, muted
+// description at y-12 (wraps to ~1 line — caller truncates long text), rule
+// at y-4. Caller MUST reserve ~26px of extra headroom above the band's top-
+// left when passing a description; buildGroupStoryLayoutIr does this for
+// standalone-taxonomy sub-bands via SUB_BAND_GAP_Y (38px gap between stacked
+// sub-bands = 26px chrome + ~12px breathing room).
+PX.components.bandLabel = function bandLabel({ x, y, w, name, count, description }) {
   const T = PX.T;
+  const hasDesc = typeof description === 'string' && description.trim().length > 0;
+  const nameY = hasDesc ? y - 26 : y - 10;
+  const nameText = `<text x="${x}" y="${nameY}" font-family="${T.mono}" font-size="10" letter-spacing="1.4" fill="${T.inkFaint}">${PX.escapeXml(name.toUpperCase())}</text>`;
+  const countText = `<text x="${x + w}" y="${nameY}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="end">${count}</text>`;
+  const rule = `<line x1="${x}" y1="${y - 4}" x2="${x + w}" y2="${y - 4}" stroke="${T.borderAlt}" stroke-width="1" stroke-dasharray="2 3"/>`;
+  if (!hasDesc) {
+    return `<g class="band-label" pointer-events="none">
+    ${nameText}
+    ${countText}
+    ${rule}
+  </g>`;
+  }
+  // Truncate very long descriptions so the header stays on one visual line.
+  // 92 chars ≈ full usable width at font-size 10 in the mono face; the exact
+  // cap doesn't matter — we just avoid SVG overflow past the band's right
+  // edge, which would bleed into the next band's chrome or the canvas gutter.
+  const MAX_DESC = 92;
+  const raw = description.trim();
+  const truncated = raw.length > MAX_DESC ? raw.slice(0, MAX_DESC - 1).trimEnd() + '\u2026' : raw;
+  const descText = `<text x="${x}" y="${y - 12}" font-family="${T.mono}" font-size="10.5" fill="${T.inkMuted}">${PX.escapeXml(truncated)}</text>`;
   return `<g class="band-label" pointer-events="none">
-    <text x="${x}" y="${y - 10}" font-family="${T.mono}" font-size="10" letter-spacing="1.4" fill="${T.inkFaint}">${PX.escapeXml(name.toUpperCase())}</text>
-    <text x="${x + w}" y="${y - 10}" font-family="${T.mono}" font-size="10" fill="${T.inkMuted}" text-anchor="end">${count}</text>
-    <line x1="${x}" y1="${y - 4}" x2="${x + w}" y2="${y - 4}" stroke="${T.borderAlt}" stroke-width="1" stroke-dasharray="2 3"/>
+    ${nameText}
+    ${countText}
+    ${descText}
+    ${rule}
   </g>`;
 };
 

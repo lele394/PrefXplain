@@ -106,12 +106,13 @@ to the plain browser (step 6 prints both the `vscode://` deeplink and the
 
 This skill runs in three cognitive modes. Use the right model for each:
 
-- **Synthesis (steps 4a, 4f, 4g)** — architectural grouping, group-level
-  highlights, and the executive summary + health score. Each of these
-  reasons across the whole project at once and needs the strongest model
-  available. **Keep the main orchestrating model** — prefer **Claude Opus
-  4.7** on Claude Code / Cursor or **GPT-5.4** on Codex (whichever
-  top-tier model is running this session). Do NOT delegate these steps.
+- **Synthesis (steps 4a, 4f, 4g, 4h)** — architectural grouping,
+  group-level highlights, per-group standalone taxonomy, and the
+  executive summary + health score. Each of these reasons across the
+  whole project at once and needs the strongest model available.
+  **Keep the main orchestrating model** — prefer **Claude Opus 4.7**
+  on Claude Code / Cursor or **GPT-5.4** on Codex (whichever top-tier
+  model is running this session). Do NOT delegate these steps.
 - **Per-file work (step 4c)** — reading a single file and producing its
   `short_title`, `description`, `highlights`, `flowchart`, `invariants`,
   and `watch_if_changed`. This is the volume step (often 10-500+ files
@@ -826,11 +827,160 @@ PYEOF
 
 Skip groups where nothing concrete spans the files. Empty list is fine.
 
-#### 4g. Generate executive summary + health score
+#### 4g. Generate per-group standalone taxonomy
+
+**Model:** Cross-file synthesis — keep the main orchestrating model
+(Claude Opus 4.7 on Claude Code / Cursor, GPT-5.4 on Codex). Do not
+delegate. The taxonomy is short and group-local, but naming the right
+categories requires the same architectural eye as 4a.
+
+**Why this step exists.** A file lands in a group's **standalone band**
+when static analysis sees no imports or importers for it anywhere in the
+repo. That's not the same as "dead code" — it usually means: CLI
+entrypoint, packaging / build glue, config or asset loaded by path,
+script invoked from the shell, framework-invoked runtime entry, codegen
+target, or a genuine orphan. A bare "Standalone" heading lumps all of
+those together and reads as noise to a new reader. This step splits the
+bucket into named sub-bands with a one-sentence hint so the reader
+understands *why* each cluster of files has no graph edges.
+
+**Scope.** For every group that has ≥1 file in its standalone band,
+emit 2–6 categories. Every standalone file in that group must land in
+exactly one category. If a group has 0 standalones, skip it. If the
+taxonomy is absent, the renderer falls back to the legacy flat
+"Standalone" band — so this step is a strict upgrade.
+
+First, enumerate the standalone files per group:
+
+```bash
+cd $REPO && python -c "
+import json
+from collections import Counter
+g = json.loads(open('prefxplain.json').read())
+indeg, outdeg = Counter(), Counter()
+for e in g['edges']:
+    indeg[e['target']] += 1
+    outdeg[e['source']] += 1
+buckets = {}
+for n in g['nodes']:
+    if indeg[n['id']] == 0 and outdeg[n['id']] == 0:
+        grp = n.get('group', '') or '(unassigned)'
+        buckets.setdefault(grp, []).append((n['id'], n.get('short_title','')))
+for grp in sorted(buckets):
+    print(f'GROUP: {grp}  ({len(buckets[grp])} standalones)')
+    for fid, title in sorted(buckets[grp]):
+        print(f'  {fid}  --  {title}')
+"
+```
+
+**Rules for naming categories:**
+
+- Categories are **codebase-specific**. A repo with Flask endpoints and
+  Dockerfiles calls them "HTTP entrypoints" and "Container build glue",
+  not generic "Entry Points" and "Build". If the project has its own
+  vocabulary (e.g. "Skills", "Workers", "Ops playbooks"), use it.
+- Common shapes are a starting point, never a fixed menu:
+  `Entry points`, `Packaging & build`, `Config & assets`,
+  `Scripts & tools`, `Docs & examples`, `Legacy / possibly orphan`.
+- Every category gets a **1-sentence description** (≤140 chars) that
+  names what the files do *and* why it makes sense that they have no
+  graph edges. Good: "CLI scripts launched from the shell — they import
+  the rest of the codebase, nothing imports them back." Bad: "Scripts.".
+- Sort categories by decreasing member count, then alphabetically.
+- Reserve the last category for suspected dead code and name it
+  honestly: "Possibly orphan", "Legacy helpers — verify before
+  deleting". A bucket with 1-2 files flagged like that is far more
+  useful than a silent orphan sitting in a generic "Other" pile.
+
+Voice matches `$LEVEL` (same rules as 4c).
+
+Patch the taxonomy onto each group's `GroupSummary`:
+
+```bash
+cd $REPO && python3 << 'PYEOF'
+from pathlib import Path
+from prefxplain.graph import Graph, GroupSummary, StandaloneCategory
+
+graph = Graph.load(Path("prefxplain.json"))
+
+# FILL THESE IN — group name → list of categories. Every standalone file
+# in the group (from the discovery query above) must appear in exactly
+# one category's member_file_ids. Skip groups with 0 standalones.
+taxonomy: dict[str, list[dict]] = {
+    # "CLI & Integrations": [
+    #     {"category": "CLI entrypoints",
+    #      "description": "Scripts launched from the shell; they import the rest of the codebase at runtime.",
+    #      "member_file_ids": ["cli/main.py", "cli/serve.py"]},
+    #     {"category": "Packaging & build",
+    #      "description": "Setup metadata and manifests used by pip / the build tooling.",
+    #      "member_file_ids": ["setup.py"]},
+    #     {"category": "Possibly orphan",
+    #      "description": "No imports detected anywhere — verify before deleting.",
+    #      "member_file_ids": ["old/legacy_shim.py"]},
+    # ],
+}
+
+for name, cats in taxonomy.items():
+    summary = graph.metadata.group_summaries.setdefault(name, GroupSummary())
+    summary.standalone_taxonomy = [
+        StandaloneCategory(
+            category=c["category"],
+            description=c["description"],
+            member_file_ids=list(c["member_file_ids"]),
+        )
+        for c in cats
+    ]
+
+graph.save(Path("prefxplain.json"))
+patched = sum(len(cats) for cats in taxonomy.values())
+print(f"Patched {patched} standalone categories across {len(taxonomy)} groups")
+PYEOF
+```
+
+**Completeness check.** Re-run the discovery query above and compare
+file ids against what you patched. Every standalone file in a group
+with a non-empty taxonomy must appear in exactly one category — a
+missing file silently drops out of the UI.
+
+**`prefxplain.json` schema addition.** The patch above extends each
+group's `GroupSummary` with a new `standalone_taxonomy` array. On disk
+the shape is:
+
+```json
+{
+  "metadata": {
+    "group_summaries": {
+      "CLI & Integrations": {
+        "semantic_role": "...",
+        "standalone_taxonomy": [
+          {
+            "category": "CLI entrypoints",
+            "description": "Scripts launched from the shell; they import the rest of the codebase at runtime.",
+            "member_file_ids": ["cli/main.py", "cli/serve.py"]
+          },
+          {
+            "category": "Possibly orphan",
+            "description": "No imports detected anywhere — verify before deleting.",
+            "member_file_ids": ["old/legacy_shim.py"]
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Categories with an empty `category` name or an empty `member_file_ids`
+list are stripped at serialization time. If the entire array is empty
+or absent, the renderer falls back to the legacy flat `STANDALONE`
+band — so this field is always optional and a strict upgrade when
+present.
+
+#### 4h. Generate executive summary + health score
 
 **Model:** The highest-leverage synthesis step in the whole run — keep
 the main orchestrating model (Claude Opus 4.7 on Claude Code / Cursor,
-GPT-5.4 on Codex). Never delegate 4g; the summary is what ends up in
+GPT-5.4 on Codex). Never delegate 4h; the summary is what ends up in
 decks, onboarding docs, and investor materials.
 
 This is the most important step. The summary is what founders paste into decks

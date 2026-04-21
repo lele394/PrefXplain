@@ -127,6 +127,38 @@ class Node:
 
 
 @dataclass
+class StandaloneCategory:
+    """One LLM-defined bucket inside a group's standalone band.
+
+    A file lands in a group's standalone band when static analysis sees no
+    imports or importers for it. That covers real entry points, packaging
+    glue, config/assets, and genuinely dead code — so a bare "Standalone"
+    heading reads as noise. This dataclass names the sub-bucket, explains
+    *why* its members are edge-less, and lists the files that belong there.
+    Categories are codebase-specific and LLM-authored (see prefxplain.md
+    step 4g); empty taxonomies trigger the legacy flat-band fallback in
+    the renderer.
+    """
+    category: str = ""          # short human name, e.g. "CLI entrypoints"
+    description: str = ""       # 1-sentence hint: what they do + why they have no edges
+    member_file_ids: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict:
+        d: dict = {"category": self.category, "description": self.description}
+        if self.member_file_ids:
+            d["member_file_ids"] = list(self.member_file_ids)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> StandaloneCategory:
+        return cls(
+            category=d.get("category", ""),
+            description=d.get("description", ""),
+            member_file_ids=list(d.get("member_file_ids") or []),
+        )
+
+
+@dataclass
 class GroupSummary:
     """Per-group semantic scaffolding produced by the group describer.
 
@@ -139,6 +171,10 @@ class GroupSummary:
     flow: str = ""
     extends_at: str = ""
     pattern: str = ""
+    # LLM-authored sub-buckets for the group's standalone band. Empty list
+    # means "no taxonomy for this group" — the UI falls back to the legacy
+    # flat STANDALONE band. Populated by step 4g of the /prefxplain command.
+    standalone_taxonomy: list[StandaloneCategory] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         d: dict = {}
@@ -152,16 +188,26 @@ class GroupSummary:
             d["extends_at"] = self.extends_at
         if self.pattern:
             d["pattern"] = self.pattern
+        if self.standalone_taxonomy:
+            serialized = [c.to_dict() for c in self.standalone_taxonomy if c.category]
+            if serialized:
+                d["standalone_taxonomy"] = serialized
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> GroupSummary:
+        raw_taxonomy = d.get("standalone_taxonomy") or []
+        taxonomy: list[StandaloneCategory] = []
+        for payload in raw_taxonomy:
+            if isinstance(payload, dict):
+                taxonomy.append(StandaloneCategory.from_dict(payload))
         return cls(
             description=d.get("description", ""),
             semantic_role=d.get("semantic_role", ""),
             flow=d.get("flow", ""),
             extends_at=d.get("extends_at", ""),
             pattern=d.get("pattern", ""),
+            standalone_taxonomy=taxonomy,
         )
 
 

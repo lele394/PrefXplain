@@ -45,6 +45,22 @@ venv + shim + slash commands for you.
 
 If the installer fails, stop and say what went wrong.
 
+**1b. Resolve a Python interpreter that can import `prefxplain`.**
+
+The installer guarantees `~/.prefxplain/.venv/bin/python` has prefxplain.
+The user's shell may be inside a conda env, project venv, or virtualenv
+where `prefxplain` is NOT installed — so `python -c "from prefxplain..."`
+will fail with `ModuleNotFoundError`. Every Python block below MUST
+resolve `$PPY` via the one-liner below (repeated in each block because
+Bash tool calls do not share environment variables):
+
+```bash
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+```
+
+Then use `"$PPY"` in place of `python` or `python3`. If no interpreter
+with prefxplain is found, stop and tell the user to re-run the installer.
+
 **2. Check IDE extension (for in-IDE preview):**
 
 Check both the CLI AND the on-disk extension directories — common macOS setups
@@ -106,13 +122,12 @@ to the plain browser (step 6 prints both the `vscode://` deeplink and the
 
 This skill runs in three cognitive modes. Use the right model for each:
 
-- **Synthesis (steps 4a, 4f, 4g, 4h)** — architectural grouping,
-  group-level highlights, per-group standalone taxonomy, and the
-  executive summary + health score. Each of these reasons across the
-  whole project at once and needs the strongest model available.
-  **Keep the main orchestrating model** — prefer **Claude Opus 4.7**
-  on Claude Code / Cursor or **GPT-5.4** on Codex (whichever top-tier
-  model is running this session). Do NOT delegate these steps.
+- **Synthesis (steps 4a, 4f, 4g)** — architectural grouping, group-level
+  highlights, and the executive summary + health score. Each of these
+  reasons across the whole project at once and needs the strongest model
+  available. **Keep the main orchestrating model** — prefer **Claude Opus
+  4.7** on Claude Code / Cursor or **GPT-5.4** on Codex (whichever
+  top-tier model is running this session). Do NOT delegate these steps.
 - **Per-file work (step 4c)** — reading a single file and producing its
   `short_title`, `description`, `highlights`, `flowchart`, `invariants`,
   and `watch_if_changed`. This is the volume step (often 10-500+ files
@@ -215,7 +230,8 @@ preserved. Otherwise, all descriptions/titles/flowcharts/highlights are cleared
 so step 4c re-writes them in the new voice.
 
 ```bash
-cd $REPO && LEVEL="$LEVEL" python -c "
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && LEVEL="$LEVEL" "$PPY" -c "
 import os
 from pathlib import Path
 from prefxplain.analyzer import analyze
@@ -328,7 +344,8 @@ Rules:
 Patch the groups into the JSON:
 
 ```bash
-cd $REPO && python3 << 'PYEOF'
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" << 'PYEOF'
 from pathlib import Path
 from prefxplain.graph import Graph
 
@@ -363,7 +380,8 @@ assigned to a group. Group names should be human-readable, 1-3 words.
 #### 4b. List undescribed nodes
 
 ```bash
-cd $REPO && python -c "
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 for n in g['nodes']:
@@ -376,71 +394,122 @@ If the list is empty, skip to step 4e.
 
 #### 4c. Read files and write descriptions in batches (Haiku 4.5 / GPT-5.4-mini)
 
-**Model:** This is the step to delegate. Per the "Model strategy" section
-above, the preferred dispatch is parallel small/fast-model subagents
-(Claude Haiku 4.5 on Claude Code, `composer-2-fast` or
-`claude-4.6-sonnet-medium-thinking` on Cursor, GPT-5.4-mini on Codex),
-one per batch of 10-20 files. The content rules below (`short_title`,
-`description`, `highlights`, `flowchart`, `invariants`, `watch_if_changed`)
-apply identically whether a subagent or the main model does the work —
-only the model and the parallelism change.
+**This step MUST run on parallel small/fast-model subagents.** Per the
+"Model strategy" section, per-file work is the volume step (often
+10-500+ files) and is embarrassingly parallel. Running it inline on the
+main model (Opus 4.7 / GPT-5.4) is ~10× the cost and serial wall-clock,
+so do not skip dispatch just because it feels simpler to loop locally.
 
-**How to dispatch:**
+**Algorithm (runtime-agnostic):**
 
-1. Take the undescribed list from step 4b and chunk it into batches of
-   10-20 files.
-2. For each batch, spawn a subagent on the runtime's small/fast model.
-   On **Claude Code**, that means Claude Haiku 4.5 via `model: haiku` in
-   the subagent's YAML frontmatter. On **Cursor**, the Task tool does
-   **not** expose Haiku 4.5 as a slug — use `composer-2-fast` (Cursor's
-   proprietary fast model) or `claude-4.6-sonnet-medium-thinking` if
-   you want to stay on a Claude backbone; don't try to pass `haiku`,
-   it will be rejected. On **Codex**, that means GPT-5.4-mini — see the
-   "Codex dispatch" note below, because `spawn_agent(model=...)` is
-   unreliable in some CLI versions and a named agent profile is the safe
-   path. Pass the subagent:
-   - the list of file paths in this batch
-   - the audience `$LEVEL` from step 1
-   - the six content rules below, verbatim
-   - an instruction to return a single JSON dict keyed by file path, in
-     the exact shape step 4d's `files` dict expects
-3. Run all batch subagents **in parallel**, not serially. Parallel
-   dispatch cuts wall-clock time for ~100 files down to the slowest
-   single batch.
-4. As each subagent returns, run step 4d for that batch immediately.
-   Per-batch writes mean a crashed or malformed subagent only loses its
-   own batch — the rest of the run is already saved to `prefxplain.json`.
+1. Chunk the undescribed list from step 4b into batches of **10-20 file
+   paths**. Ceil-divide: 37 files → 2 batches of ~19.
+2. Dispatch **every batch concurrently** in a single turn (one assistant
+   message with N parallel tool calls), using the runtime-specific
+   recipe below. Do **not** dispatch sequentially — that gives you
+   zero parallelism gain.
+3. Each subagent returns one JSON dict keyed by file path. As results
+   come back, feed each dict into step 4d and patch `prefxplain.json`
+   immediately — per-batch writes mean a crashed subagent only loses
+   its own batch.
+4. The content rules (the `short`, `description`, `highlights`,
+   `flowchart`, `invariants`, `watch` spec below this block) are the
+   source of truth and MUST be passed inline to the worker in every
+   dispatch call, delimited by `<CONTENT_RULES>` tags. Do not paraphrase
+   them — copy verbatim.
 
-**Codex dispatch (only when the runtime is Codex):** In some Codex CLI
-versions, `spawn_agent(model="gpt-5.4-mini")` is silently ignored and the
-subagent inherits the parent model (GPT-5.4), which defeats the whole
-cost split. The reliable path is a named agent profile. Define a custom
-agent at `.codex/agents/prefxplain-worker.toml` once:
+---
 
-```toml
-name = "prefxplain_worker"
-model = "gpt-5.4-mini"
-model_reasoning_effort = "medium"
-sandbox_mode = "read-only"
-developer_instructions = """
-Read the given files and return their short_title, description,
-highlights, flowchart, invariants, and watch_if_changed as a single
-JSON dict keyed by file path, per the step 4c content rules.
+**Claude Code dispatch (preferred runtime).** The `prefxplain-worker`
+subagent is shipped with this skill (installed to
+`~/.claude/agents/prefxplain-worker.md` by `prefxplain setup claude-code`)
+and pins `model: haiku` in its frontmatter, so every Task call below
+runs on Claude Haiku 4.5 — no `model` override needed.
+
+For N batches, emit **one assistant turn** with N parallel Task calls.
+Each call looks like:
+
+```
+Task(
+  subagent_type="prefxplain-worker",
+  description="prefxplain batch 1/N",
+  prompt="""
+$LEVEL: middle
+
+Files in this batch:
+- path/to/file_a.py
+- path/to/file_b.ts
+- ...
+
+<CONTENT_RULES>
+... copy the full six-field spec from the section below, verbatim ...
+</CONTENT_RULES>
+
+Return a single JSON dict keyed by the exact paths above, per the rules.
+No prose, no markdown fences.
 """
+)
 ```
 
-Then dispatch batches by agent name (`spawn_agent("prefxplain_worker",
-...)` or `spawn_agents_on_csv` over the batched file list). The model is
-now pinned at profile level and can't silently fall back to GPT-5.4.
-Claude Code / Cursor runtimes ignore this block — they use the
-per-subagent `model:` selection described in bullet 2 above.
+If the `prefxplain-worker` subagent_type is not found (fresh install
+that hasn't run `prefxplain setup` yet), fall through to the inline
+fallback at the end of this subsection — do **not** substitute
+`generalPurpose` at the main model, that silently defeats the cost
+split.
 
-**Fallback** — if the runtime cannot select a subagent model per call, or
-the small/fast model (Haiku 4.5 / GPT-5.4-mini) is not available there,
-run step 4c inline on the main session model. The output rules don't
-change, only the cost does. Do not invent a workaround: falling back to
-the main model for per-file work is strictly better than a half-broken
-subagent setup.
+---
+
+**Cursor dispatch.** The Task tool on Cursor does not expose
+`haiku` as a model slug and the `prefxplain-worker` subagent_type
+doesn't exist there — Cursor uses a fixed baked-in list (`explore`,
+`generalPurpose`, ...). Use `subagent_type="explore"` (readonly is
+fine, the worker only reads) with `model="composer-2-fast"` for the
+small/fast path, or `model="claude-4.6-sonnet-medium-thinking"` if you
+want to stay on a Claude backbone:
+
+```
+Task(
+  subagent_type="explore",
+  model="composer-2-fast",
+  description="prefxplain batch 1/N",
+  prompt="... same body as Claude Code, with $LEVEL, file list, and <CONTENT_RULES> ..."
+)
+```
+
+Do not pass `model="haiku"` — it will be rejected. N parallel calls in
+one turn, same as Claude Code.
+
+---
+
+**Codex dispatch.** Some Codex CLI versions silently ignore
+`spawn_agent(model="gpt-5.4-mini")` and inherit the parent's GPT-5.4,
+which defeats the cost split. The reliable path is the named agent
+profile `prefxplain_worker` (installed to
+`~/.codex/agents/prefxplain-worker.toml` by `prefxplain setup codex`)
+with the model pinned in-file. Dispatch batches by name:
+
+```
+spawn_agent(
+  "prefxplain_worker",
+  prompt="... $LEVEL, file list, <CONTENT_RULES> ..."
+)
+```
+
+…or `spawn_agents_on_csv` over the batched file list. The profile pins
+`model = "gpt-5.4-mini"` so it can't silently fall back.
+
+---
+
+**Inline fallback — last resort only.** Run step 4c inline on the main
+session model **only** when all of the following are true:
+(a) the runtime is neither Claude Code, Cursor, nor Codex (e.g. a bare
+Anthropic API harness with no subagent primitive), **or** (b) the
+`prefxplain-worker` subagent_type / named profile is missing and the
+user has explicitly declined to re-run setup. Even then, batch the
+work (10-20 files per turn) so you can interleave step 4d writes.
+Never silently degrade to inline on a supported runtime — surface the
+missing-worker error to the user and ask them to run
+`prefxplain setup` first.
 
 Process 10-20 files per batch. For each file:
 
@@ -721,7 +790,8 @@ the flowchart `label` / `description` fields below:
 After writing descriptions for a batch, run this script with the dict filled in:
 
 ```bash
-cd $REPO && python3 << 'PYEOF'
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" << 'PYEOF'
 from pathlib import Path
 from prefxplain.graph import Graph
 
@@ -779,7 +849,8 @@ IMPORTANT:
 After all batches, verify nothing was missed:
 
 ```bash
-cd $REPO && python -c "
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" -c "
 import json
 g = json.loads(open('prefxplain.json').read())
 missing = [n['id'] for n in g['nodes'] if not n.get('description')]
@@ -808,7 +879,8 @@ Style (same constraints as file highlights):
 - Empty list `[]` when nothing cross-file stands out. Don't pad.
 
 ```bash
-cd $REPO && python3 << 'PYEOF'
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" << 'PYEOF'
 from pathlib import Path
 from prefxplain.graph import Graph
 
@@ -827,160 +899,11 @@ PYEOF
 
 Skip groups where nothing concrete spans the files. Empty list is fine.
 
-#### 4g. Generate per-group standalone taxonomy
-
-**Model:** Cross-file synthesis — keep the main orchestrating model
-(Claude Opus 4.7 on Claude Code / Cursor, GPT-5.4 on Codex). Do not
-delegate. The taxonomy is short and group-local, but naming the right
-categories requires the same architectural eye as 4a.
-
-**Why this step exists.** A file lands in a group's **standalone band**
-when static analysis sees no imports or importers for it anywhere in the
-repo. That's not the same as "dead code" — it usually means: CLI
-entrypoint, packaging / build glue, config or asset loaded by path,
-script invoked from the shell, framework-invoked runtime entry, codegen
-target, or a genuine orphan. A bare "Standalone" heading lumps all of
-those together and reads as noise to a new reader. This step splits the
-bucket into named sub-bands with a one-sentence hint so the reader
-understands *why* each cluster of files has no graph edges.
-
-**Scope.** For every group that has ≥1 file in its standalone band,
-emit 2–6 categories. Every standalone file in that group must land in
-exactly one category. If a group has 0 standalones, skip it. If the
-taxonomy is absent, the renderer falls back to the legacy flat
-"Standalone" band — so this step is a strict upgrade.
-
-First, enumerate the standalone files per group:
-
-```bash
-cd $REPO && python -c "
-import json
-from collections import Counter
-g = json.loads(open('prefxplain.json').read())
-indeg, outdeg = Counter(), Counter()
-for e in g['edges']:
-    indeg[e['target']] += 1
-    outdeg[e['source']] += 1
-buckets = {}
-for n in g['nodes']:
-    if indeg[n['id']] == 0 and outdeg[n['id']] == 0:
-        grp = n.get('group', '') or '(unassigned)'
-        buckets.setdefault(grp, []).append((n['id'], n.get('short_title','')))
-for grp in sorted(buckets):
-    print(f'GROUP: {grp}  ({len(buckets[grp])} standalones)')
-    for fid, title in sorted(buckets[grp]):
-        print(f'  {fid}  --  {title}')
-"
-```
-
-**Rules for naming categories:**
-
-- Categories are **codebase-specific**. A repo with Flask endpoints and
-  Dockerfiles calls them "HTTP entrypoints" and "Container build glue",
-  not generic "Entry Points" and "Build". If the project has its own
-  vocabulary (e.g. "Skills", "Workers", "Ops playbooks"), use it.
-- Common shapes are a starting point, never a fixed menu:
-  `Entry points`, `Packaging & build`, `Config & assets`,
-  `Scripts & tools`, `Docs & examples`, `Legacy / possibly orphan`.
-- Every category gets a **1-sentence description** (≤140 chars) that
-  names what the files do *and* why it makes sense that they have no
-  graph edges. Good: "CLI scripts launched from the shell — they import
-  the rest of the codebase, nothing imports them back." Bad: "Scripts.".
-- Sort categories by decreasing member count, then alphabetically.
-- Reserve the last category for suspected dead code and name it
-  honestly: "Possibly orphan", "Legacy helpers — verify before
-  deleting". A bucket with 1-2 files flagged like that is far more
-  useful than a silent orphan sitting in a generic "Other" pile.
-
-Voice matches `$LEVEL` (same rules as 4c).
-
-Patch the taxonomy onto each group's `GroupSummary`:
-
-```bash
-cd $REPO && python3 << 'PYEOF'
-from pathlib import Path
-from prefxplain.graph import Graph, GroupSummary, StandaloneCategory
-
-graph = Graph.load(Path("prefxplain.json"))
-
-# FILL THESE IN — group name → list of categories. Every standalone file
-# in the group (from the discovery query above) must appear in exactly
-# one category's member_file_ids. Skip groups with 0 standalones.
-taxonomy: dict[str, list[dict]] = {
-    # "CLI & Integrations": [
-    #     {"category": "CLI entrypoints",
-    #      "description": "Scripts launched from the shell; they import the rest of the codebase at runtime.",
-    #      "member_file_ids": ["cli/main.py", "cli/serve.py"]},
-    #     {"category": "Packaging & build",
-    #      "description": "Setup metadata and manifests used by pip / the build tooling.",
-    #      "member_file_ids": ["setup.py"]},
-    #     {"category": "Possibly orphan",
-    #      "description": "No imports detected anywhere — verify before deleting.",
-    #      "member_file_ids": ["old/legacy_shim.py"]},
-    # ],
-}
-
-for name, cats in taxonomy.items():
-    summary = graph.metadata.group_summaries.setdefault(name, GroupSummary())
-    summary.standalone_taxonomy = [
-        StandaloneCategory(
-            category=c["category"],
-            description=c["description"],
-            member_file_ids=list(c["member_file_ids"]),
-        )
-        for c in cats
-    ]
-
-graph.save(Path("prefxplain.json"))
-patched = sum(len(cats) for cats in taxonomy.values())
-print(f"Patched {patched} standalone categories across {len(taxonomy)} groups")
-PYEOF
-```
-
-**Completeness check.** Re-run the discovery query above and compare
-file ids against what you patched. Every standalone file in a group
-with a non-empty taxonomy must appear in exactly one category — a
-missing file silently drops out of the UI.
-
-**`prefxplain.json` schema addition.** The patch above extends each
-group's `GroupSummary` with a new `standalone_taxonomy` array. On disk
-the shape is:
-
-```json
-{
-  "metadata": {
-    "group_summaries": {
-      "CLI & Integrations": {
-        "semantic_role": "...",
-        "standalone_taxonomy": [
-          {
-            "category": "CLI entrypoints",
-            "description": "Scripts launched from the shell; they import the rest of the codebase at runtime.",
-            "member_file_ids": ["cli/main.py", "cli/serve.py"]
-          },
-          {
-            "category": "Possibly orphan",
-            "description": "No imports detected anywhere — verify before deleting.",
-            "member_file_ids": ["old/legacy_shim.py"]
-          }
-        ]
-      }
-    }
-  }
-}
-```
-
-Categories with an empty `category` name or an empty `member_file_ids`
-list are stripped at serialization time. If the entire array is empty
-or absent, the renderer falls back to the legacy flat `STANDALONE`
-band — so this field is always optional and a strict upgrade when
-present.
-
-#### 4h. Generate executive summary + health score
+#### 4g. Generate executive summary + health score
 
 **Model:** The highest-leverage synthesis step in the whole run — keep
 the main orchestrating model (Claude Opus 4.7 on Claude Code / Cursor,
-GPT-5.4 on Codex). Never delegate 4h; the summary is what ends up in
+GPT-5.4 on Codex). Never delegate 4g; the summary is what ends up in
 decks, onboarding docs, and investor materials.
 
 This is the most important step. The summary is what founders paste into decks
@@ -989,7 +912,8 @@ and what devs read to understand a project in 30 seconds.
 First, collect the structural signals you need. Run:
 
 ```bash
-cd $REPO && python -c "
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" -c "
 import json
 from collections import Counter
 g = json.loads(open('prefxplain.json').read())
@@ -1048,7 +972,8 @@ files to write:
 Patch them into the JSON:
 
 ```bash
-cd $REPO && python3 << 'PYEOF'
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" << 'PYEOF'
 from pathlib import Path
 from prefxplain.graph import Graph
 
@@ -1071,7 +996,8 @@ any project, rewrite it.
 ### 5. Render the final HTML
 
 ```bash
-cd $REPO && python -c "
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" -c "
 from pathlib import Path
 from prefxplain.graph import Graph
 from prefxplain.renderer import render

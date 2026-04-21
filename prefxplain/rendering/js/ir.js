@@ -566,6 +566,7 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
   bandGapX = 44,
   cardGapY = 18,
   standaloneCollapsed = false,
+  maxCols = 3,
 } = {}) {
   const fileSize = showBullets ? PX.NODE_SIZES.fileBullets : PX.NODE_SIZES.fileNoBullets;
   const cw = fileSize.w, ch = fileSize.h;
@@ -599,7 +600,7 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
     // Narrow layout: each band is a row, files wrap as 2+ per row.
     for (const band of columnBands) {
       const bandX = leftPad;
-      const perRow = Math.max(1, Math.floor((canvasWidth - 2 * leftPad + bandGapX) / (cw + bandGapX)));
+      const perRow = Math.min(maxCols, Math.max(1, Math.floor((canvasWidth - 2 * leftPad + bandGapX) / (cw + bandGapX))));
       const rows = Math.ceil(band.files.length / perRow);
       const bandH = rows * ch + (rows - 1) * cardGapY;
       for (let i = 0; i < band.files.length; i++) {
@@ -660,7 +661,7 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
   // groups that previously inherited totalW=0 and degenerated to one column).
   if (testBand && testBand.files.length > 0) {
     const usableW = canvasWidth - 2 * leftPad;
-    const perRow = Math.max(1, Math.floor((usableW + bandGapX) / (cw + bandGapX)));
+    const perRow = Math.min(maxCols, Math.max(1, Math.floor((usableW + bandGapX) / (cw + bandGapX))));
 
     // Clustered layout: one sub-column per test target ("tests for analyzer.py").
     // Falls through to the flat layout if no clusters were computed.
@@ -757,6 +758,12 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
   // When standaloneCollapsed=true (user clicked the ▶ toggle): emit only the
   // outer band rect (h=0, so just the dashed-rule label chrome) and skip all
   // file positions. The canvas height stays accurate — no blank space.
+  //
+  // Two-section architecture: standalone nodes are NEVER passed to ELK.
+  // The nested renderer places them below the core section's actual ELK bottom.
+  // standaloneStartY records where the standalone section begins so the renderer
+  // can compute the correct Y-offset shift after ELK runs.
+  let standaloneStartY = cursorY;
   if (standaloneBand && standaloneBand.files.length > 0) {
     const usableW = canvasWidth - 2 * leftPad;
     if (standaloneCollapsed) {
@@ -853,59 +860,43 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
 
   totalH = cursorY;
 
-  // Build ELK IR with hand-positioned children. Use algorithm=fixed so ELK
-  // respects (x, y) and only computes edge polylines. Keep FIXED_SIDE ports.
-  //
-  // Each edge gets UNIQUE per-edge ports on source (SOUTH) and target
-  // (NORTH) so ELK fans them out along the card's bottom/top edges, giving
-  // every arrow its own lane at the port. Shared .in/.out ports collapsed
-  // every edge onto the card's midline — parallel arrows then stacked on
-  // top of each other near the endpoints, which read as a single ribbon.
-  // We keep SOUTH/NORTH everywhere: mixing EAST/WEST on the same card under
-  // algorithm=fixed caused ELK to abort ("edge section count 0") for some
-  // combinations. The card-detour post-pass handles obstacle avoidance.
-  const outPortsByNode = {};
-  const inPortsByNode = {};
-  story.edges.forEach((e, i) => {
-    (outPortsByNode[e.source] = outPortsByNode[e.source] || []).push(`${e.source}.out-gs${i}`);
-    (inPortsByNode[e.target]  = inPortsByNode[e.target]  || []).push(`${e.target}.in-gs${i}`);
-  });
+  // Build ELK IR. We use layered + partitioning:
+  // Each architecture band (entry, core, leaf, test) is assigned its own ELK
+  // partition. Partitioning forces same-band files into the same layer (column),
+  // regardless of intra-band edges. Without this, ELK splits every connected
+  // pair into separate layers → 8+ horizontal columns instead of 3.
+  // portConstraints:FREE lets ELK pick the best edge exit side per hop.
+  // Only core (non-standalone) nodes enter ELK.
+  const BAND_PARTITION = { entry: 0, core: 1, leaf: 2, test: 3 };
+  const fileBandKey = {};
+  for (const band of story.bands) {
+    for (const f of band.files) fileBandKey[f.id] = band.key;
+  }
+
   const children = [];
   for (const band of story.bands) {
     for (const f of band.files) {
       const pos = positions[f.id];
       if (!pos) continue;
-      const isStandalone = standaloneIds.has(f.id);
-      const nodeH = isStandalone ? CH_STANDALONE : ch;
-      const ports = [];
-      for (const pid of outPortsByNode[f.id] || []) {
-        ports.push({ id: pid, properties: { 'port.side': 'SOUTH' } });
-      }
-      for (const pid of inPortsByNode[f.id] || []) {
-        ports.push({ id: pid, properties: { 'port.side': 'NORTH' } });
-      }
-      // Fallback for isolated cards so ELK always has at least one port per side.
-      if (ports.length === 0) {
-        ports.push(_port(f.id, 'NORTH'), _port(f.id, 'SOUTH'));
-      }
+      if (standaloneIds.has(f.id)) continue;
+      const partition = BAND_PARTITION[band.key] ?? 0;
       children.push({
         id: f.id,
         x: pos.x,
         y: pos.y,
         width: cw,
-        height: nodeH,
-        ports,
+        height: ch,
         properties: {
-          'org.eclipse.elk.portConstraints': 'FIXED_SIDE',
-          'org.eclipse.elk.position': `(${pos.x},${pos.y})`,
+          'org.eclipse.elk.portConstraints': 'FREE',
+          'org.eclipse.elk.partitioning.partition': String(partition),
         },
       });
     }
   }
   const edges = story.edges.map((e, i) => ({
     id: `gs${i}`,
-    sources: [`${e.source}.out-gs${i}`],
-    targets: [`${e.target}.in-gs${i}`],
+    sources: [e.source],
+    targets: [e.target],
     count: e.count,
     labelled: e.labelled,
     sourceNode: e.source,
@@ -917,19 +908,21 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
     children,
     edges,
     layoutOptions: {
-      'elk.algorithm': 'fixed',
+      'elk.algorithm': 'layered',
+      'elk.partitioning.activate': 'true',
+      'elk.layered.nodePlacement.strategy': 'INTERACTIVE',
       'elk.edgeRouting': 'ORTHOGONAL',
-      // Wider edge-edge spacing stops parallel arrows from collapsing onto
-      // the same horizontal/vertical run (each gets its own visible lane).
-      // edgeNode spacing keeps the routed polylines clear of card borders
-      // so the card-detour pass in the view rarely has to fire.
       'elk.spacing.edgeEdge': '24',
       'elk.spacing.edgeNode': '32',
+      'elk.spacing.nodeNode': '22',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '72',
     },
   };
   return {
     ir,
     positions,
+    standaloneIds,
+    standaloneStartY,
     bandRects,
     canvasW: Math.max(totalW + 2 * leftPad, canvasWidth),
     canvasH: totalH + topPad,

@@ -42,6 +42,10 @@ SKIP_DIRS = {
     "out", "node_modules",
 }
 
+# Directories whose __init__.py should not anchor a package root (they're test
+# namespaces, not import roots).  The directories themselves are still analyzed.
+_PKG_ROOT_FILTER = {"tests", "test", "__tests__", "testing"}
+
 # Dot-directories the walker keeps instead of blanket-skipping them.
 # .github houses CI workflows, .vscode/.devcontainer house IDE/dev env config —
 # high-signal non-code files users often want surfaced.
@@ -82,6 +86,104 @@ def _is_config_file(path: Path, root: Path) -> bool:
         if fnmatch.fnmatch(target, pattern):
             return True
     return False
+
+
+def discover_package_roots(repo: Path) -> list[tuple[Path, str]]:
+    """Heuristic: find Python package roots by climbing __init__.py chains.
+
+    For each __init__.py, climb until the parent no longer contains an
+    __init__.py — that outermost package's parent is an import root.  Filters
+    out test namespaces so they don't pollute the root list.
+
+    Returns list of (root_path, reason) sorted by path length (shallowest first).
+    """
+    skip = SKIP_DIRS | _PKG_ROOT_FILTER
+    repo_str = str(repo)
+    roots: dict[Path, str] = {}
+
+    for init in repo.rglob("__init__.py"):
+        if any(part in skip for part in init.parts):
+            continue
+        # Climb while parent is still a package
+        pkg_top = init.parent
+        while True:
+            parent = pkg_top.parent
+            if not str(parent).startswith(repo_str):
+                break
+            if not (parent / "__init__.py").exists():
+                break
+            pkg_top = parent
+        # pkg_top is the outermost package dir; its parent is the import root
+        pkg_root = pkg_top.parent
+        if pkg_root not in roots:
+            roots[pkg_root] = f"heuristic: {pkg_top.name}/__init__.py"
+
+    return sorted(roots.items(), key=lambda kv: len(kv[0].parts))
+
+
+def _parse_pyproject_roots(repo: Path) -> list[tuple[Path, str]]:
+    """Parse pyproject.toml at repo root for explicit source directories.
+
+    Reads [tool.setuptools], [tool.setuptools.packages.find], and
+    [tool.poetry] stanzas.  Returns [] if tomllib/tomli is unavailable
+    (Python < 3.11 without the backport) — the heuristic covers most cases.
+    """
+    pyproject = repo / "pyproject.toml"
+    if not pyproject.exists():
+        return []
+
+    try:
+        import tomllib  # Python 3.11+
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[no-reattr]
+        except ImportError:
+            return []
+
+    try:
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+    roots: list[tuple[Path, str]] = []
+    tool = data.get("tool", {})
+
+    # [tool.setuptools] package-dir = {"": "src"}
+    st = tool.get("setuptools", {})
+    pkg_dir = st.get("package-dir", {})
+    if "" in pkg_dir:
+        src = repo / pkg_dir[""]
+        if src.is_dir():
+            roots.append((src, "config: pyproject.toml [tool.setuptools]"))
+
+    # [tool.setuptools.packages.find] where = ["src"]
+    packages = st.get("packages", {})
+    if isinstance(packages, dict):
+        for w in packages.get("find", {}).get("where", []):
+            src = repo / w
+            if src.is_dir():
+                roots.append((src, "config: pyproject.toml [tool.setuptools.packages.find]"))
+
+    # [tool.poetry] packages = [{include = "foo", from = "src"}]
+    for pkg in tool.get("poetry", {}).get("packages", []):
+        if isinstance(pkg, dict) and pkg.get("from"):
+            src = repo / pkg["from"]
+            if src.is_dir():
+                roots.append((src, "config: pyproject.toml [tool.poetry]"))
+
+    # [tool.hatch.build.targets.wheel] packages = ["src/mylib"]
+    for pkg_path in (
+        tool.get("hatch", {})
+        .get("build", {})
+        .get("targets", {})
+        .get("wheel", {})
+        .get("packages", [])
+    ):
+        src = (repo / pkg_path).parent
+        if src.is_dir():
+            roots.append((src, "config: pyproject.toml [tool.hatch]"))
+
+    return roots
 
 
 def _git_changed_files(root: Path) -> list[Path]:
@@ -238,7 +340,8 @@ def _analyze_python(
 
 
 def _resolve_python_import(
-    raw: str | tuple[str, int], source_file: Path, root: Path
+    raw: str | tuple[str, int], source_file: Path, root: Path,
+    pkg_roots: list[Path] | None = None,
 ) -> str | None:
     """Resolve a Python import to a file path relative to root.
 
@@ -250,6 +353,9 @@ def _resolve_python_import(
     walking up `level` packages. `from . import x` is represented as
     `(module="x", level=1)`, so we try `<parent>/x.py` first, then
     `<parent>/x/__init__.py`.
+
+    pkg_roots: ordered list of import roots to search (config first, heuristic
+    next, legacy fallbacks last).  When None, the old src/lib heuristic is used.
     """
     # Back-compat: allow plain strings (treated as absolute)
     if isinstance(raw, tuple):
@@ -285,29 +391,33 @@ def _resolve_python_import(
                     return None
         return None
 
-    # Absolute import
+    # Absolute import — search all registered roots in priority order.
     if not module:
         return None
     parts = module.split(".")
-    candidate_file = root / Path(*parts).with_suffix(".py")
-    candidate_pkg = root / Path(*parts) / "__init__.py"
+    root_resolved = root.resolve()
 
-    if candidate_file.exists():
-        return str(candidate_file.relative_to(root))
-    if candidate_pkg.exists():
-        return str(candidate_pkg.relative_to(root))
+    # Build search order: explicit pkg_roots first, then legacy fallbacks.
+    search_roots: list[Path] = list(pkg_roots) if pkg_roots else []
+    for fallback in (root, root / "src", root / "lib"):
+        if fallback not in search_roots:
+            search_roots.append(fallback)
 
-    # Also try common src layouts: src/<pkg>/...
-    for src_root_name in ("src", "lib"):
-        src_root = root / src_root_name
-        if not src_root.exists():
+    for search_root in search_roots:
+        if not search_root.is_dir():
             continue
-        candidate_file = src_root / Path(*parts).with_suffix(".py")
-        candidate_pkg = src_root / Path(*parts) / "__init__.py"
+        candidate_file = search_root / Path(*parts).with_suffix(".py")
+        candidate_pkg = search_root / Path(*parts) / "__init__.py"
         if candidate_file.exists():
-            return str(candidate_file.relative_to(root))
+            try:
+                return str(candidate_file.resolve().relative_to(root_resolved))
+            except ValueError:
+                continue
         if candidate_pkg.exists():
-            return str(candidate_pkg.relative_to(root))
+            try:
+                return str(candidate_pkg.resolve().relative_to(root_resolved))
+            except ValueError:
+                continue
 
     # Fallback: try relative to source file's directory
     rel_dir = source_file.parent
@@ -961,6 +1071,26 @@ def analyze(
         include_changed=include_changed,
     )
 
+    # Discover Python package roots (config > heuristic > legacy fallbacks).
+    # Printed so users can immediately see why imports resolve (or don't).
+    cfg_roots = _parse_pyproject_roots(root)
+    heuristic_roots = [
+        (p, r) for p, r in discover_package_roots(root)
+        if not any(p == cp for cp, _ in cfg_roots)
+    ]
+    all_root_entries = cfg_roots + heuristic_roots
+    pkg_roots: list[Path] = [p for p, _ in all_root_entries]
+
+    if all_root_entries:
+        print("Package roots detected:")
+        for p, reason in all_root_entries:
+            try:
+                label = str(p.relative_to(root)) or "."
+            except ValueError:
+                label = str(p)
+            print(f"  {label}  ({reason})")
+        print(f"Resolving imports from {len(pkg_roots)} root(s).")
+
     # Load TypeScript/JS path aliases once for the whole project
     ts_aliases = _load_ts_aliases(root)
 
@@ -1024,14 +1154,27 @@ def analyze(
 
     # Pass 2: create edges (using cached analysis, no re-parse)
     seen_edges: set[tuple[str, str]] = set()
+    # Track unresolved absolute Python imports for the orphan-import warning.
+    _failed_abs: dict[str, int] = {}
+    # Resolution coverage counters (internal = resolved to a node in graph).
+    _total_imports = 0
+    _internal_imports = 0
+    _external_imports = 0
 
     for fpath in files:
         rel = str(fpath.relative_to(root))
         lang, raw_imports = file_analysis[rel]
 
         for raw in raw_imports:
+            _total_imports += 1
             if lang == "python":
-                target = _resolve_python_import(raw, fpath, root)
+                target = _resolve_python_import(raw, fpath, root, pkg_roots=pkg_roots)
+                # Record misses for the orphan-import warning (absolute only).
+                if target is None and isinstance(raw, tuple):
+                    module, level = raw
+                    if level == 0 and module:
+                        top = module.split(".")[0]
+                        _failed_abs[top] = _failed_abs.get(top, 0) + 1
             elif lang in ("javascript", "typescript"):
                 target = _resolve_js_import(raw, fpath, root, aliases=ts_aliases)
             elif lang in ("c", "c++"):
@@ -1048,6 +1191,48 @@ def analyze(
             if target and target in node_ids and (rel, target) not in seen_edges:
                 graph.edges.append(Edge(source=rel, target=target, type="imports"))
                 seen_edges.add((rel, target))
+                _internal_imports += 1
+            elif target is None:
+                _external_imports += 1
+
+    # Orphan-import warning: top-level names that appear ≥5 times as external
+    # but match a real directory in the repo — almost certainly a missing root.
+    if _failed_abs:
+        repo_dirs: dict[str, Path] = {}
+        for dirpath, dirnames, _ in os.walk(root, followlinks=False):
+            # Mirror the same pruning as _collect_files so we don't false-positive
+            # on .mypy_cache, .venv, node_modules, etc.
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in SKIP_DIRS
+                and (not d.startswith(".") or d in ALLOWED_DOTDIRS)
+            ]
+            for d in dirnames:
+                if d not in repo_dirs:
+                    repo_dirs[d] = Path(dirpath) / d
+        for name, count in sorted(_failed_abs.items(), key=lambda kv: -kv[1]):
+            if count >= 5 and name in repo_dirs:
+                match_path = repo_dirs[name]
+                try:
+                    parent_rel = str(match_path.parent.relative_to(root)) or "."
+                except ValueError:
+                    parent_rel = str(match_path.parent)
+                print(
+                    f"\n⚠  {count} imports of `{name}` classified as external,\n"
+                    f"   but `{parent_rel}/{name}/` exists in the repo.\n"
+                    f"   → re-run from inside `{parent_rel}/`, or\n"
+                    f"   → add `{parent_rel}` to [tool.prefxplain] package_roots in pyproject.toml"
+                )
+
+    # Resolution coverage summary (helps users spot misconfigured roots quickly).
+    if _total_imports > 0:
+        _other = _total_imports - _internal_imports - _external_imports
+        msg = f"Imports resolved: {_internal_imports}/{_total_imports} internal"
+        if _external_imports:
+            msg += f", {_external_imports} external/stdlib"
+        if _other:
+            msg += f", {_other} cross-file deduped"
+        print(msg)
 
     # ── Prune trivial nodes that add noise to the diagram ──────────────
     # Compute in/out degree for pruning decisions
@@ -1079,5 +1264,8 @@ def analyze(
     graph.metadata.total_files = len(graph.nodes)
     graph.metadata.languages = languages
     graph.metadata.generated_at = datetime.now(timezone.utc).isoformat()
+    graph.metadata.package_roots = [
+        str(p.relative_to(root)) if p != root else "." for p in pkg_roots
+    ]
 
     return graph

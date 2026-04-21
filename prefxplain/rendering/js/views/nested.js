@@ -198,141 +198,60 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     standaloneCollapsed,
   });
 
-  // Hand-route intra-group edges using the known band/column structure.
-  //
-  // ELK's 'fixed' algorithm proved fragile for this layout — it aborts with
-  // "edge section count 0" on some graphs and leaves zero polylines. Hand-
-  // routing is deterministic, respects the rules, and always succeeds.
-  //
-  // The rules we enforce:
-  //   1. Arrows NEVER cross a card. Horizontal runs sit in the gap BETWEEN
-  //      columns (empty by construction) or BELOW all cards (trunk zone).
-  //      Vertical runs sit in a column's side gap.
-  //   2. The arrowhead tip lands AT the target's border.
-  //   3. Each arrow owns its own corridor (per-edge lane offset).
-  //
-  // Routing strategy (picked per edge from relative position):
-  //   SHORT HOP (same col OR adjacent col, dx ≤ cw + bandGapX):
-  //     4-point C/Z shape flowing horizontally through the gap between
-  //     source and target. Enters target from its WEST or EAST side.
-  //     Short path, stays inside the visible band area — no risk of
-  //     overshooting the canvas top.
-  //   LONG HOP (>1 column apart):
-  //     6-point trunk route: source.SOUTH → down to trunk below all cards
-  //     → across → up in target's side-gap → across above target → DOWN
-  //     into target.NORTH. Only this shape can skip over intermediate
-  //     columns without crossing their cards.
-  const cards = layout.ir.children || [];
-  const cardById = Object.fromEntries(cards.map(c => [c.id, c]));
-  const mainBandsBottomY = cards.length > 0
-    ? Math.max(...cards.map(c => c.y + c.height))
-    : 0;
-  const TRUNK_BASE = mainBandsBottomY + 20;
-  const APPROACH_MARGIN = 18;
-  const GAP_OFFSET = 22;
-  // Column width including the bandGapX that separates parallel columns.
-  // We use this to decide whether a hop crosses zero, one, or many gaps.
-  const BAND_GAP_X = 72;            // matches buildGroupStoryLayoutIr call
-  const CARD_WIDTH = cards.length > 0 ? cards[0].width : 304;
-  const COL_STRIDE = CARD_WIDTH + BAND_GAP_X;
+  // ELK layered+interactive routes edges with ORTHOGONAL routing while
+  // respecting pre-positioned nodes (set by buildGroupStoryLayoutIr).
+  // portConstraints:FREE lets ELK assign EAST/WEST for inter-column hops
+  // and SOUTH/NORTH for same-column hops — no hand-routing needed.
+  const laid = await PX.runLayout(layout.ir);
+  const laidNodesById = PX._collectNodes(laid);
+  const rawPolylines = PX.extractEdgePolylines(laid);
+  const irEdgesById = Object.fromEntries((layout.ir.edges || []).map(e => [e.id, e]));
 
-  const edgesRouted = layout.ir.edges.map((e, i) => {
-    const sNode = cardById[e.sourceNode];
-    const tNode = cardById[e.targetNode];
-    if (!sNode || !tNode) return null;
+  // Merge IR edge metadata (count, labelled, sourceNode, targetNode) into polylines.
+  const edgesContentFrame = rawPolylines.map(p => ({ ...p, ...(irEdgesById[p.id] || {}) }));
 
-    const dx = tNode.x - sNode.x;
-    const numColsApart = Math.round(Math.abs(dx) / COL_STRIDE);
-    const laneX = i * 10;
-    const laneY = i * 10;
-
-    const sMidY = sNode.y + sNode.height / 2;
-    const tMidY = tNode.y + tNode.height / 2;
-
-    let points;
-
-    if (numColsApart === 0) {
-      // Same column — 4-point C route in the RIGHT gap of the column.
-      // Enters target from its EAST side, so arrowhead touches the right
-      // border of the card.
-      const gapX = sNode.x + sNode.width + GAP_OFFSET + laneX;
-      const sSideX = sNode.x + sNode.width;
-      const tSideX = tNode.x + tNode.width;
-      points = [
-        { x: sSideX, y: sMidY },     // source.EAST
-        { x: gapX,   y: sMidY },     // horiz into right gap
-        { x: gapX,   y: tMidY },     // vert in right gap
-        { x: tSideX, y: tMidY },     // horiz back into target.EAST
-      ];
-    } else if (numColsApart === 1) {
-      // Adjacent columns — 4-point route through the gap between them.
-      // Arrow flows left→right (or right→left), enters target from the
-      // WEST or EAST side depending on direction.
-      const rightward = dx > 0;
-      const gapCenterX = rightward
-        ? sNode.x + sNode.width + BAND_GAP_X / 2 + laneX - (BAND_GAP_X / 4)
-        : sNode.x - BAND_GAP_X / 2 - laneX + (BAND_GAP_X / 4);
-      const sSideX = rightward ? sNode.x + sNode.width : sNode.x;
-      const tSideX = rightward ? tNode.x : tNode.x + tNode.width;
-      points = [
-        { x: sSideX,    y: sMidY },
-        { x: gapCenterX, y: sMidY },
-        { x: gapCenterX, y: tMidY },
-        { x: tSideX,    y: tMidY },
-      ];
-    } else {
-      // Far hop (skips one or more columns) — 6-point trunk route below
-      // all cards. Only this shape can get past intermediate columns.
-      const sx = sNode.x + sNode.width / 2;
-      const sy = sNode.y + sNode.height;
-      const tx = tNode.x + tNode.width / 2;
-      const ty = tNode.y;
-      const trunkY = TRUNK_BASE + laneY;
-      const approachY = ty - APPROACH_MARGIN;
-      const gapX = dx > 0
-        ? tNode.x - GAP_OFFSET - laneX
-        : tNode.x + tNode.width + GAP_OFFSET + laneX;
-      points = [
-        { x: sx,   y: sy },
-        { x: sx,   y: trunkY },
-        { x: gapX, y: trunkY },
-        { x: gapX, y: approachY },
-        { x: tx,   y: approachY },
-        { x: tx,   y: ty },
-      ];
-    }
-
-    return {
-      ...e,
-      source: `${e.sourceNode}.out-gs${i}`,
-      target: `${e.targetNode}.in-gs${i}`,
-      points,
-    };
-  }).filter(Boolean);
-
-  // Used only for bounding-box computation later (layout.ir.children already
-  // carry absolute coordinates in the pre-translate frame); we no longer
-  // need ELK's laid tree for anything.
-  const laid = null;
-
-  // Translate everything by (mainLeft, bandsStartY) so the boundary anchor
-  // columns on the left stay clear of the main bands.
+  // Two-section architecture:
+  // Core section — all nodes returned by ELK (ELK repositioned them freely
+  //   since standalone was excluded and every node here has at least one edge).
+  // Standalone section — hand-positioned below the core's actual ELK bottom.
+  //   They never enter ELK so ELK can't shunt them to an arbitrary layer.
   const nodesById = {};
-  for (const c of layout.ir.children) {
-    nodesById[c.id] = {
-      id: c.id,
-      x: c.x + mainLeft,
-      y: c.y + bandsStartY,
-      w: c.width,
-      h: c.height,
+  const fileSize = CW_NAT;
+  const CH_STANDALONE = PX.NODE_SIZES.fileNoBullets.h;
+  for (const [id, n] of Object.entries(laidNodesById)) {
+    nodesById[id] = { id, x: n.x + mainLeft, y: n.y + bandsStartY, w: n.w, h: n.h };
+  }
+
+  // Compute actual ELK core bottom (in ir coordinates) to anchor standalone below.
+  const coreIrBottom = Object.values(laidNodesById).length > 0
+    ? Math.max(...Object.values(laidNodesById).map(n => n.y + n.h))
+    : (layout.standaloneStartY || 0);
+  const STANDALONE_GAP = 72; // matches bandGapY passed to buildGroupStoryLayoutIr
+  const standaloneIrTop = coreIrBottom + STANDALONE_GAP;
+
+  for (const [id, pos] of Object.entries(layout.positions)) {
+    if (!layout.standaloneIds.has(id)) continue;
+    const relY = pos.y - layout.standaloneStartY;
+    nodesById[id] = {
+      id,
+      x: pos.x + mainLeft,
+      y: standaloneIrTop + relY + bandsStartY,
+      w: fileSize,
+      h: CH_STANDALONE,
     };
   }
-  const bandRects = layout.bandRects.map(b => ({
-    ...b,
-    x: b.x + mainLeft,
-    y: b.y + bandsStartY,
-  }));
-  const edgesTranslated = edgesRouted.map(e => _translateEdge(e, mainLeft, bandsStartY));
+
+  // Translate bandRects; shift standalone bands to match the new standalone section Y.
+  const standaloneIrShift = standaloneIrTop - layout.standaloneStartY;
+  const bandRects = layout.bandRects.map(b => {
+    const isStandaloneBand = b.key === 'standalone' || b.key === 'standalone-sub';
+    return {
+      ...b,
+      x: b.x + mainLeft,
+      y: b.y + (isStandaloneBand ? standaloneIrShift : 0) + bandsStartY,
+    };
+  });
+  const edgesTranslated = edgesContentFrame.map(e => _translateEdge(e, mainLeft, bandsStartY));
 
   // Rule: arrows never cross cards — they must go AROUND them. ELK's router
   // mostly honors this under FIXED with ORTHOGONAL + generous edgeNode
@@ -416,14 +335,19 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   // at least as tall as the tallest anchor column. USE_ZONE_H reserves the
   // horizontal USE trunk zone below the bands so the stress strip doesn't
   // collide with below-bands trunks.
-  const bandsH = layout.canvasH;
+  // Actual content height: max bottom across all placed nodes (both ELK-positioned
+  // core nodes and hand-positioned standalone nodes), converted back to ir frame.
+  const actualContentBottom = Object.values(nodesById).reduce(
+    (m, n) => Math.max(m, n.y - bandsStartY + n.h), layout.canvasH
+  );
+  const bandsH = actualContentBottom;
   const anchorsStackH = maxAnchorCount > 0
     ? maxAnchorCount * ANCHOR_H + Math.max(0, maxAnchorCount - 1) * ANCHOR_GAP_Y
     : 0;
   // Reserve room below the bands for the hand-routed trunk zone. Without
   // this, the trunk Y (mainBandsBottomY + 20 + lane*10) can overshoot bandsH
   // for groups with many edges, pushing the polyline past the canvas.
-  const allEdgeYs = edgesRouted.flatMap(e => (e.points || []).map(p => p.y));
+  const allEdgeYs = edgesContentFrame.flatMap(e => (e.points || []).map(p => p.y));
   const maxEdgeY = allEdgeYs.length > 0 ? Math.max(...allEdgeYs) : 0;
   const neededH = Math.max(bandsH, maxEdgeY + 20);
   const contentH = Math.max(neededH + USE_ZONE_H, anchorsStackH);
@@ -432,7 +356,10 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   });
   const STRESS_H = stressPreview.h;
   const totalH = bandsStartY + contentH + (STRESS_H ? GAP + STRESS_H : 0) + TOP;
-  const W = CANVAS;
+  // Expand W to cover ELK's actual node positions — ELK interactive mode
+  // can place nodes slightly beyond the hand-computed CANVAS width.
+  const maxNodeRight = Object.values(nodesById).reduce((m, n) => Math.max(m, n.x + n.w), 0);
+  const W = Math.max(CANVAS, maxNodeRight + LEFT);
   const H = totalH;
 
   // Anchor positions (centered vertically within the content area).
@@ -862,7 +789,7 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   if (STRESS_H > 0) {
     const stress = PX.components.stressStrip({
       x: LEFT,
-      y: bandsStartY + bandsH + USE_ZONE_H + GAP,
+      y: bandsStartY + contentH + GAP,
       w: CANVAS - 2 * LEFT,
       stress: story.stress,
     });

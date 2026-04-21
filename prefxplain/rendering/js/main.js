@@ -76,7 +76,7 @@
   bottomRight.appendChild(minimapHost);
   const miniMap = PX.ui.minimap(minimapHost, { graph, groupsMeta });
 
-  // Three buttons in the bottom-right: zoom to 150%, 175%, and reset to 100%.
+  // Four buttons in the bottom-right: zoom to 50%, 100%, 150%, 175%.
   // Zoom is tracked per mode (overview vs focused group) so each keeps its
   // own scale across toggles. Mode is derived from state.focusedGroup.
   const zoomKey = () => (state.focusedGroup ? 'focused' : 'overview');
@@ -95,7 +95,8 @@
   const z175 = btn('175%', 'Zoom in to 175%');
   const zIn = btn('150%', 'Zoom in to 150%');
   const zOut = btn('100%', 'Reset to 100%');
-  zoomPanel.append(z175, zIn, zOut);
+  const zHalf = btn('50%', 'Zoom out to 50%');
+  zoomPanel.append(z175, zIn, zOut, zHalf);
   bottomRight.appendChild(zoomPanel);
 
   const applyZoom = () => {
@@ -109,11 +110,12 @@
   z175.onclick = () => setZoom(1.75);
   zIn.onclick = () => setZoom(1.5);
   zOut.onclick = () => setZoom(1);
+  zHalf.onclick = () => setZoom(0.5);
   applyZoom();
   // Pinch shortcut: one step per gesture.
   // After a step fires, ignore all wheel events for 500ms (fixed cooldown).
   // The user must release and re-pinch to trigger the next step.
-  const zoomLevels = [1, 1.5, 1.75];
+  const zoomLevels = [0.5, 1, 1.5, 1.75];
   let pinchCooldown = false;
   canvasWrap.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;

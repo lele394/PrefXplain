@@ -253,6 +253,7 @@ class GraphMetadata:
     # working (renderer.py/top-panel both read the flat `groups` string map).
     group_summaries: dict[str, GroupSummary] = field(default_factory=dict)
     level: str = ""  # audience level used for descriptions: newbie | middle | strong | expert
+    package_roots: list[str] = field(default_factory=list)  # import roots detected at analysis time
 
     def to_dict(self) -> dict:
         d = {
@@ -280,6 +281,8 @@ class GraphMetadata:
             }
         if self.level:
             d["level"] = self.level
+        if self.package_roots:
+            d["package_roots"] = self.package_roots
         return d
 
     @classmethod
@@ -302,6 +305,7 @@ class GraphMetadata:
             group_highlights=dict(d.get("group_highlights") or {}),
             group_summaries=summaries,
             level=d.get("level", ""),
+            package_roots=d.get("package_roots", []),
         )
 
 

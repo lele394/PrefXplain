@@ -14,6 +14,13 @@ All notable changes to PrefXplain are documented here.
 ### Changed
 - **Default audience level is now `newbie`** (was `middle`). Run `/prefxplain middle` (or any other level) to override.
 - Card and group dimensions enlarged so bullet highlights remain readable at the worst-case zoom-out.
+- **Group Map: max 3 columns**: the overview now uses Coffman-Graham layering (`layerBound=3`), so architectural groups always arrange in at most 3 columns. Previously all groups could land in one horizontal row, making dependency arrows invisible.
+- **Group Map: arrow labels removed**: "[Tests] imports 5× [CLI]" labels are gone. Coupling strength is now communicated by arrow thickness alone, reducing visual noise.
+- **Group Map: ↑N / ↓M dependency badges**: each group card shows how many groups import it (↑N) and how many it imports (↓M). Border thickness also scales with in-degree — foundational groups look visually heavier.
+- **Focused group view: horizontal scroll**: the inner diagram renders at natural pixel width instead of scaling down to fit the container. Groups with more than 3 file columns now scroll horizontally instead of squishing to fit.
+
+### Fixed
+- **`standaloneCollapsed` ReferenceError**: clicking a group block when using the focused view threw "standaloneCollapsed is not defined". The variable is now correctly scoped in both render paths.
 
 ---
 

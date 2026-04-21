@@ -567,6 +567,7 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
   bandGapY = 52,
   bandGapX = 44,
   cardGapY = 18,
+  standaloneCollapsed = false,
 } = {}) {
   const fileSize = showBullets ? PX.NODE_SIZES.fileBullets : PX.NODE_SIZES.fileNoBullets;
   const cw = fileSize.w, ch = fileSize.h;
@@ -745,18 +746,33 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
   }
 
   // Standalone band: pure orphans (no edges anywhere). Rendered as a compact
-  // full-width grid with shorter cards so they don't dominate the layout.
+  // grid capped to the CORE content width so they don't push the canvas wider.
   //
   // Taxonomy split: when buildGroupStory has attached a taxonomy (LLM-defined
   // semantic categories — see prefxplain.md §4g), we break the single grid
   // into N stacked sub-bands, each with its own 2-line chrome (category name
   // + 1-line description). Sub-bands share the column grid and stack with a
   // tighter gap so they read as one grouped section. The outer 'standalone'
-  // rect is still emitted so existing consumers that iterate bandRects by
-  // key keep working; the nested renderer suppresses its label when sub-
-  // bands are present (same precedent as the clustered test band above).
+  // rect is always emitted for hit-testing; the nested renderer controls
+  // the label via the data-toggle-standalone pattern.
+  //
+  // When standaloneCollapsed=true (user clicked the ▶ toggle): emit only the
+  // outer band rect (h=0, so just the dashed-rule label chrome) and skip all
+  // file positions. The canvas height stays accurate — no blank space.
   if (standaloneBand && standaloneBand.files.length > 0) {
     const usableW = canvasWidth - 2 * leftPad;
+    if (standaloneCollapsed) {
+      bandRects.push({
+        key: 'standalone',
+        kind: 'band',
+        name: standaloneBand.name,
+        x: leftPad, y: cursorY,
+        w: usableW,
+        h: 0,
+        count: standaloneBand.files.length,
+      });
+      cursorY += bandGapY / 2;
+    } else {
     const perRow = Math.max(1, Math.floor((usableW + bandGapX) / (cw + bandGapX)));
     const hasTaxonomy = Array.isArray(standaloneBand.taxonomy) && standaloneBand.taxonomy.length > 0;
     if (hasTaxonomy) {
@@ -834,6 +850,7 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
       });
       cursorY += bandH + bandGapY;
     }
+    } // end else (standaloneCollapsed)
   }
 
   totalH = cursorY;

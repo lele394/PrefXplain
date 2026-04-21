@@ -902,6 +902,101 @@ PYEOF
 
 Skip groups where nothing concrete spans the files. Empty list is fine.
 
+#### 4f-bis. Categorize standalone files per group
+
+**Model:** Main orchestrating model (same as 4f — cross-file synthesis).
+
+For each group that has files in its standalone band (files with zero import
+edges — detected in step 4b's output as files belonging to a group but not
+appearing in any import), define 2-5 LLM-authored sub-categories. These render
+as labeled sub-sections inside the standalone band instead of an unlabeled grid.
+
+First, find which groups have standalone files:
+
+```bash
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" -c "
+import json
+g = json.loads(open('prefxplain.json').read())
+sources = {e['source'] for e in g['edges']}
+targets = {e['target'] for e in g['edges']}
+connected = sources | targets
+by_group = {}
+for n in g['nodes']:
+    grp = n.get('group') or 'Ungrouped'
+    if n['id'] not in connected:
+        by_group.setdefault(grp, []).append(n['id'])
+for grp, files in sorted(by_group.items()):
+    print(f'GROUP: {grp} ({len(files)} standalone)')
+    for f in files:
+        print(f'  {f}')
+"
+```
+
+For each group with standalone files, look at the file names and infer semantic
+categories. Good categories describe **why** the files have no edges:
+- `"CLI entrypoints"` — scripts invoked directly, not imported
+- `"Packaging & config"` — setup.py, pyproject.toml, Dockerfile; not imported
+- `"Static assets"` — CSS, SVG, images; not parsed by the import analyzer
+- `"Test fixtures"` — data files loaded at runtime, not via import
+- `"Vendor bundles"` — minified third-party JS that the bundler serves directly
+
+Each category needs:
+- `category`: short name (2-4 words)
+- `description`: one sentence — what these files do AND why they have no edges
+- `member_file_ids`: exact file IDs from the group's standalone list above
+
+```bash
+PPY="$HOME/.prefxplain/.venv/bin/python"; [ -x "$PPY" ] || PPY="$(command -v python3 || command -v python)"
+cd $REPO && "$PPY" << 'PYEOF'
+from pathlib import Path
+from prefxplain.graph import Graph, GroupSummary, StandaloneCategory
+
+graph = Graph.load(Path("prefxplain.json"))
+
+# FILL THESE IN — one entry per group that has standalone files.
+# Leave out groups with no standalone files.
+taxonomy_by_group = {
+    # "Diagram Frontend": [
+    #     {
+    #         "category": "Vendor bundles",
+    #         "description": "Minified third-party JS served directly by the bundler — not parsed for imports.",
+    #         "member_file_ids": ["elk-worker.min.js", "elk.bundled.js"],
+    #     },
+    #     {
+    #         "category": "UI Components",
+    #         "description": "Self-contained SVG/JSX panels imported via dynamic bundler paths the analyzer doesn't trace.",
+    #         "member_file_ids": ["card-file.js", "group-hero.js"],
+    #     },
+    # ],
+}
+
+for group_name, categories in taxonomy_by_group.items():
+    if group_name not in graph.metadata.group_summaries:
+        graph.metadata.group_summaries[group_name] = GroupSummary()
+    summary = graph.metadata.group_summaries[group_name]
+    summary.standalone_taxonomy = [
+        StandaloneCategory(
+            category=c["category"],
+            description=c["description"],
+            member_file_ids=list(c["member_file_ids"]),
+        )
+        for c in categories
+    ]
+
+graph.save(Path("prefxplain.json"))
+total_cats = sum(len(v) for v in taxonomy_by_group.values())
+print(f"Patched taxonomy for {len(taxonomy_by_group)} group(s), {total_cats} categories total")
+PYEOF
+```
+
+IMPORTANT:
+- Only categorize groups that have standalone files. Skip others.
+- Every standalone file must land in exactly one category. Files not assigned
+  to any category get a synthetic "Uncategorized" fallback in the renderer.
+- If a group has standalone files but you can't find a meaningful pattern,
+  use a single `"Miscellaneous"` category with all files — better than nothing.
+
 #### 4g. Generate executive summary + health score
 
 **Model:** The highest-leverage synthesis step in the whole run — keep

@@ -40,6 +40,9 @@
     pinnedGroup: null,
     // Hovering a file card lights up its edges transiently (no dim).
     hoveredFile: null,
+    // Standalone band collapse toggle — persists across re-renders without
+    // being reset by selection changes.
+    standaloneCollapsed: false,
   };
 
   // ── Shell DOM ─────────────────────────────────────────────────────
@@ -182,6 +185,13 @@
   // the dblclick handler can cancel it before the rerender wipes the card.
   let fileClickTimer = null;
   canvas.addEventListener('click', async (e) => {
+    // Standalone collapse toggle — handled before any other target so the
+    // clickable <g> doesn't fall through to the background-click handler.
+    if (e.target.closest('[data-toggle-standalone]')) {
+      state.standaloneCollapsed = !state.standaloneCollapsed;
+      await rerender();
+      return;
+    }
     const entryChip = e.target.closest('.entry-chip');
     const clusterHeader = e.target.closest('.cluster-header');
     const ghostAnchor = e.target.closest('.ghost-anchor');
@@ -403,6 +413,7 @@
           focusedGroup: state.focusedGroup,
           hoveredGroup: effectiveGroup,
           hoveredFile: state.hoveredFile,
+          standaloneCollapsed: state.standaloneCollapsed,
         })
         : await PX.views.groupMap(graph, {
           selected: state.selected,

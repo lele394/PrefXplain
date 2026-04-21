@@ -45,6 +45,7 @@ PX.views.focused = async function renderFocusedView(graph, opts = {}) {
     focusedGroup = null,
     hoveredGroup = null,
     hoveredFile = null,
+    standaloneCollapsed = false,
   } = opts;
   if (!focusedGroup) {
     throw new Error('PX.views.focused requires opts.focusedGroup');
@@ -144,18 +145,20 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
         : storyTestBand.files.length)
     : 0;
   const naturalTestW = gridNatW(testUnitsNat);
-  // Standalone natural width. With a taxonomy, each sub-band lays out its
-  // own grid independently (subPerRow = min(perRow, sub.files.length) — see
-  // ir.js). The widest sub-band therefore dictates the minimum canvas width.
-  // Without a taxonomy we fall back to the total-file grid (current behavior).
+  // Standalone natural width. Capped to the CORE content width so orphan files
+  // never push the canvas wider than the main graph — they scroll vertically.
+  // With a taxonomy, each sub-band lays out independently; the widest drives
+  // the cap. Without a taxonomy we fall back to the total-file grid.
   let naturalStandaloneW = 0;
-  if (storyStandaloneBand && storyStandaloneBand.files.length > 0) {
+  if (storyStandaloneBand && storyStandaloneBand.files.length > 0 && !standaloneCollapsed) {
+    const coreW = Math.max(naturalColW, CW_NAT);
     if (Array.isArray(storyStandaloneBand.taxonomy) && storyStandaloneBand.taxonomy.length > 0) {
-      naturalStandaloneW = Math.max(
-        ...storyStandaloneBand.taxonomy.map(sub => gridNatW(sub.files.length)),
+      naturalStandaloneW = Math.min(
+        Math.max(...storyStandaloneBand.taxonomy.map(sub => gridNatW(sub.files.length))),
+        coreW,
       );
     } else {
-      naturalStandaloneW = gridNatW(storyStandaloneBand.files.length);
+      naturalStandaloneW = Math.min(gridNatW(storyStandaloneBand.files.length), coreW);
     }
   }
   // Final main width = widest content row. Floor at one card so a lone
@@ -192,6 +195,7 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
     bandGapY: 72,
     bandGapX: 72,
     cardGapY: 22,
+    standaloneCollapsed,
   });
 
   // Hand-route intra-group edges using the known band/column structure.
@@ -727,7 +731,23 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
       continue;
     }
     if (band.key === 'test' && hasClusters) continue; // cluster headers own this band
-    if (band.key === 'standalone' && hasStandaloneSubs) continue; // sub-band labels own this section
+    if (band.key === 'standalone') {
+      // Render a clickable toggle header regardless of sub-bands. ▼ = expanded,
+      // ▶ = collapsed. When sub-bands exist their labels render below this one;
+      // when collapsed both the sub-band labels and cards are absent (ir.js
+      // emits no positions for standalone files when standaloneCollapsed=true).
+      const chevron = standaloneCollapsed ? '▶' : '▼';
+      svg += `<g data-toggle-standalone="true" style="cursor:pointer" pointer-events="all">`;
+      svg += PX.components.bandLabel({
+        x: band.x,
+        y: band.y,
+        w: band.w,
+        name: `${chevron}  ${band.name}`,
+        count: band.count,
+      });
+      svg += `</g>`;
+      continue;
+    }
     svg += PX.components.bandLabel({
       x: band.x,
       y: band.y,

@@ -39,89 +39,36 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
   const rawPolylines = PX.extractEdgePolylines(laid);
   const irEdgesById = Object.fromEntries((ir.edges || []).map(e => [e.id, e]));
 
+  // Degree maps for badge rendering on hero cards.
+  const inDegree = {}, outDegree = {};
+  for (const e of ir.edges || []) {
+    if (e.sourceGroupName) outDegree[e.sourceGroupName] = (outDegree[e.sourceGroupName] || 0) + 1;
+    if (e.targetGroupName) inDegree[e.targetGroupName] = (inDegree[e.targetGroupName] || 0) + 1;
+  }
+
   // Rule: arrows never cross group blocks. Detour any middle segment that
-  // would clip an intermediate group card (source/target cards excluded —
-  // the arrow terminates at their ports). Matches the same rule applied in
-  // the nested view so aggregate arrows honour block boundaries everywhere.
+  // would clip an intermediate group card (source/target cards excluded).
   const cardBboxes = (laid.children || []).map(box => ({
     id: box.id,
     x1: box.x || 0, y1: box.y || 0,
     x2: (box.x || 0) + (box.width || 0),
     y2: (box.y || 0) + (box.height || 0),
   }));
-  const polylines = rawPolylines.map(p => {
+  const edges = rawPolylines.map(p => {
     const srcId = PX.splitPortId(p.source).nodeId;
     const tgtId = PX.splitPortId(p.target).nodeId;
-    const obstacles = cardBboxes.filter(b => b.id !== srcId && b.id !== tgtId);
-    if (obstacles.length === 0) return p;
-    return {
-      ...p,
-      points: PX.detourAroundLabels(p.points || [], obstacles, 14, { preserveEndSegments: true }),
-    };
-  });
-
-  const withLabelDims = polylines.map(p => {
     const irEdge = irEdgesById[p.id] || {};
-    const lbl = (irEdge.labels || [])[0] || {};
+    const obstacles = cardBboxes.filter(b => b.id !== srcId && b.id !== tgtId);
+    const points = obstacles.length === 0
+      ? (p.points || [])
+      : PX.detourAroundLabels(p.points || [], obstacles, 14, { preserveEndSegments: true });
     return {
       ...p,
+      points,
       count: irEdge.count || 1,
-      sourceGroup: PX.splitPortId(p.source).nodeId,
-      targetGroup: PX.splitPortId(p.target).nodeId,
-      __labelW: lbl.width || 180,
-      __labelH: lbl.height || 56,
+      sourceGroup: srcId,
+      targetGroup: tgtId,
     };
-  });
-
-  const placed = PX.placeEdgeLabels(withLabelDims, { centerOnPath: true });
-
-  const segments = [];
-  for (const edge of placed) {
-    const pts = edge.points || [];
-    for (let i = 0; i < pts.length - 1; i++) {
-      segments.push({
-        x1: pts[i].x, y1: pts[i].y,
-        x2: pts[i + 1].x, y2: pts[i + 1].y,
-        edgeId: edge.id,
-      });
-    }
-  }
-  const cardRects = (laid.children || []).map(box => ({
-    x1: box.x, y1: box.y,
-    x2: box.x + box.width, y2: box.y + box.height,
-  }));
-  const labelled = PX.avoidLabelCollisions(placed, {
-    labelW: (e) => e.__labelW,
-    labelH: (e) => e.__labelH,
-    gap: 18,
-    segments,
-    walkPath: true,
-    cardRects,
-  });
-
-  // Final pass: detour each edge's polyline around the bboxes of OTHER edges'
-  // labels. The shared-trunk exception in avoidLabelCollisions allows foreign
-  // segments within `gap` when the label sits on its own arrow — without this
-  // detour, those foreign segments cross the label rect and become visible
-  // once the edge is highlighted (opacity 0.55 → 0.95). detourAroundLabels
-  // unions all crossed bboxes into a single envelope per segment (no tentacle
-  // jogs) and only activates when the segment actually enters a bbox.
-  const labelBboxes = labelled
-    .filter(e => e.labelX != null && e.labelY != null)
-    .map(e => ({
-      id: e.id,
-      x1: e.labelX - (e.__labelW || 0) / 2,
-      y1: e.labelY - (e.__labelH || 0) / 2,
-      x2: e.labelX + (e.__labelW || 0) / 2,
-      y2: e.labelY + (e.__labelH || 0) / 2,
-    }));
-  const edges = labelled.map(e => {
-    const foreign = labelBboxes.filter(b => b.id !== e.id);
-    if (foreign.length === 0) return e;
-    // gap=2: only detour segments that ACTUALLY cross the label bbox, not
-    // near-misses. preserveEndSegments=true: keep port connections straight
-    // (else the arrowhead hides inside the target card).
-    return { ...e, points: PX.detourAroundLabels(e.points || [], foreign, 2, { preserveEndSegments: true }) };
   });
 
   const topBoxes = (laid.children || []).slice().sort((a, b) => (a.y || 0) - (b.y || 0));
@@ -169,13 +116,6 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
       if (p.x > maxX) maxX = p.x;
       if (p.y > maxY) maxY = p.y;
     }
-    if (e.labelX != null && e.labelY != null) {
-      const lw = e.__labelW || 0, lh = e.__labelH || 0;
-      if (e.labelX - lw / 2 < minX) minX = e.labelX - lw / 2;
-      if (e.labelY - lh / 2 < minY) minY = e.labelY - lh / 2;
-      if (e.labelX + lw / 2 > maxX) maxX = e.labelX + lw / 2;
-      if (e.labelY + lh / 2 > maxY) maxY = e.labelY + lh / 2;
-    }
   }
   const pad = 20;
   const vbX = Math.floor(minX - pad);
@@ -185,19 +125,10 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
   let svg = `<svg viewBox="${vbX} ${vbY} ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="display:block;margin:0 auto;width:calc(100% * var(--px-zoom, 1));height:auto" data-view="group-map" data-natural-w="${W}" data-natural-h="${H}">`;
   svg += PX.components.markers();
 
-  // Render in three layers: arrow paths → cards → labels. Labels on top
-  // means their bg-filled rects mask any stray arrow that clips them.
-  const mkLabel = (e) => (e.count > 0 && e.sourceGroup && e.targetGroup ? {
-    sourceName: e.sourceGroup,
-    sourceColor: PX.groupColor(e.sourceGroup, groupsMeta[e.sourceGroup] || {}),
-    targetName: e.targetGroup,
-    targetColor: PX.groupColor(e.targetGroup, groupsMeta[e.targetGroup] || {}),
-    count: e.count,
-  } : null);
-
+  // Two layers: arrows below cards so arrowheads don't overdraw card borders.
   for (const e of edges) {
     const st = groupEdgeState(e);
-    svg += PX.components.edge(e, { nodesById, state: st, thick: true, pathOnly: true });
+    svg += PX.components.edge(e, { nodesById, state: st, thick: true });
   }
 
   for (const box of (laid.children || [])) {
@@ -215,14 +146,9 @@ PX.views.groupMap = async function renderGroupMap(graph, opts = {}) {
       layer: layerOf[box.id] || 0,
       selected: st === 'selected',
       faded: st === 'faded',
+      inDegree: inDegree[box.id] || 0,
+      outDegree: outDegree[box.id] || 0,
     });
-  }
-
-  for (const e of edges) {
-    const st = groupEdgeState(e);
-    const label = mkLabel(e);
-    if (!label) continue;
-    svg += PX.components.edge(e, { nodesById, state: st, label, thick: true, labelOnly: true });
   }
 
   svg += `</svg>`;

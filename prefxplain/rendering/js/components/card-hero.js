@@ -17,9 +17,12 @@ PX.components.cardHero = function cardHeroSvg(groupMeta, opts = {}) {
     layer = 0,                  // layer index (0 = deepest)
     selected = false,
     faded = false,
+    inDegree = 0,               // groups that depend on this one
+    outDegree = 0,              // groups this one depends on
   } = Object.assign({}, groupMeta, opts);
   const strokeCol = selected ? color : T.border;
-  const strokeW = selected ? 2 : 1;
+  // Border thickens with inDegree: heavily-imported groups read as foundational.
+  const strokeW = selected ? 2.5 : 1 + Math.min(inDegree, 3) * 0.4;
   const opacity = faded ? 0.28 : 1;
   const hs = highlights.slice(0, 3);
   let out = `<g class="hero-card" data-group="${PX.escapeXml(name)}" opacity="${opacity}" style="transition:opacity 200ms;cursor:pointer">`;
@@ -47,6 +50,13 @@ PX.components.cardHero = function cardHeroSvg(groupMeta, opts = {}) {
     out += `<rect x="${x + 22}" y="${by}" width="4" height="4" fill="${color}" rx="2"/>`;
     out += `<text x="${x + 34}" y="${by + 4}" font-family="${T.mono}" font-size="11" fill="${T.ink2}">${PX.escapeXml(h)}</text>`;
   });
+  // Dependency badges: ↑N = N groups depend on this (foundational), ↓M = depends on M others.
+  if (inDegree > 0 || outDegree > 0) {
+    const parts = [];
+    if (inDegree > 0)  parts.push(`↑${inDegree}`);
+    if (outDegree > 0) parts.push(`↓${outDegree}`);
+    out += `<text x="${x + w - 12}" y="${y + h - 10}" font-family="${T.mono}" font-size="9" fill="${T.inkFaint}" text-anchor="end" pointer-events="none">${parts.join('  ')}</text>`;
+  }
   out += `</g>`;
   return out;
 };

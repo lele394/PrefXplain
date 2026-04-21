@@ -108,7 +108,6 @@ function _aggregateGroupEdges(graph, byId) {
   }
   return Object.entries(counts).map(([k, count], i) => {
     const [source, target] = k.split('\u0000');
-    const dims = _labelDims(source, target, count);
     return {
       id: `ge${i}`,
       sources: [`${source}.out-ge${i}`],
@@ -116,7 +115,6 @@ function _aggregateGroupEdges(graph, byId) {
       sourceGroupName: source,
       targetGroupName: target,
       count,
-      labels: [{ text: '', width: dims.width, height: dims.height }],
     };
   });
 }

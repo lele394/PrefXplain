@@ -58,7 +58,7 @@ PX.views.focused = async function renderFocusedView(graph, opts = {}) {
 
 // ── Focused group: ranked architectural narrative ──────────────────────
 PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts) {
-  const { showBullets, selected, filter, hoveredGroup = null, hoveredFile = null } = opts;
+  const { showBullets, selected, filter, hoveredGroup = null, hoveredFile = null, standaloneCollapsed = false } = opts;
   const story = PX.buildGroupStory(graph, groupId, idx);
   const LEFT = 32;
   const TOP = 20;

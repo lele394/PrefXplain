@@ -538,6 +538,12 @@ def setup_cmd(
     package_root = Path(__file__).parent
     cmd_source = package_root / "commands" / "prefxplain.md"
     update_cmd_source = package_root / "commands" / "prefxplain-update.md"
+    # Per-file description worker — Haiku 4.5 on Claude Code, gpt-5.4-mini on
+    # Codex. Without these, step 4c of /prefxplain has no cheap/fast subagent
+    # to dispatch to and silently falls back to the main model (10× cost,
+    # serial).
+    claude_worker_source = package_root / "agents" / "prefxplain-worker.md"
+    codex_worker_source = package_root / "agents" / "prefxplain-worker.toml"
     cmd_content: Optional[str] = None
     update_cmd_content: Optional[str] = None
     copilot_plugin_dir = package_root / "copilot_plugin"
@@ -618,11 +624,11 @@ def setup_cmd(
     failed = False
     for t in targets:
         if t == "claude-code":
-            commands_dir = (
-                Path.cwd() / ".claude" / "commands"
-                if project
-                else home / ".claude" / "commands"
+            claude_root = (
+                Path.cwd() / ".claude" if project else home / ".claude"
             )
+            commands_dir = claude_root / "commands"
+            agents_dir = claude_root / "agents"
             commands_dir.mkdir(parents=True, exist_ok=True)
             scope = "project" if project else "global"
 
@@ -635,6 +641,20 @@ def setup_cmd(
                 update_dest = commands_dir / "prefxplain-update.md"
                 update_dest.write_text(update_body, encoding="utf-8")
                 installed.append(f"Claude Code ({scope}): {update_dest}")
+
+            # Ship the Haiku worker agent so step 4c's parallel dispatch
+            # actually has a cheap/fast subagent to target. Missing this
+            # file is what caused the "it ran everything inline on Opus"
+            # bug — Claude Code silently falls back to the main model when
+            # the named subagent_type doesn't exist.
+            if claude_worker_source.exists():
+                agents_dir.mkdir(parents=True, exist_ok=True)
+                worker_dest = agents_dir / "prefxplain-worker.md"
+                worker_dest.write_text(
+                    claude_worker_source.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                installed.append(f"Claude Code ({scope}): {worker_dest}")
 
         elif t == "cursor":
             # Cursor uses .cursor/rules/ for project-level instructions
@@ -675,7 +695,8 @@ def setup_cmd(
 
         elif t == "codex":
             # Codex uses AGENTS.md for project instructions. There is no global
-            # install target, so explicit setup always writes to the current repo.
+            # install target for the slash-command side, so explicit setup
+            # always writes to the current repo.
             dest = Path.cwd() / "AGENTS.md"
             section = (
                 "\n\n## /prefxplain\n\n"
@@ -692,6 +713,20 @@ def setup_cmd(
             else:
                 dest.write_text(f"# Agent Instructions{section}", encoding="utf-8")
                 installed.append(f"Codex (project): created {dest}")
+
+            # The Codex agent profile itself lives under ~/.codex/agents/ and
+            # is read globally by the CLI regardless of which repo invoked it.
+            # We always install it there so `spawn_agent("prefxplain_worker")`
+            # resolves to gpt-5.4-mini instead of silently reusing GPT-5.4.
+            if codex_worker_source.exists():
+                codex_agents_dir = home / ".codex" / "agents"
+                codex_agents_dir.mkdir(parents=True, exist_ok=True)
+                worker_dest = codex_agents_dir / "prefxplain-worker.toml"
+                worker_dest.write_text(
+                    codex_worker_source.read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+                installed.append(f"Codex (global): {worker_dest}")
 
         elif t == "copilot":
             if not copilot_plugin_manifest.exists():

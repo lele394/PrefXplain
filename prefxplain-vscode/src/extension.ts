@@ -365,12 +365,67 @@ function setupWatcher(htmlPath: string): void {
   startRefreshLoop(htmlPath);
 }
 
-function openPreview(htmlPath: string): void {
-  const normalizedPath = path.resolve(htmlPath);
+/**
+ * Resolve prefxplain.html when the URI or default path is wrong (common case:
+ * workspace opened on `repo/prefxplain` while HTML is at `repo/prefxplain.html`).
+ */
+async function resolvePrefxplainHtmlPath(
+  requested: string
+): Promise<string | undefined> {
+  const normalizedPath = path.resolve(requested);
+  if (fs.existsSync(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  if (path.basename(normalizedPath) !== "prefxplain.html") {
+    return undefined;
+  }
+
+  // .../repo/prefxplain/prefxplain.html -> .../repo/prefxplain.html
+  const grandparent = path.dirname(path.dirname(normalizedPath));
+  const oneLevelUp = path.join(grandparent, "prefxplain.html");
+  if (fs.existsSync(oneLevelUp)) {
+    return oneLevelUp;
+  }
+
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const atRoot = path.join(folder.uri.fsPath, "prefxplain.html");
+    if (fs.existsSync(atRoot)) {
+      return atRoot;
+    }
+  }
+
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    const parent = path.join(path.dirname(folder.uri.fsPath), "prefxplain.html");
+    if (fs.existsSync(parent)) {
+      return parent;
+    }
+  }
+
+  try {
+    const found = await vscode.workspace.findFiles(
+      "**/prefxplain.html",
+      "**/{node_modules,.git,.venv,venv,dist,target,build}/**",
+      5
+    );
+    if (found.length > 0) {
+      found.sort((a, b) => a.fsPath.length - b.fsPath.length);
+      return found[0].fsPath;
+    }
+  } catch {
+    // ignore search errors
+  }
+
+  return undefined;
+}
+
+async function openPreview(htmlPath: string): Promise<void> {
+  const resolved = await resolvePrefxplainHtmlPath(htmlPath);
+  const normalizedPath = resolved ?? path.resolve(htmlPath);
 
   if (!fs.existsSync(normalizedPath)) {
     vscode.window.showErrorMessage(
-      `PrefXplain: file not found: ${normalizedPath}`
+      `PrefXplain: file not found: ${path.resolve(htmlPath)}. Run prefxplain from the repository root so it writes prefxplain.html there, or open the repo folder (not only the prefxplain/ package) in the IDE.`
     );
     return;
   }
@@ -420,7 +475,7 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(
       "prefxplain.preview",
-      (input?: string | vscode.Uri) => {
+      async (input?: string | vscode.Uri) => {
         let htmlPath = toHtmlPath(input);
 
         if (!htmlPath) {
@@ -437,7 +492,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        openPreview(htmlPath);
+        await openPreview(htmlPath);
       }
     )
   );
@@ -456,7 +511,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return;
         }
 
-        openPreview(htmlPath);
+        await openPreview(htmlPath);
       },
     })
   );

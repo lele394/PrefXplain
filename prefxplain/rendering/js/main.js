@@ -76,7 +76,7 @@
   bottomRight.appendChild(minimapHost);
   const miniMap = PX.ui.minimap(minimapHost, { graph, groupsMeta });
 
-  // Two buttons in the bottom-right: zoom in to 150% and reset to 100%.
+  // Three buttons in the bottom-right: zoom to 150%, 175%, and reset to 100%.
   // Zoom is tracked per mode (overview vs focused group) so each keeps its
   // own scale across toggles. Mode is derived from state.focusedGroup.
   const zoomKey = () => (state.focusedGroup ? 'focused' : 'overview');
@@ -92,9 +92,10 @@
     b.onmouseleave = () => { b.style.background = 'transparent'; };
     return b;
   };
+  const z175 = btn('175%', 'Zoom in to 175%');
   const zIn = btn('150%', 'Zoom in to 150%');
   const zOut = btn('100%', 'Reset to 100%');
-  zoomPanel.append(zIn, zOut);
+  zoomPanel.append(z175, zIn, zOut);
   bottomRight.appendChild(zoomPanel);
 
   const applyZoom = () => {
@@ -105,15 +106,30 @@
     zoomState[zoomKey()] = next;
     applyZoom();
   };
+  z175.onclick = () => setZoom(1.75);
   zIn.onclick = () => setZoom(1.5);
   zOut.onclick = () => setZoom(1);
   applyZoom();
-  // Pinch shortcut: trackpad pinch emits wheel with ctrlKey set.
+  // Pinch shortcut: one step per gesture.
+  // After a step fires, ignore all wheel events for 500ms (fixed cooldown).
+  // The user must release and re-pinch to trigger the next step.
+  const zoomLevels = [1, 1.5, 1.75];
+  let pinchCooldown = false;
   canvasWrap.addEventListener('wheel', (e) => {
     if (!e.ctrlKey) return;
     e.preventDefault();
-    if (e.deltaY < 0) setZoom(1.5);
-    else if (e.deltaY > 0) setZoom(1);
+    if (pinchCooldown) return;
+    const cur = zoomState[zoomKey()] ?? 1;
+    const idx = zoomLevels.indexOf(cur);
+    if (e.deltaY < 0) {
+      const next = idx === -1 ? 1 : Math.min(idx + 1, zoomLevels.length - 1);
+      setZoom(zoomLevels[next]);
+    } else if (e.deltaY > 0) {
+      const next = idx === -1 ? 0 : Math.max(idx - 1, 0);
+      setZoom(zoomLevels[next]);
+    }
+    pinchCooldown = true;
+    setTimeout(() => { pinchCooldown = false; }, 500);
   }, { passive: false });
   const legendHost = document.createElement('div'); shell.appendChild(legendHost);
   root.appendChild(shell);
@@ -169,10 +185,9 @@
   top.onDeselect(() => setSelected(null));
   top.onClearFocus(() => setFocusedGroup(null));
 
-  // Hero single-click: toggle focus on that group's story. Hero double-click
-  // behaves the same way (kept for muscle memory from the previous "drill
-  // into nested" gesture). Debounce the single-click so dblclick preempts it
-  // without flicker.
+  // Hero single-click: pin/highlight the group (lightens it up, no drill-in).
+  // Hero double-click: enter the group detail view (setFocusedGroup).
+  // Debounce the single-click so dblclick preempts it without flicker.
   let heroClickTimer = null;
   // Ghost anchor single-click pins the group; double-click teleports to it.
   // Same debounce pattern as hero so the two pin-toggles fired by a dblclick
@@ -233,8 +248,15 @@
       if (heroClickTimer) clearTimeout(heroClickTimer);
       heroClickTimer = setTimeout(() => {
         heroClickTimer = null;
-        const next = state.focusedGroup === groupId ? null : groupId;
-        setFocusedGroup(next);
+        // Single-click: pin/highlight the group without entering it.
+        state.pinnedGroup = state.pinnedGroup === groupId ? null : groupId;
+        if (state.pinnedGroup) {
+          state.selected = null;
+          state.hoveredGroup = null;
+          state.hoveredFile = null;
+        }
+        syncChrome();
+        rerender();
       }, 240);
       return;
     }

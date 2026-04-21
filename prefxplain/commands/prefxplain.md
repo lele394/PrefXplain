@@ -117,8 +117,10 @@ This skill runs in three cognitive modes. Use the right model for each:
   and `watch_if_changed`. This is the volume step (often 10-500+ files
   per run) and it is embarrassingly parallel. Run it on a small/fast
   model via parallel subagents whenever the runtime supports it —
-  **Claude Haiku 4.5** on Claude Code / Cursor, **GPT-5.4-mini** on
-  Codex. Near-equivalent output quality at a fraction of the cost and
+  **Claude Haiku 4.5** on Claude Code, **`composer-2-fast`** (or
+  **`claude-4.6-sonnet-medium-thinking`** if you want to stay on a
+  Claude backbone) on Cursor, **GPT-5.4-mini** on Codex.
+  Near-equivalent output quality at a fraction of the cost and
   wall-clock time.
 - **Everything else** — bootstrap checks, analyzer calls, JSON patching,
   HTML rendering. Plain Bash + Python, no LLM work.
@@ -375,8 +377,9 @@ If the list is empty, skip to step 4e.
 
 **Model:** This is the step to delegate. Per the "Model strategy" section
 above, the preferred dispatch is parallel small/fast-model subagents
-(Claude Haiku 4.5 on Claude Code / Cursor, GPT-5.4-mini on Codex), one
-per batch of 10-20 files. The content rules below (`short_title`,
+(Claude Haiku 4.5 on Claude Code, `composer-2-fast` or
+`claude-4.6-sonnet-medium-thinking` on Cursor, GPT-5.4-mini on Codex),
+one per batch of 10-20 files. The content rules below (`short_title`,
 `description`, `highlights`, `flowchart`, `invariants`, `watch_if_changed`)
 apply identically whether a subagent or the main model does the work —
 only the model and the parallelism change.
@@ -386,9 +389,12 @@ only the model and the parallelism change.
 1. Take the undescribed list from step 4b and chunk it into batches of
    10-20 files.
 2. For each batch, spawn a subagent on the runtime's small/fast model.
-   On Claude Code / Cursor that means Claude Haiku 4.5 — e.g. `haiku` in
-   a Claude Code subagent's `model:` frontmatter, or the Haiku 4.5 slug
-   in a Cursor Task call. On Codex that means GPT-5.4-mini — see the
+   On **Claude Code**, that means Claude Haiku 4.5 via `model: haiku` in
+   the subagent's YAML frontmatter. On **Cursor**, the Task tool does
+   **not** expose Haiku 4.5 as a slug — use `composer-2-fast` (Cursor's
+   proprietary fast model) or `claude-4.6-sonnet-medium-thinking` if
+   you want to stay on a Claude backbone; don't try to pass `haiku`,
+   it will be rejected. On **Codex**, that means GPT-5.4-mini — see the
    "Codex dispatch" note below, because `spawn_agent(model=...)` is
    unreliable in some CLI versions and a named agent profile is the safe
    path. Pass the subagent:

@@ -130,10 +130,10 @@ PX.views._nestedFocused = async function renderFocused(graph, idx, groupId, opts
   const naturalColW = colCountNat > 0
     ? colCountNat * CW_NAT + (colCountNat - 1) * BAND_GAP_X_NAT
     : 0;
-  // Tests + standalone wrap into a grid. Cap at 4 columns so a group with
-  // many tests grows DOWN (more rows) instead of blowing up the canvas
-  // horizontally. Matches the density feel of the multi-group overview.
-  const MAX_WRAP_COLS_NAT = 4;
+  // Tests + standalone wrap into a grid. Cap at 3 columns (matches maxCols=3
+  // in buildGroupStoryLayoutIr) so a group with many tests grows DOWN instead
+  // of blowing up the canvas horizontally.
+  const MAX_WRAP_COLS_NAT = 3;
   const gridNatW = (units) => {
     if (units <= 0) return 0;
     const cols = Math.min(Math.max(units, 1), MAX_WRAP_COLS_NAT);

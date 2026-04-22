@@ -860,26 +860,16 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
 
   totalH = cursorY;
 
-  // Build ELK IR. We use layered + partitioning:
-  // Each architecture band (entry, core, leaf, test) is assigned its own ELK
-  // partition. Partitioning forces same-band files into the same layer (column),
-  // regardless of intra-band edges. Without this, ELK splits every connected
-  // pair into separate layers → 8+ horizontal columns instead of 3.
+  // Build ELK IR. We use algorithm:fixed so ELK routes edges between nodes at
+  // their hand-positioned coordinates without repositioning them. Standalone
+  // nodes are excluded (two-section layout) so ELK only sees nodes with edges.
   // portConstraints:FREE lets ELK pick the best edge exit side per hop.
-  // Only core (non-standalone) nodes enter ELK.
-  const BAND_PARTITION = { entry: 0, core: 1, leaf: 2, test: 3 };
-  const fileBandKey = {};
-  for (const band of story.bands) {
-    for (const f of band.files) fileBandKey[f.id] = band.key;
-  }
-
   const children = [];
   for (const band of story.bands) {
     for (const f of band.files) {
       const pos = positions[f.id];
       if (!pos) continue;
       if (standaloneIds.has(f.id)) continue;
-      const partition = BAND_PARTITION[band.key] ?? 0;
       children.push({
         id: f.id,
         x: pos.x,
@@ -888,7 +878,6 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
         height: ch,
         properties: {
           'org.eclipse.elk.portConstraints': 'FREE',
-          'org.eclipse.elk.partitioning.partition': String(partition),
         },
       });
     }
@@ -908,14 +897,11 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
     children,
     edges,
     layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.partitioning.activate': 'true',
-      'elk.layered.nodePlacement.strategy': 'INTERACTIVE',
+      'elk.algorithm': 'fixed',
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.spacing.edgeEdge': '24',
       'elk.spacing.edgeNode': '32',
       'elk.spacing.nodeNode': '22',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '72',
     },
   };
   return {

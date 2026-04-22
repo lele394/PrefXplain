@@ -57,11 +57,6 @@ First run on a medium repo: ~2 minutes. Re-runs: seconds (descriptions are cache
 covers it. For CI or headless use, set `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` and use
 the `prefxplain` CLI.
 
-![PrefXplain open side-by-side with Claude Code inside VS Code](docs/images/hero-split.png)
-
-*PrefXplain on the left, Claude Code on the right. Architecture stays visible while
-your agent codes. No alt-tab, no context loss.*
-
 ## What you get
 
 - **Executive summary** — 3–5 sentences covering what the project does, its main layers, and its critical path. Paste it into a deck.
@@ -71,11 +66,6 @@ your agent codes. No alt-tab, no context loss.*
 - **Semantic search** — type `auth` or `database` and it matches descriptions, not just filenames.
 - **Flowcharts** — double-click a file to see its real logic as a flowchart.
 - **Inline editor** — press Space on any block to open the source file without leaving the diagram.
-
-![Clicking a block highlights its blast radius and shows the description on hover](docs/images/blast-radius.png)
-
-*Click any block: neighbors fade, dependency edges light up with labels, and a hover
-reveals the plain-English description.*
 
 ![Double-clicking a file opens its real logic as a flowchart](docs/images/flowchart-popup.png)
 

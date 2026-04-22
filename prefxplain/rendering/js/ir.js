@@ -882,16 +882,55 @@ PX.buildGroupStoryLayoutIr = function buildGroupStoryLayoutIr(story, {
       });
     }
   }
-  const edges = story.edges.map((e, i) => ({
-    id: `gs${i}`,
-    sources: [e.source],
-    targets: [e.target],
-    count: e.count,
-    labelled: e.labelled,
-    sourceNode: e.source,
-    targetNode: e.target,
-    kind: 'internal',
-  }));
+  // ELK fixed preserves edge sections exactly — it never computes them.
+  // Provide a simple border-to-border section for each edge so the output
+  // has exactly one section per edge (no section → IllegalArgumentException).
+  // detourAroundLabels in nested.js then routes around card obstacles.
+  const _edgeSection = (sp, tp) => {
+    if (!sp || !tp) return null;
+    const dx = tp.x - sp.x;
+    const dy = tp.y - sp.y;
+    let startPoint, endPoint;
+    const bendPoints = [];
+    if (Math.abs(dx) >= Math.abs(dy)) {
+      startPoint = dx >= 0
+        ? { x: sp.x + cw, y: sp.y + ch / 2 }
+        : { x: sp.x,      y: sp.y + ch / 2 };
+      endPoint = dx >= 0
+        ? { x: tp.x,      y: tp.y + ch / 2 }
+        : { x: tp.x + cw, y: tp.y + ch / 2 };
+      if (Math.abs(dy) > 2) {
+        const midX = (startPoint.x + endPoint.x) / 2;
+        bendPoints.push({ x: midX, y: startPoint.y }, { x: midX, y: endPoint.y });
+      }
+    } else {
+      startPoint = dy >= 0
+        ? { x: sp.x + cw / 2, y: sp.y + ch }
+        : { x: sp.x + cw / 2, y: sp.y      };
+      endPoint = dy >= 0
+        ? { x: tp.x + cw / 2, y: tp.y      }
+        : { x: tp.x + cw / 2, y: tp.y + ch };
+      if (Math.abs(dx) > 2) {
+        const midY = (startPoint.y + endPoint.y) / 2;
+        bendPoints.push({ x: startPoint.x, y: midY }, { x: endPoint.x, y: midY });
+      }
+    }
+    return { id: 's0', startPoint, endPoint, ...(bendPoints.length ? { bendPoints } : {}) };
+  };
+  const edges = story.edges.map((e, i) => {
+    const section = _edgeSection(positions[e.source], positions[e.target]);
+    return {
+      id: `gs${i}`,
+      sources: [e.source],
+      targets: [e.target],
+      ...(section ? { sections: [section] } : {}),
+      count: e.count,
+      labelled: e.labelled,
+      sourceNode: e.source,
+      targetNode: e.target,
+      kind: 'internal',
+    };
+  });
   const ir = {
     id: 'root',
     children,

@@ -15,6 +15,7 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse, urlunparse
 
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
@@ -29,6 +30,60 @@ CACHE_DB = CACHE_DIR / "cache.db"
 # Default: Claude Sonnet 4.6 — better descriptions than Haiku with acceptable latency/cost
 DEFAULT_MODEL = "claude-sonnet-4-6"
 ANTHROPIC_BASE = "https://api.anthropic.com/v1"
+DEFAULT_OLLAMA_HOST = "127.0.0.1"
+DEFAULT_OLLAMA_PORT = 11434
+
+
+def _build_ollama_base(host: str | None, port: int | None) -> str:
+    """Build Ollama's OpenAI-compatible base URL (must end with /v1)."""
+    raw_host = (host or os.environ.get("OLLAMA_HOST") or DEFAULT_OLLAMA_HOST).strip()
+    if not raw_host.startswith(("http://", "https://")):
+        raw_host = f"http://{raw_host}"
+
+    parsed = urlparse(raw_host)
+    scheme = parsed.scheme or "http"
+    hostname = parsed.hostname or DEFAULT_OLLAMA_HOST
+    env_port_raw = os.environ.get("OLLAMA_PORT")
+    try:
+        env_port = int(env_port_raw) if env_port_raw else None
+    except ValueError:
+        env_port = None
+    resolved_port = port or env_port or parsed.port or DEFAULT_OLLAMA_PORT
+    netloc = f"{hostname}:{resolved_port}"
+    return urlunparse((scheme, netloc, "/v1", "", "", ""))
+
+
+def _resolve_client_config(
+    api_key: str | None,
+    api_base: str | None,
+    ollama: bool = False,
+    ollama_host: str | None = None,
+    ollama_port: int | None = None,
+) -> tuple[str | None, str | None]:
+    """Resolve API key/base with optional first-class Ollama support."""
+    use_ollama = bool(
+        ollama
+        or ollama_host
+        or ollama_port
+        or os.environ.get("OLLAMA_HOST")
+        or os.environ.get("OLLAMA_PORT")
+    )
+
+    if use_ollama:
+        resolved_base = api_base or _build_ollama_base(ollama_host, ollama_port)
+        resolved_key = (
+            api_key
+            or os.environ.get("OLLAMA_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or "ollama"
+        )
+        return resolved_key, resolved_base
+
+    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    resolved_base = api_base
+    if not resolved_base and (api_key or os.environ.get("ANTHROPIC_API_KEY")):
+        resolved_base = ANTHROPIC_BASE
+    return resolved_key, resolved_base
 
 
 def _resolve_model(model: str | None) -> str:
@@ -469,6 +524,9 @@ def describe_groups(
     root: Path,
     api_key: str | None = None,
     api_base: str | None = None,
+    ollama: bool = False,
+    ollama_host: str | None = None,
+    ollama_port: int | None = None,
     model: str | None = None,
     force: bool = False,
     level: str | None = None,
@@ -500,10 +558,13 @@ def describe_groups(
     if not eligible:
         return graph
 
-    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    resolved_base = api_base
-    if not resolved_base and (api_key or os.environ.get("ANTHROPIC_API_KEY")):
-        resolved_base = ANTHROPIC_BASE
+    resolved_key, resolved_base = _resolve_client_config(
+        api_key=api_key,
+        api_base=api_base,
+        ollama=ollama,
+        ollama_host=ollama_host,
+        ollama_port=ollama_port,
+    )
 
     client_kwargs: dict = {}
     if resolved_key:
@@ -650,6 +711,9 @@ def describe(
     root: Path,
     api_key: str | None = None,
     api_base: str | None = None,
+    ollama: bool = False,
+    ollama_host: str | None = None,
+    ollama_port: int | None = None,
     model: str | None = None,
     force: bool = False,
     detail: bool = False,
@@ -666,6 +730,9 @@ def describe(
         root: Repo root path (for reading file content).
         api_key: API key. Falls back to ANTHROPIC_API_KEY then OPENAI_API_KEY env vars.
         api_base: Optional API base URL. Defaults to Anthropic's endpoint.
+        ollama: Use Ollama OpenAI-compatible API mode.
+        ollama_host: Ollama host/IP/domain (default: 127.0.0.1).
+        ollama_port: Ollama port (default: 11434).
         model: LLM model name. Default: claude-sonnet-4-6.
         force: Re-generate all descriptions, ignoring cache.
         detail: If True, generate paragraph-length file descriptions (no symbol descriptions).
@@ -680,17 +747,20 @@ def describe(
     try:
         from openai import OpenAI
     except ImportError:
-        console.print("[yellow]openai package not installed. Run: pip install openai[/yellow]")
+        console.print(
+            "[yellow]openai package not installed. Run: "
+            "pip install openai (or repo install: pip install -e '.[llm]').[/yellow]"
+        )
         console.print("[yellow]Skipping descriptions. Use --no-descriptions to suppress this warning.[/yellow]")
         return graph
 
-    # Resolve API key: explicit > ANTHROPIC_API_KEY > OPENAI_API_KEY
-    resolved_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
-
-    # Resolve base URL: explicit > Anthropic default (if Anthropic key in use)
-    resolved_base = api_base
-    if not resolved_base and (api_key or os.environ.get("ANTHROPIC_API_KEY")):
-        resolved_base = ANTHROPIC_BASE
+    resolved_key, resolved_base = _resolve_client_config(
+        api_key=api_key,
+        api_base=api_base,
+        ollama=ollama,
+        ollama_host=ollama_host,
+        ollama_port=ollama_port,
+    )
 
     client_kwargs: dict = {}
     if resolved_key:

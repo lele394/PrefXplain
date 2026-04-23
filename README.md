@@ -39,6 +39,63 @@ PATH entry. Re-run the same command to upgrade. For Codex (project-local), run
 
 > **Inside your AI coding tool?** Paste the line above and the agent runs it for you.
 
+## Local dev install (from this repo)
+
+If you cloned this repository and want to test it directly:
+
+```bash
+cd /path/to/PrefXplain
+./setup
+```
+
+What this does:
+
+- Creates a local virtualenv at `./.venv`
+- Installs PrefXplain in editable mode from this clone
+- Adds a global shim at `~/.local/bin/prefxplain`
+- Registers integrations via `prefxplain setup`
+
+Verify:
+
+```bash
+which prefxplain
+prefxplain --version
+prefxplain create . --no-descriptions --no-open
+```
+
+Run tests from the repo root:
+
+```bash
+./.venv/bin/python -m pytest tests/ -q
+```
+
+If `prefxplain` isn't found, add `~/.local/bin` to PATH:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### Uninstall / reset local dev install
+
+If you want to remove or fully reset the repo-based install:
+
+```bash
+# remove global shim
+rm -f ~/.local/bin/prefxplain
+
+# remove repo-local virtualenv (run from repo root)
+rm -rf ./.venv
+```
+
+Optional: remove tool integrations created by `prefxplain setup`.
+
+- Claude Code: remove `~/.claude/commands/prefxplain.md` and `~/.claude/commands/prefxplain-update.md`
+- Gemini CLI: remove `~/.gemini/skills/prefxplain/`
+- Codex (per-repo): remove the `/prefxplain` section from `AGENTS.md`
+
+Then re-run `./setup` for a clean reinstall.
+
 ## Use — 1 command
 
 Open your AI coding tool inside any repo and type:
@@ -101,6 +158,10 @@ prefxplain create . --no-descriptions  # offline, no LLM, still useful
 prefxplain check .                     # CI: fail on circular deps
 prefxplain mcp .                       # MCP server for AI agents
 prefxplain upgrade                     # pull the latest release from GitHub main
+
+# Local Ollama (OpenAI-compatible API)
+prefxplain create . --ollama --model llama3.1:8b
+prefxplain create . --ollama-host 192.168.1.20 --ollama-port 11434 --model qwen2.5-coder:14b
 ```
 
 Force setup for a specific tool:
@@ -122,6 +183,10 @@ prefxplain setup codex   # per-repo
 | `--format` | `html` | `html`, `matrix`, `mermaid`, `dot` |
 | `--no-descriptions` | false | Skip LLM step |
 | `--api-key` | env | Override API key |
+| `--api-base` | — | Custom OpenAI-compatible base URL |
+| `--ollama` | false | Use local Ollama endpoint (`http://127.0.0.1:11434/v1`) |
+| `--ollama-host` | `OLLAMA_HOST` or `127.0.0.1` | Ollama server IP/domain |
+| `--ollama-port` | `OLLAMA_PORT` or `11434` | Ollama server port |
 | `--model` | `gpt-4o-mini` | LLM model |
 | `--max-files` | 500 | Analysis cap |
 | `--force`, `-f` | false | Regenerate all descriptions |
